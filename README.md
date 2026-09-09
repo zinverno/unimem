@@ -16,8 +16,13 @@ Implemented so far:
   `Processor` port, a `ProcessorRouter` that requires exactly one matching
   processor, and `TextProcessor`, which turns a stored UTF-8 original into a
   canonical `ContentObject`.
+- **Phase 0D — derived representations.** A `Renderer` port and two pure
+  projections of a `ContentObject`: `JsonRenderer`, the full-fidelity form that
+  round-trips back into the object, and `MarkdownRenderer`, a deliberately
+  lossy title-and-text projection for humans and LLMs. Renderers return
+  strings; nothing is written or exported.
 
-There is no HTTP, database, queueing, rendering, or AI code.
+There is no HTTP, database, queueing, or AI code.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 
@@ -27,6 +32,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 src/core/contracts/   canonical domain contracts (Pydantic v2 models)
 src/core/storage/     raw object store port and local backend
 src/core/processing/  processor port, router, and the UTF-8 text processor
+src/core/rendering/   renderer port and the JSON and Markdown projections
 tests/                unit and integration tests
 docs/                 architecture notes and ADRs
 ```
