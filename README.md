@@ -1,9 +1,9 @@
 # capture-core
 
 Core domain contracts, immutable raw-object storage, capture-record
-persistence, and text capture intake for a universal multimodal capture and
-ingestion layer. Canonical contracts are at schema version **0.2**; `0.1`
-documents remain readable and are rewritten as `0.1`.
+persistence, text capture intake, and a local HTTP capture API for a universal
+multimodal capture and ingestion layer. Canonical contracts are at schema
+version **0.2**; `0.1` documents remain readable and are rewritten as `0.1`.
 
 Implemented so far:
 
@@ -56,9 +56,85 @@ Implemented so far:
 
 **This closes the Phase-0 foundation.** A text capture can be accepted, stored,
 normalized, and completed, and everything up to canonical content survives a
-restart. There is no HTTP, queueing, or AI code, and no ORM.
+restart. There is no queueing or AI code, and no ORM.
+
+Phase 1 builds the first product surface around it:
+
+- **Phase 1, PR 1 — local HTTP capture API.** A FastAPI delivery adapter in
+  `src/unimem_api/`, **outside `core`**: four routes, a synchronous
+  intake-plus-processing `POST`, a stable typed error envelope, and
+  `python -m unimem_api`. The request body is the canonical `CaptureEnvelope`
+  itself, so the browser extension and Obsidian connector still to come will
+  call this API unchanged. `core` gained no dependency and imports nothing from
+  the adapter.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
+
+## Quick start
+
+Run the local capture server:
+
+```bash
+python -m unimem_api --data-dir ./data
+```
+
+It binds `127.0.0.1:8765` by default and creates `./data` if it is missing:
+
+```
+./data/raw/              immutable originals, addressed by SHA-256
+./data/unimem.sqlite3    capture records and canonical content
+```
+
+> **This server has no authentication, authorization, or TLS.** Anyone who can
+> reach the port can submit captures and read everything stored. Keep the default
+> localhost binding, and do not expose it to an untrusted network.
+
+Submit a capture. The body is the canonical `CaptureEnvelope`, and the client
+picks the capture id:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8765/v1/captures \
+  -H 'content-type: application/json' \
+  -d '{
+    "schema_version": "0.2",
+    "id": "cap_readme_01",
+    "source": {"type": "api", "provider": "curl"},
+    "payload": {"type": "text", "mime_type": "text/plain",
+                "text": "The canonical object is not Markdown.",
+                "title": "A note"},
+    "context": {"captured_at": "2026-01-02T03:04:05+00:00"},
+    "intent": {"action": "save", "tags": ["architecture"]}
+  }'
+```
+
+`201` is returned only once intake **and** processing have finished, so the
+content already exists by the time you read the response:
+
+```json
+{"capture_id": "cap_readme_01", "content_id": "...", "status": "complete"}
+```
+
+Read the capture's authoritative lifecycle record — this is also how a failure
+after `POST` is inspected (`received`, `stored`, `processing`, `failed`):
+
+```bash
+curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_01
+```
+
+Read the canonical `ContentObject` it normalized into (the canonical object
+itself, not a rendering):
+
+```bash
+curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_01/content
+```
+
+Errors come back as `{"error": {"code": ..., "message": ...}}`. There is no
+idempotency yet: posting the same capture id twice is `409
+capture_already_exists`. Only inline `text` payloads are processed today; a
+valid image, webpage, or document envelope is accepted by the contract and
+refused with `422 unsupported_payload`.
+
+`GET /health` reports process liveness only and checks nothing else.
 
 ## Layout
 
@@ -69,6 +145,7 @@ src/core/processing/  processor port, router, text processor, and the lifecycle 
 src/core/rendering/   renderer port and the JSON and Markdown projections
 src/core/persistence/ capture record store port and the SQLite adapter
 src/core/intake/      capture intake, the envelope-to-stored-capture flow
+src/unimem_api/       the HTTP delivery adapter and its CLI — outside core
 tests/                unit and integration tests
 docs/                 architecture notes and ADRs
 ```
@@ -79,10 +156,12 @@ docs/                 architecture notes and ADRs
 uv venv --python 3.13 .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
 
-.venv/bin/pytest --cov=core --cov-report=term-missing   # tests + coverage
+.venv/bin/pytest --cov=core --cov=unimem_api --cov-report=term-missing
 .venv/bin/ruff check . && .venv/bin/ruff format --check .
 .venv/bin/mypy                                          # type checking
 ```
 
-Runtime dependencies: **pydantic** only. Persistence uses the standard
-library's `sqlite3`.
+Runtime dependencies: **pydantic** for `core`, plus **fastapi** and **uvicorn**
+for the `unimem_api` delivery adapter. `core` imports none of the latter and is
+usable without a web framework. Persistence uses the standard library's
+`sqlite3`.

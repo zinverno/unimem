@@ -5,23 +5,29 @@ build-backend = "hatchling.build"
 [project]
 name = "capture-core"
 version = "0.1.0"
-description = "Core domain contracts for the multimodal capture and ingestion layer (Phase 0A)."
+description = "Capture core plus the local HTTP capture surface for the multimodal capture and ingestion layer."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "pydantic>=2.9",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3",
+    # Starlette's TestClient runs the ASGI app in-process over an HTTP client
+    # library; it is the only way to exercise the real HTTP stack without
+    # binding a TCP port. Current Starlette wants httpx2 and deprecates httpx.
+    "httpx2>=2.12",
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.11",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/core"]
+packages = ["src/core", "src/unimem_api"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -29,11 +35,20 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "-W", "error",
+    # Warnings stay fatal; this one exception is a deprecation Starlette raises
+    # against itself. `starlette.testclient` imports the
+    # `anyio.abc.BlockingPortal` alias at module level, which anyio now
+    # deprecates, so it fires while conftest is being imported and there is
+    # nothing in this repository to fix. It is listed here rather than under
+    # `filterwarnings` because an ini filter is not yet in force that early.
+    # The pattern is as narrow as the message allows, so any other deprecation
+    # — including a different one from anyio — is still an error.
+    "-W", "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
 ]
 
 [tool.coverage.run]
 branch = true
-source = ["core"]
+source = ["core", "unimem_api"]
 
 [tool.coverage.report]
 show_missing = true

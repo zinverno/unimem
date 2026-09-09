@@ -53,7 +53,30 @@ capture's submitted title onto the content object.
 `src/core/persistence/`, and one new step in the orchestrator's success path.
 **This closes the Phase-0 foundation** — see *Phase 0 is closed*, below.
 
+### Macro Phase 1 — Capture Surface
+
+**Phase 0 is closed and stays closed.** Phase 1 does not revise, reopen, or
+extend the foundation; it builds the first product surface *around* it.
+
+**Phase 1, PR 1 — local HTTP capture API.** Answers "how does a client outside
+this process hand UniMem a capture and get the result back?" A FastAPI delivery
+adapter in `src/unimem_api/`, **outside `core`**, with four routes, a synchronous
+intake-plus-processing `POST`, a stable typed error envelope, and
+`python -m unimem_api`. The POST body is the canonical `CaptureEnvelope` itself —
+there is no HTTP-specific copy of it. See *The HTTP capture surface (Phase 1)*,
+below, and [ADR-011](ADR/ADR-011-local-http-capture-surface.md).
+
 ## Future data flow
+
+```
+Browser extension / Obsidian connector / script / curl
+  -> HTTP               (unimem_api — Phase 1; only curl and scripts exist today)
+  -> CaptureEnvelope    the canonical ingress contract, unchanged by transport
+  -> core
+  -> durable raw bytes + capture records + canonical content
+```
+
+In more detail, and unchanged below the transport:
 
 ```
 Source
@@ -988,6 +1011,76 @@ designed against, and building any of them now would be adding foundation for a
 product that has not asked for it. They become concrete work when a vertical
 product phase requires them.
 
+## The HTTP capture surface (Phase 1)
+
+The first product boundary, and an adapter over the finished core. It lives in
+`src/unimem_api/` — **outside `core`** — and `core` neither imports it nor knows
+it exists. FastAPI, uvicorn, status codes, routing, and the command line are all
+on this side of the line, and the kernel's runtime dependencies are unchanged.
+
+```
+POST /v1/captures        CaptureEnvelope
+                             -> CaptureIntake.accept        RECEIVED -> STORED
+                             -> ProcessingOrchestrator      PROCESSING -> COMPLETE
+                             -> 201 {capture_id, content_id, status}
+
+GET  /v1/captures/{id}           the authoritative CaptureRecord
+GET  /v1/captures/{id}/content   the canonical ContentObject
+GET  /health                     {"status": "ok"}
+```
+
+The decisions that shape it:
+
+- **The POST body is `CaptureEnvelope` itself.** No HTTP-specific request model
+  exists. The contract's own rules — `extra="forbid"`, `AwareDatetime`, the
+  payload cross-field validators, the closed `SchemaVersion` literal — are what
+  validate a request, because there is one definition of a capture.
+- **`201` means the whole synchronous pipeline finished**, never that intake
+  reached `STORED`. The status is written after the orchestrator returns, which
+  means the canonical content and the `COMPLETE` snapshot are both durable.
+- **The two reads return the canonical contracts as their own JSON**, the same
+  `model_dump_json()` the stores persist through. No renderer is called:
+  `core.rendering` is a derived-representation layer and this is not it.
+- **Lifecycle stays core-owned.** No handler advances, repairs, retries, or rolls
+  back a status. `GET /v1/captures/{id}` is what makes Phase 0's truthful
+  non-terminal states — `received`, `stored`, `processing`, `failed` —
+  observable, and that is the whole recovery story this phase offers.
+- **Typed core failures are translated only at the delivery boundary.** Core's
+  error hierarchies are untouched; a table maps concrete types to a stable
+  `{"error": {"code", "message"}}` envelope. An unmapped error is not adopted by
+  a nearby base class — it becomes an ordinary 500.
+- **A 4xx explains the request; a 5xx explains nothing.** A 4xx passes core's own
+  message through. Every 5xx carries a fixed public message, because core's
+  storage errors name the database file and the staging directory on purpose and
+  those must not reach a caller.
+- **No idempotency.** A duplicate capture id is `409`. Two different ids carrying
+  identical text both succeed, sharing one deduplicated raw object.
+- **No authentication, authorization, API keys, TLS, or CORS.** The CLI therefore
+  binds `127.0.0.1` by default, and that default is a control rather than a
+  convenience. **Do not expose this server to an untrusted network.**
+- **The wired pipeline still supports inline `TEXT` only.** A structurally valid
+  webpage, image, or document envelope is accepted by HTTP, refused by intake's
+  existing capability check, and returned as `422 unsupported_payload`. Nothing
+  fakes support.
+
+`create_app(intake, orchestrator, record_store, content_store)` takes every
+dependency as a parameter — no module-level app, registry, settings framework, or
+container — and `build_local_app(data_dir)` is the one concrete composition:
+
+```
+<data-dir>/
+    raw/              LocalRawObjectStore
+    unimem.sqlite3    capture_records + content_objects (ADR-010: one file, two tables)
+```
+
+The composition root creates `data_dir`, because preparing an application's
+workspace is a deployment decision. `SqliteCaptureRecordStore` still refuses to
+fabricate a missing parent directory, and `LocalRawObjectStore` is unchanged.
+
+**No connector exists yet.** The browser extension and the Obsidian connector are
+later work in this phase; today the callers are `curl` and scripts.
+
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
@@ -1044,9 +1137,15 @@ product phase requires them.
     `processing`, and one capture can have at most one durable canonical
     object.
 
+17. Delivery is an adapter, and the kernel never learns about it. Implemented
+    in Phase 1: `core` imports no web framework and no `unimem_api` module, HTTP
+    translation of typed core failures happens only at the delivery boundary
+    without altering a core error, a 5xx body carries no backend path or
+    identifier, and no route writes lifecycle state.
+
 Invariants 1, 4, 7 and 10 are design commitments; 2, 3, 5, 6, 8, 9, 11, 12, 13,
-14, 15 and 16 are enforced by the models, renderers, stores, intake and
-orchestration and covered by tests.
+14, 15, 16 and 17 are enforced by the models, renderers, stores, intake,
+orchestration and the delivery adapter, and covered by tests.
 
 ## Contract rules
 
@@ -1111,7 +1210,9 @@ then serialized.
 
 ## Tooling
 
-- Python 3.13+, Pydantic v2. Pydantic is the only runtime dependency.
+- Python 3.13+, Pydantic v2. Pydantic is `core`'s only runtime dependency, and
+  stays so: FastAPI and uvicorn are dependencies of the Phase-1 delivery
+  adapter alone, and no `core` module imports either.
 - **mypy** in `strict` mode is the type checker (chosen over pyright because
   Pydantic ships a first-party mypy plugin, and one tool configured in
   `pyproject.toml` is enough for a package this size).
@@ -1152,6 +1253,12 @@ src/core/persistence/
 src/core/intake/
   service.py      CaptureIntake, the envelope-to-stored-capture orchestration
   errors.py       typed intake errors
+src/unimem_api/   the HTTP delivery adapter — outside core (Phase 1)
+  app.py          create_app and the four routes
+  models.py       the HTTP response DTOs (there is no request DTO)
+  errors.py       the core-failure-to-status translation table
+  wiring.py       build_local_app, the local composition root
+  __main__.py     python -m unimem_api
 tests/unit/contracts/
 tests/unit/storage/
 tests/unit/processing/
@@ -1163,6 +1270,8 @@ tests/integration/processing/
 tests/integration/rendering/
 tests/integration/persistence/
 tests/integration/intake/
+tests/unit/api/
+tests/integration/api/
 docs/
 ```
 
