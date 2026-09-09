@@ -28,8 +28,13 @@ and two pure projections — JSON and Markdown — in `src/core/rendering/`.
 **Phase 0E — capture record persistence.** Answers "how is a valid
 `CaptureRecord` durably stored and retrieved without coupling domain code to a
 database?" A `CaptureRecordStore` port and one file-backed SQLite adapter in
-`src/core/persistence/`. Still not implemented: capture intake, orchestration
-of the capture lifecycle, persistence of `ContentObject`s or rendered output,
+`src/core/persistence/`.
+
+**Phase 0F — text capture intake.** Answers "how does a valid inline-text
+`CaptureEnvelope` become an immutable raw object plus a durably registered
+`CaptureRecord`?" The first orchestration: `CaptureIntake` in
+`src/core/intake/`. Still not implemented: orchestration of *processing*,
+persistence of `ContentObject`s or rendered output, durable capture metadata,
 transport, and every non-text modality.
 
 ## Future data flow
@@ -49,8 +54,10 @@ Source
 
 The capture, capture-record, raw-original, processing, content, and
 representation steps exist today for UTF-8 text; everything below them is
-future work. Nothing yet *drives* that sequence: each step is a component a
-future orchestrator will call, and the orchestrator is not written.
+future work. Phase 0F drives the first arc of that sequence — envelope to
+stored capture record — and stops there. Nothing yet drives processing: a
+`ContentObject` is still produced only when a caller invokes a processor
+directly.
 
 ## The canonical ContentObject
 
@@ -496,6 +503,125 @@ output, delete and retention policy, listing, querying, filtering, and search,
 submission idempotency, transactions spanning more than one record, migrations,
 remote or hosted databases, connection pooling, and async I/O.
 
+## Text capture intake (Phase 0F)
+
+Everything before this phase was a component. Phase 0F is the first code that
+owns a *sequence* — and, with it, the first code that has to decide what
+happens when one step of that sequence fails.
+
+```
+CaptureEnvelope(TEXT)
+    |
+CaptureIntake
+    |
+    +--> CaptureRecordStore   CaptureRecord(RECEIVED)   the receipt, written first
+    |
+    +--> RawObjectStore       the immutable original
+    |
+    +--> CaptureRecordStore   CaptureRecord(STORED)     replaced, with the reference
+```
+
+**The API is one class and one method.**
+
+```python
+CaptureIntake(
+    raw_store: RawObjectStore,
+    record_store: CaptureRecordStore,
+    *,
+    now: Callable[[], datetime] = utc_now,
+)
+accept(envelope: CaptureEnvelope) -> CaptureRecord
+```
+
+Both stores arrive as their ports, so intake names no backend. The clock is a
+plain callable because a test needs to control time and a function already does
+that — there is no clock class, service hierarchy, container, DI framework,
+registry, or router. Phase 0F accepts one payload type, so there is nothing to
+route. See [ADR-007](ADR/ADR-007-capture-intake.md).
+
+**The receipt is written before the bytes.** `create` the `RECEIVED` record,
+then store the bytes, then `replace` with `STORED`. This ordering is the
+decision the phase exists to make: a failure after the receipt leaves a durable,
+truthful record that a capture was accepted and is incomplete, which is
+recoverable. Storing bytes first would leave orphaned content in a
+content-addressed store with nothing anywhere saying a capture was ever
+submitted.
+
+**Two snapshots are built, never one mutated.** The `STORED` record is
+constructed and validated fresh, not produced by editing the `RECEIVED` one or
+by `model_copy(update=...)` — neither re-runs cross-field validators, so an
+"updated" record would not be a checked record. Nested models are copied rather
+than aliased, so nothing intake returns shares state with the caller's
+envelope.
+
+**Identity comes from the envelope.** `CaptureRecord.id` *is*
+`CaptureEnvelope.id`: a capture is an event its submitter named, and intake does
+not rename it. No capture id is ever minted from, seeded by, or compared against
+a raw SHA-256. Two envelopes with different ids and identical text produce two
+capture records referencing one deduplicated raw object — ADR-003's layering,
+now exercised end to end.
+
+**A duplicate capture id is an error, not idempotency.**
+`CaptureRecordAlreadyExistsError` propagates unchanged, and it is raised before
+any byte is written. There are no idempotency keys, retry tokens, replay, or
+resume in this phase; submission idempotency needs an explicit request identity
+defined with a real client in hand.
+
+**Time is intake's, not the envelope's.** `received_at` is the intake clock —
+when UniMem accepted the capture — and never `context.captured_at`, which is
+when the *user* captured it and which a client supplies. `updated_at` is a
+second clock reading taken after the bytes are safely stored. Persistence still
+creates no timestamps; intake supplies both and the store transcribes them.
+
+**Text is encoded and nothing else.** The stored bytes are exactly
+`envelope.payload.text.encode("utf-8")` — no trimming, Unicode normalization,
+line-ending rewriting, BOM insertion, charset detection, or alternate encoding.
+`payload.mime_type` passes through as declared, and an absent MIME type stays
+absent: intake invents no `text/plain`, and Phase 0C's asset-level fallback
+stays where it is. UTF-8 is not a preference here — Phase 0C decodes strict
+UTF-8, so both ends must name the same encoding for a capture to survive its
+own pipeline.
+
+**Failures keep their own types, and nothing is fabricated.** Intake defines
+`CaptureIntakeError` with two subclasses, separating the two reasons it refuses
+an envelope: `UnsupportedCapturePayloadError` for a non-`TEXT` payload — a valid
+envelope naming a capability this phase lacks, which a later phase will accept
+unchanged — and `InvalidCaptureEnvelopeError` for a `TEXT` payload carrying no
+text, an envelope that contradicts its own contract and that no phase will
+accept. A caller waits for one and fixes the other, so they are not one error.
+Both are raised before the clock is read or a store is touched. Store errors are
+never wrapped — `RawObjectWriteError` and `CaptureRecordPersistenceError` reach
+the caller as themselves, because "the bytes did not get written" and "the
+database is down" lead to different decisions. No `FAILED` status is ever
+invented from an infrastructure error: a timeout is not a failed capture.
+
+**Cross-store atomicity is a documented gap, not a solved problem.** The raw
+store and the record store are separate transactions. If raw storage fails the
+record stays `RECEIVED`; if the final `replace` fails the record stays
+`RECEIVED` while the raw object already exists. Nothing is rolled back — the raw
+store has no delete by design, and adding one would trade immutability for the
+*appearance* of atomicity that still would not hold, while risking a digest
+another capture shares. Phase 0F records recoverable incompleteness instead of
+claiming consistency it cannot provide, and a real deployment will need a
+resume or reconciliation pass that this phase does not provide.
+
+**Envelope-only metadata is dropped, visibly.** `CaptureRecord` has no durable
+field for `context` (captured_at, device, application), `intent` (action,
+collection, tags), or `payload.title`. Phase 0F retains only what the current
+contract can represent — id, source, payload type, status, timestamps, raw
+reference — plus the raw content bytes. None of the rest is smuggled into
+`error`, `source`, the stored bytes, or an improvised field, and the contract is
+not changed here to make room for it. **Durable capture metadata is a required
+boundary before any real connector:** a browser extension's whole value is
+context, and a lossy intake would discard it at scale.
+
+**Out of scope here:** every non-text payload type (no `file_ref` resolution,
+URL fetching, HTML parsing, file reading, images, documents, or video), any
+connector, processing (no `ProcessorRouter`, no `TextProcessor`, no
+`ContentObject`), rendering and export, `ContentObject` persistence, HTTP, CLI,
+browser surfaces, queues and workers, idempotency and replay, recovery and
+reconciliation, and durable capture metadata.
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
@@ -522,12 +648,17 @@ remote or hosted databases, connection pooling, and async I/O.
    gains a table, column, session, or database path.
 10. Phase 0A contains domain semantics, not infrastructure.
 11. `RawObject` identity is not capture identity. Implemented in Phase 0B for
-    raw storage and in Phase 0E for capture persistence: a capture record is
-    keyed by its own opaque `id`, never by a raw SHA-256, and records sharing a
-    digest coexist.
+    raw storage, Phase 0E for capture persistence, and Phase 0F at intake: a
+    capture record is keyed by its own opaque `id` — the envelope's — never by a
+    raw SHA-256, and records sharing a digest coexist.
+12. An accepted capture is registered before its bytes are stored, and no
+    lifecycle status is fabricated from an infrastructure failure. Implemented
+    in Phase 0F: `RECEIVED` is durable before raw storage, `STORED` replaces it
+    afterwards, and a failure in between leaves the truthful `RECEIVED` record
+    rather than an invented `FAILED` one.
 
-Invariants 1, 4, 7 and 10 are design commitments; 2, 3, 5, 6, 8, 9 and 11 are
-enforced by the models, renderers and stores and covered by tests.
+Invariants 1, 4, 7 and 10 are design commitments; 2, 3, 5, 6, 8, 9, 11 and 12
+are enforced by the models, renderers, stores and intake and covered by tests.
 
 ## Contract rules
 
@@ -625,14 +756,19 @@ src/core/persistence/
   base.py         the CaptureRecordStore port
   sqlite.py       SqliteCaptureRecordStore, the file-backed SQLite adapter
   errors.py       typed persistence errors
+src/core/intake/
+  service.py      CaptureIntake, the envelope-to-stored-capture orchestration
+  errors.py       typed intake errors
 tests/unit/contracts/
 tests/unit/storage/
 tests/unit/processing/
 tests/unit/rendering/
 tests/unit/persistence/
+tests/unit/intake/
 tests/integration/storage/
 tests/integration/processing/
 tests/integration/rendering/
 tests/integration/persistence/
+tests/integration/intake/
 docs/
 ```
