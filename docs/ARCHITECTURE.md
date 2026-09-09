@@ -19,8 +19,13 @@ immutable original bytes?" A storage port and one local backend in
 
 **Phase 0C — processing foundation.** Answers "how does a stored raw object
 become a canonical `ContentObject`?" A processor port, a router, and one real
-processor for UTF-8 text in `src/core/processing/`. Still not implemented:
-capture persistence, transport, rendering, and every non-text modality.
+processor for UTF-8 text in `src/core/processing/`.
+
+**Phase 0D — derived representations.** Answers "how do we derive an external
+readable representation from an existing `ContentObject`?" A `Renderer` port
+and two pure projections — JSON and Markdown — in `src/core/rendering/`. Still
+not implemented: capture persistence, transport, persistence or export of
+rendered output, and every non-text modality.
 
 ## Future data flow
 
@@ -30,14 +35,14 @@ Source
   -> Raw Original       (immutable bytes, stored by RawObjectStore — Phase 0B)
   -> Processing         (processors; recorded as ProcessingRecord — Phase 0C)
   -> ContentObject      (canonical, with Segments + Provenance + Assets)
-  -> Representations    (JSON, Markdown, ... all derived)
+  -> Representations    (derived JSON / derived Markdown — Phase 0D)
   -> later: retrieval
   -> later: ctxalloc
   -> later: agents
 ```
 
-The capture, raw-original, processing, and content steps exist today for
-UTF-8 text; everything below them is future work.
+The capture, raw-original, processing, content, and representation steps exist
+today for UTF-8 text; everything below them is future work.
 
 ## The canonical ContentObject
 
@@ -251,21 +256,118 @@ object as well as the bytes it addresses, and that overload is exactly what
 ADR-003 rules out. Storage deduplication is unaffected: it is decided by the
 digest, which nothing here changes.
 
-**Rendering is deliberately absent.** "How do we derive readable
-representations from a `ContentObject`?" is a separate question with a separate
-answer, and mixing it into normalization would make the canonical object
-optional. There is no `Renderer`, no Markdown, and no JSON view here.
+**Rendering is deliberately absent from processing.** "How do we derive
+readable representations from a `ContentObject`?" is a separate question with a
+separate answer, and mixing it into normalization would make the canonical
+object optional. No `Renderer`, Markdown, or JSON view lives in
+`core.processing`; rendering is Phase 0D, below, and it consumes a finished
+content object without knowing which processor produced it.
 
 **Out of scope here:** capture record persistence, capture intake and
 idempotency, HTTP, queues and workers, every non-text modality (HTML, images,
 OCR, documents, video, transcription), chunking, embeddings, AI analysis, and
 renderers.
 
+## Derived representations (Phase 0D)
+
+A canonical `ContentObject` is precise and unreadable from outside the process.
+Phase 0D answers one question — how do we derive an external readable
+representation from an object that already exists? — and answers nothing else.
+
+```
+ContentObject
+    |
+    +-- JsonRenderer     -> derived JSON      (json/0.1/application/json)
+    |
+    +-- MarkdownRenderer -> derived Markdown  (markdown/0.1/text/markdown)
+```
+
+**The canonical object comes first, always.** A renderer consumes a
+`ContentObject` that has already been produced and validated. Rendering is
+never a step on the way to the canonical object, and no rendered string is ever
+read back as domain state: nothing in the system parses JSON or Markdown output
+into contracts. See [ADR-005](ADR/ADR-005-derived-representations.md).
+
+**Renderers are pure projections.** A renderer reads the content object and
+nothing else — no `RawObjectStore`, no `CaptureRecord`, no filesystem, no
+network, no clock, no environment — and mutates nothing, including the object
+it was handed. The same validated `ContentObject` rendered by the same renderer
+version produces the same string, which is what makes invariant 3
+(reproducibility) checkable rather than aspirational.
+
+**The port is three attributes and one method.** `Renderer` is a `Protocol`
+with `name`, `version`, `media_type`, and `render(content) -> str`. Those three
+values are the renderer's stable identity and describe rendering semantics, not
+deployment: `version` changes when the output for an unchanged object changes.
+There is no base class, no options or configuration framework, and no async
+surface.
+
+**JSON is the full-fidelity representation.** `JsonRenderer` serializes the
+whole object — source, original, metadata, segments, assets, derived, and
+processing — through Pydantic's own `model_dump(mode="json")` rather than a
+hand-maintained field mapping, so a new contract field appears without anyone
+remembering it. Output is a bare compact document with no wrapper key, emitted
+with `ensure_ascii=False` (Unicode stays readable) and `sort_keys=True`, and it
+round-trips through `ContentObject.model_validate_json(...)` to an equal
+object. Mapping keys are sorted so objects built in different insertion orders
+render identically; **list order is never touched**, because segment, asset,
+topic and processing order is domain state rather than spelling. Nothing is
+generated during rendering — no timestamps, no ids. `NaN` and the infinities
+are refused rather than written, since they are not JSON.
+
+This is deterministic; it is deliberately **not** RFC 8785 canonical JSON and
+does not claim to be.
+
+**Markdown is a deliberately lossy readable projection.** `MarkdownRenderer`
+exists for humans and for language models reading like humans, and its whole
+specification is:
+
+- a `title`, when present, becomes `# <title>`;
+- every segment whose `text is not None` follows, in the order the content
+  object stores them;
+- blocks are joined by exactly one blank line;
+- segment text is reproduced **exactly** — no trimming, Unicode normalization,
+  CRLF rewriting, escaping, splitting, chunking, or summarizing;
+- segments are *not* re-sorted by `position`: list order is the canonical
+  order, and `position` is optional metadata;
+- no title is fabricated, from the content id or anything else;
+- ids, digests, asset references, provenance, processing records, metadata,
+  topics, entities, and JSON never appear, and there is no YAML frontmatter;
+- no title and no textual segment renders as the empty string, and no trailing
+  newline is appended beyond what the last block already carries.
+
+**Markdown is not made reversible, on purpose.** A consumer that needs
+provenance, assets, or exact machine state reads the `ContentObject` or its
+JSON projection. Pushing metadata into the Markdown to close that gap would
+produce a second, worse serialization that has to be kept in sync with the
+first, degrade the output for the reader it exists to serve, and invite
+somebody to parse it back — which is exactly how a readable view becomes an
+accidental source of truth. Invariant 2 forbids it.
+
+**Nothing is persisted or exported.** A renderer returns a string. No file is
+written, no path is chosen, no export service exists, and no artifact is
+recorded. Where output goes is a separate decision with its own trade-offs, and
+no caller needs it yet.
+
+**Selection is explicit.** There is no renderer registry, router, discovery
+mechanism, or cache: a caller that wants Markdown constructs
+`MarkdownRenderer`. The processor router exists because *the system* must pick
+exactly one processor for a capture; nothing forces a rendering choice on the
+system, so there is nothing to route.
+
+**Out of scope here:** writing files, export or sync services, artifact
+records, HTML/PDF/image/video renderers, templates and themes, YAML
+frontmatter, chunking for retrieval, embeddings, and any renderer that consults
+something other than the content object it was given.
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
-2. Markdown is not a source of truth.
+2. Markdown is not a source of truth. Implemented in Phase 0D: the Markdown
+   projection is lossy by design and nothing parses it back.
 3. Derived representations must be reproducible from a `ContentObject`.
+   Implemented in Phase 0D: renderers are pure functions of the object, and
+   JSON round-trips back to an equal object.
 4. Raw originals are immutable once stored; contracts reference them, they do
    not embed or mutate them. Implemented in Phase 0B: content-addressed, with
    no mutation API.
@@ -282,8 +384,8 @@ renderers.
    storage, AI providers, or browser APIs.
 10. Phase 0A contains domain semantics, not infrastructure.
 
-Invariants 1–4, 7 and 10 are design commitments; 5, 6, 8 and 9 are enforced by
-the models and covered by tests.
+Invariants 1, 4, 7 and 10 are design commitments; 2, 3, 5, 6, 8 and 9 are
+enforced by the models and renderers and covered by tests.
 
 ## Contract rules
 
@@ -373,10 +475,16 @@ src/core/processing/
   router.py       ProcessorRouter, exactly-one-match routing
   text.py         TextProcessor, UTF-8 text normalization
   errors.py       typed processing and routing errors
+src/core/rendering/
+  base.py         the Renderer port
+  json.py         JsonRenderer, the full-fidelity projection
+  markdown.py     MarkdownRenderer, the lossy readable projection
 tests/unit/contracts/
 tests/unit/storage/
 tests/unit/processing/
+tests/unit/rendering/
 tests/integration/storage/
 tests/integration/processing/
+tests/integration/rendering/
 docs/
 ```
