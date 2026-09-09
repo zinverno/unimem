@@ -45,10 +45,13 @@ read and rewrite `0.1` documents.
 capture become `processing`, get normalized by exactly one processor, and end
 `complete` or in a truthful incomplete state?" `ProcessingOrchestrator` in
 `src/core/processing/service.py`, plus `TextProcessor` 0.2, which carries the
-capture's submitted title onto the content object. Still not implemented:
-persistence of `ContentObject`s or rendered output, reprocessing and recovery,
-safe concurrent processing of one capture, transport, and every non-text
-modality.
+capture's submitted title onto the content object.
+
+**Phase 0I — canonical content persistence.** Answers "how does a normalized
+`ContentObject` become durable before a capture is allowed to become
+`complete`?" A `ContentObjectStore` port and a SQLite adapter in
+`src/core/persistence/`, and one new step in the orchestrator's success path.
+**This closes the Phase-0 foundation** — see *Phase 0 is closed*, below.
 
 ## Future data flow
 
@@ -70,8 +73,10 @@ representation steps exist today for UTF-8 text; everything below them is
 future work. Two orchestrators drive that sequence: Phase 0F's `CaptureIntake`
 takes an envelope to a stored capture record, and Phase 0H's
 `ProcessingOrchestrator` takes that record to a canonical `ContentObject` and a
-completed capture. The content object is returned to the caller and is not yet
-persisted anywhere.
+completed capture. Since Phase 0I that content object is durable — stored
+before the capture is marked `complete` — so everything up to and including
+canonical content survives a restart. Rendered representations are still
+derived on demand and persisted nowhere.
 
 ## The canonical ContentObject
 
@@ -832,15 +837,11 @@ missing capture, a wrong starting status, a routing failure, or a `processing`
 write that fails. `TextProcessor`'s internal `ProcessingRecord` timestamps are
 untouched.
 
-**`COMPLETE` does not mean the content object is durable.** It means
-normalization succeeded *and the capture lifecycle completion was recorded*.
-The `ContentObject` is returned synchronously and stored nowhere, so a crash
-after `complete` but before the caller uses it loses the normalized
-representation. The immutable raw bytes make it reproducible in principle, but
-reprocessing is refused by the starting-state rule, so such a capture is stuck
-at `complete` with nothing to show. Canonical content persistence is the next
-boundary; adding a store here to make the word "complete" sound better would be
-building that boundary in a hurry.
+**`COMPLETE` means the content object is durable** — since Phase 0I, below.
+The orchestrator stores the canonical object before it writes `complete`, so
+the word means normalization succeeded, the content exists, and the lifecycle
+completion was recorded. It still says nothing about derived Markdown,
+embeddings, or indexes, which are reproducible from the object.
 
 **Concurrent processing of one capture is not safe.** `CaptureRecordStore` has
 no compare-and-swap, version, or lease, so two workers can both read `stored`
@@ -855,6 +856,137 @@ decision.
 reconciliation, retry, queues and workers, locks/leases/compare-and-swap,
 scheduling, batch or scanning APIs, HTTP and CLI surfaces, renderer changes,
 and every non-text modality.
+
+## Canonical content persistence (Phase 0I)
+
+Phase 0H had to end with an admission: `COMPLETE` recorded that normalization
+had happened, and the `ContentObject` it produced was handed to the caller and
+stored nowhere. Phase 0I closes that, and closes the foundation with it.
+
+```
+processor.process
+    |
+validate content.source.capture_id == capture id
+    |
+ContentObjectStore.create        the canonical object, durable first
+    |
+[completion clock]
+    |
+CaptureRecord(COMPLETE)          written only once the content exists
+    |
+return the ContentObject
+```
+
+**A second port, sibling to the first.**
+
+```python
+class ContentObjectStore(Protocol):
+    def create(self, content: ContentObject) -> None: ...
+    def get(self, content_id: str) -> ContentObject: ...
+    def get_for_capture(self, capture_id: str) -> ContentObject: ...
+```
+
+No `replace`, `save`, `upsert`, `delete`, `list`, `search`, pagination, or
+caller-visible transaction. Two lookups, because there are two questions worth
+asking: "give me this object" and "what did this capture normalize into?". See
+[ADR-010](ADR/ADR-010-canonical-content-persistence.md).
+
+**There is no `replace`, deliberately.** The system produces one canonical
+result per capture and has no reprocessing, so an operation that overwrote
+canonical content could only be an accident. Superseding it is a decision
+reprocessing will have to make explicitly.
+
+**Whole-contract JSON, never a rendering.** `content.model_dump_json()` in,
+`ContentObject.model_validate_json(...)` out. `JsonRenderer` is *not* used and
+`core.persistence` does not import `core.rendering`: rendering is a derived
+representation with its own audience and version, and letting the database read
+it back would make a renderer change a data migration.
+
+**Identity stays layered.** `ContentObject.id` is canonical object identity,
+`source.capture_id` is the association to the capture event, and a raw SHA-256
+identifies bytes. No content id is derived from a capture id, a digest, a
+title, or the text — so two captures of identical bytes have two content
+objects.
+
+**One canonical object per capture, enforced by the database.**
+
+```sql
+CREATE TABLE IF NOT EXISTS content_objects (
+    id         TEXT PRIMARY KEY,
+    capture_id TEXT NOT NULL UNIQUE,
+    payload    TEXT NOT NULL
+)
+```
+
+Two key columns, each earning its place: `id` addresses an object, and
+`capture_id` — being `UNIQUE` — makes the one-per-capture rule a constraint
+rather than a convention. Nothing else is lifted out of the payload. This is
+also why no `content_object_id` column was added to `CaptureRecord`, and
+therefore why **`schema_version` stays `0.2`**: no canonical contract changed.
+
+`SqliteContentObjectStore` mirrors the capture record adapter exactly — table
+created at construction, parent directories not fabricated, one connection and
+one transaction per operation, no WAL tuning, retry, pooling, or ORM. It may
+share a database file with `SqliteCaptureRecordStore`, which leaves
+`capture_records` untouched.
+
+**A sibling error hierarchy.** `ContentObjectStoreError` with
+`ContentObjectAlreadyExistsError`, `ContentObjectNotFoundError`,
+`ContentObjectCorruptError`, and `ContentObjectPersistenceError` — not
+subclasses of `CaptureRecordStoreError`, and not of `ProcessingError`. Failing
+to *store* content says nothing about whether the capture could be normalized,
+and the orchestrator acts on that difference. Constraint classification is
+exact: a primary-key conflict is a taken content id, the one `UNIQUE` column is
+a capture that already has content, and any other constraint failure is a
+backend failure rather than a duplicate. Corruption covers a non-text payload,
+malformed JSON, an invalid object, an unsupported version, and — on *both*
+lookups — an embedded `id` or `source.capture_id` disagreeing with the row.
+
+**Content is durable before `COMPLETE` is.** The completion clock is not read
+until the content write succeeds, so a completion timestamp always describes a
+capture whose content exists. A content-store failure needs no new rule: it is
+not a `ProcessingError`, so the capture stays `processing`, the error
+propagates unchanged, nothing is marked `failed` or rolled back, and no content
+is returned. A duplicate for the capture propagates too — nothing loads and
+returns the existing object, and nothing marks the capture complete, because
+"concurrent worker", "stale retry", and "drifted lifecycle" cannot be told
+apart here.
+
+**The new cross-store gap, stated rather than papered over.** If the `COMPLETE`
+write fails after content was stored, the content is durable while the capture
+still says `processing`. The persistence error propagates; the content object
+is **not** deleted or overwritten and the capture is **not** rolled back.
+`get_for_capture` exists in part to make that state findable by a
+reconciliation pass that does not exist yet.
+
+**No cross-store transaction, and no unit of work.** Even where both adapters
+point at one file, orchestration never opens a transaction across them: that
+would couple lifecycle orchestration to one adapter's backend and quietly make
+the ports un-swappable. No connection is exposed.
+
+**`UNIQUE(capture_id)` is integrity, not mutual exclusion.** Two canonical
+objects can never both become durable for one capture. Two workers can still
+both process one — the loser simply fails at the content write, having burned
+the work. Phase 0H's concurrency limitation is unchanged.
+
+**Out of scope here:** reprocessing and supersession, reconciliation of the
+gap above, retries, worker ownership, query and search over content, rendered
+output persistence, and any contract or schema change.
+
+## Phase 0 is closed
+
+Phase 0I is the last foundation microphase. End to end, the system can now
+accept a text capture, store its bytes immutably, register it durably with its
+capture-time metadata, normalize it into canonical content, store that content,
+and record the whole lifecycle truthfully — every boundary behind a port, every
+failure mode named, and everything up to canonical content surviving a restart.
+
+The concerns still open — reconciliation, retries, same-capture worker
+ownership, reprocessing and supersession, query and search, connectors — are
+**not** blockers for closing Phase 0. Each needs a real requirement to be
+designed against, and building any of them now would be adding foundation for a
+product that has not asked for it. They become concrete work when a vertical
+product phase requires them.
 
 ## Architectural invariants
 
@@ -906,8 +1038,14 @@ and every non-text modality.
     infrastructure failure leaves the capture `processing` rather than being
     given a terminal state it has not earned.
 
+16. A capture is complete only when its canonical content is durable.
+    Implemented in Phase 0I: the `ContentObject` is stored before the
+    `COMPLETE` snapshot is written, a content-store failure leaves the capture
+    `processing`, and one capture can have at most one durable canonical
+    object.
+
 Invariants 1, 4, 7 and 10 are design commitments; 2, 3, 5, 6, 8, 9, 11, 12, 13,
-14 and 15 are enforced by the models, renderers, stores, intake and
+14, 15 and 16 are enforced by the models, renderers, stores, intake and
 orchestration and covered by tests.
 
 ## Contract rules
@@ -1006,9 +1144,11 @@ src/core/rendering/
   json.py         JsonRenderer, the full-fidelity projection
   markdown.py     MarkdownRenderer, the lossy readable projection
 src/core/persistence/
-  base.py         the CaptureRecordStore port
-  sqlite.py       SqliteCaptureRecordStore, the file-backed SQLite adapter
-  errors.py       typed persistence errors
+  base.py             the CaptureRecordStore port
+  sqlite.py           SqliteCaptureRecordStore, the file-backed SQLite adapter
+  content_base.py     the ContentObjectStore port
+  content_sqlite.py   SqliteContentObjectStore, its file-backed adapter
+  errors.py           typed persistence errors, one hierarchy per port
 src/core/intake/
   service.py      CaptureIntake, the envelope-to-stored-capture orchestration
   errors.py       typed intake errors

@@ -1,6 +1,7 @@
 # ADR-006: Capture records are persisted as whole snapshots behind a port
 
-Status: accepted (Phase 0E)
+Status: accepted (Phase 0E); joined in Phase 0I by a sibling port for canonical
+content ([ADR-010](ADR-010-canonical-content-persistence.md)).
 
 ## Context
 
@@ -258,3 +259,30 @@ Costs:
   contract with no reader. The first query that needs one is the argument for
   adding it, and then it should be derived from the payload rather than
   maintained by hand.
+
+## Note (Phase 0I): a sibling port for canonical content
+
+Phase 0I added `ContentObjectStore` and `SqliteContentObjectStore` alongside
+the port and adapter this ADR defines. They are **siblings, not an extension**:
+two ports, two tables, two error hierarchies, and `capture_records` is
+unchanged. See [ADR-010](ADR-010-canonical-content-persistence.md).
+
+The split is deliberate. A capture record is a mutable lifecycle snapshot,
+`replace`d as a capture advances; a canonical content object is written once
+and has no `replace` at all. Their failures also mean different things to a
+caller — in the processing orchestrator, "the capture lifecycle could not be
+recorded" and "the normalized content could not be stored" lead to different
+outcomes — which one merged `PersistenceError` would hide.
+
+Everything decided here carried over unchanged: whole-contract JSON rather than
+a hand-built mapping or a rendering, snapshot semantics with no live objects,
+per-operation connections, exact constraint classification, typed errors that
+never leak `sqlite3` or Pydantic, and no migration framework. The content table
+adds one thing this one did not need — a `UNIQUE` key column — because "one
+canonical object per capture" is an invariant worth having the database
+enforce, and because it removes any need for a pointer column on
+`CaptureRecord` and therefore any need for schema 0.3.
+
+Both SQLite adapters may point at one database file. That is a deployment
+convenience and never a shared transaction: neither reaches into the other, and
+nothing exposes a connection or a unit of work to a caller.

@@ -24,6 +24,7 @@ from tests.unit.processing.builders import RECEIVED_AT, make_capture, make_conte
 from tests.unit.processing.doubles import (
     FakeClock,
     RecordingCaptureRecordStore,
+    RecordingContentObjectStore,
     SpyProcessor,
 )
 
@@ -64,6 +65,7 @@ def test_a_legacy_capture_can_be_processed(
     orchestrator = ProcessingOrchestrator(
         ProcessorRouter([SpyProcessor(content=make_content(CAPTURE_ID))]),
         record_store,
+        RecordingContentObjectStore(),
         now=clock,
     )
 
@@ -80,6 +82,7 @@ def test_its_lifecycle_snapshots_stay_at_the_legacy_version(
     ProcessingOrchestrator(
         ProcessorRouter([SpyProcessor(content=make_content(CAPTURE_ID))]),
         record_store,
+        RecordingContentObjectStore(),
         now=clock,
     ).process(CAPTURE_ID)
 
@@ -97,6 +100,7 @@ def test_its_snapshots_still_serialize_as_legacy_documents(
     ProcessingOrchestrator(
         ProcessorRouter([SpyProcessor(content=make_content(CAPTURE_ID))]),
         record_store,
+        RecordingContentObjectStore(),
         now=clock,
     ).process(CAPTURE_ID)
 
@@ -111,7 +115,10 @@ def test_a_legacy_failure_also_stays_at_the_legacy_version(
 ) -> None:
     failure = ProcessingInputError("capture has no raw object")
     orchestrator = ProcessingOrchestrator(
-        ProcessorRouter([SpyProcessor(raises=failure)]), record_store, now=clock
+        ProcessorRouter([SpyProcessor(raises=failure)]),
+        record_store,
+        RecordingContentObjectStore(),
+        now=clock,
     )
 
     with pytest.raises(ProcessingInputError):
@@ -130,6 +137,7 @@ def test_the_content_object_uses_the_current_schema_version(
     content = ProcessingOrchestrator(
         ProcessorRouter([SpyProcessor(content=make_content(CAPTURE_ID))]),
         record_store,
+        RecordingContentObjectStore(),
         now=clock,
     ).process(CAPTURE_ID)
 

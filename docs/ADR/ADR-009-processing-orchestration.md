@@ -1,6 +1,7 @@
 # ADR-009: Orchestration owns the capture lifecycle; processors stay pure
 
-Status: accepted (Phase 0H)
+Status: accepted (Phase 0H); the content-durability limitation below was closed
+in Phase 0I ([ADR-010](ADR-010-canonical-content-persistence.md)).
 
 ## Context
 
@@ -189,14 +190,15 @@ Positive:
 Costs:
 
 - **The `ContentObject` is not durable, and `complete` does not claim it is.**
-  `complete` means normalization succeeded and the *capture lifecycle* was
-  durably recorded. The object is returned synchronously and stored nowhere, so
-  a crash after `complete` but before the caller does something with it loses
-  the normalized representation. The immutable raw bytes make it reproducible
-  in principle — but reprocessing is refused by the starting-state rule, so in
-  practice such a capture is stuck at `complete` with nothing to show. This is
-  named rather than hidden: adding a `ContentObjectStore` to make the sentence
-  sound better would be building the next boundary badly, in a hurry.
+  *(Closed in Phase 0I — see the amendment at the end.)* `complete` means
+  normalization succeeded and the *capture lifecycle* was durably recorded. The
+  object is returned synchronously and stored nowhere, so a crash after
+  `complete` but before the caller does something with it loses the normalized
+  representation. The immutable raw bytes make it reproducible in principle —
+  but reprocessing is refused by the starting-state rule, so in practice such a
+  capture is stuck at `complete` with nothing to show. This is named rather
+  than hidden: adding a `ContentObjectStore` to make the sentence sound better
+  would be building the next boundary badly, in a hurry.
 - **Concurrent processing of one capture is not safe.** `CaptureRecordStore`
   has no compare-and-swap, version, or lease, so two workers can both read
   `stored` before either writes `processing`, and both will run. Phase 0H does
@@ -264,3 +266,43 @@ Costs:
   is transient, how many attempts, and with what backoff — none of which this
   phase has evidence for. The typed error split is what a retry layer will need
   when it exists, and it is now in place.
+
+## Amendment (Phase 0I): `COMPLETE` now implies durable content
+
+The limitation this ADR named — "`COMPLETE` does not imply `ContentObject`
+durability" — was closed in Phase 0I, as its own designed boundary rather than
+as a store bolted on here. See
+[ADR-010](ADR-010-canonical-content-persistence.md).
+
+The orchestrator now takes a third dependency, a `ContentObjectStore`, and the
+successful path gained one step in the one position that makes the claim true:
+
+```
+processor.process -> validate capture association
+                  -> ContentObjectStore.create      <- new
+                  -> [completion clock]
+                  -> CaptureRecord(COMPLETE)
+                  -> return the ContentObject
+```
+
+**From Phase 0I onward, `COMPLETE` is written only after canonical content is
+durable**, and the completion clock is not read until that write succeeds. It
+still says nothing about derived Markdown, embeddings, or indexes.
+
+A content-store failure follows this ADR's existing rule without needing a new
+one: it is not a `ProcessingError`, so the capture stays `processing`, the
+error propagates unchanged, nothing is marked `failed` or rolled back to
+`stored`, and no content is returned. Every other row of the failure matrix is
+unchanged, including the `FAILED`-write exception chaining.
+
+One new gap arrives with the second store, and Phase 0I states it rather than
+hiding it: if the `COMPLETE` write fails *after* content was stored, the
+content is durable while the capture still says `processing`. Nothing is
+deleted and nothing rolls back — `ContentObjectStore.get_for_capture` exists in
+part to make that state findable by a reconciliation pass that does not exist
+yet.
+
+The concurrency limitation stands exactly as written. `UNIQUE(capture_id)` in
+the content table means two canonical objects can never both become durable for
+one capture, which is useful integrity protection — but it does not stop two
+workers from both processing, and the loser simply fails at the content write.

@@ -25,6 +25,7 @@ from tests.unit.processing.builders import RECEIVED_AT, make_capture, make_conte
 from tests.unit.processing.doubles import (
     FakeClock,
     RecordingCaptureRecordStore,
+    RecordingContentObjectStore,
     SpyProcessor,
 )
 
@@ -61,6 +62,11 @@ def processor(journal: list[str], content: ContentObject) -> SpyProcessor:
 
 
 @pytest.fixture
+def content_store(journal: list[str]) -> RecordingContentObjectStore:
+    return RecordingContentObjectStore(journal)
+
+
+@pytest.fixture
 def clock() -> FakeClock:
     """Two instants: entering processing, and finishing."""
     return FakeClock(PROCESSING_AT, FINISHED_AT)
@@ -68,9 +74,14 @@ def clock() -> FakeClock:
 
 @pytest.fixture
 def orchestrator(
-    processor: SpyProcessor, record_store: RecordingCaptureRecordStore, clock: FakeClock
+    processor: SpyProcessor,
+    record_store: RecordingCaptureRecordStore,
+    content_store: RecordingContentObjectStore,
+    clock: FakeClock,
 ) -> ProcessingOrchestrator:
-    return ProcessingOrchestrator(ProcessorRouter([processor]), record_store, now=clock)
+    return ProcessingOrchestrator(
+        ProcessorRouter([processor]), record_store, content_store, now=clock
+    )
 
 
 def test_process_returns_the_content_object(
@@ -105,6 +116,7 @@ def test_the_whole_sequence_happens_in_order(
         "records.get",
         "records.replace(processing)",
         "processor.process",
+        "content.create",
         "records.replace(complete)",
     ]
 
@@ -156,9 +168,9 @@ def test_the_router_is_not_asked_a_second_time(
             return True
 
     processor = CountingProcessor(content=content)
-    ProcessingOrchestrator(ProcessorRouter([processor]), record_store, now=clock).process(
-        CAPTURE_ID
-    )
+    ProcessingOrchestrator(
+        ProcessorRouter([processor]), record_store, RecordingContentObjectStore(), now=clock
+    ).process(CAPTURE_ID)
 
     assert asked == ["stored"]
 
@@ -257,7 +269,9 @@ def test_the_default_clock_is_timezone_aware_utc() -> None:
 def test_the_default_clock_is_used_when_none_is_injected(
     record_store: RecordingCaptureRecordStore, processor: SpyProcessor
 ) -> None:
-    ProcessingOrchestrator(ProcessorRouter([processor]), record_store).process(CAPTURE_ID)
+    ProcessingOrchestrator(
+        ProcessorRouter([processor]), record_store, RecordingContentObjectStore()
+    ).process(CAPTURE_ID)
 
     complete = record_store.stored(CAPTURE_ID)
     assert complete.status is CaptureStatus.COMPLETE
@@ -270,9 +284,9 @@ def test_the_orchestrator_depends_on_the_record_store_port(
     """Bound through the protocol — mypy checks this too, which is the point."""
     store: CaptureRecordStore = RecordingCaptureRecordStore(journal, records=[stored])
 
-    content = ProcessingOrchestrator(ProcessorRouter([processor]), store, now=clock).process(
-        CAPTURE_ID
-    )
+    content = ProcessingOrchestrator(
+        ProcessorRouter([processor]), store, RecordingContentObjectStore(), now=clock
+    ).process(CAPTURE_ID)
 
     assert isinstance(content, ContentObject)
 
@@ -282,7 +296,9 @@ def test_a_missing_capture_propagates_the_store_error(
 ) -> None:
     """The persistence error keeps its own type; it is not a processing failure."""
     empty = RecordingCaptureRecordStore(journal)
-    orchestrator = ProcessingOrchestrator(ProcessorRouter([processor]), empty, now=clock)
+    orchestrator = ProcessingOrchestrator(
+        ProcessorRouter([processor]), empty, RecordingContentObjectStore(), now=clock
+    )
 
     with pytest.raises(CaptureRecordNotFoundError) as raised:
         orchestrator.process("cap_missing")
@@ -301,7 +317,9 @@ def test_only_a_stored_capture_may_begin_processing(
 ) -> None:
     record = make_capture(status=status, updated_at=PROCESSING_AT, raw_object=None)
     store = RecordingCaptureRecordStore(journal, records=[record])
-    orchestrator = ProcessingOrchestrator(ProcessorRouter([processor]), store, now=clock)
+    orchestrator = ProcessingOrchestrator(
+        ProcessorRouter([processor]), store, RecordingContentObjectStore(), now=clock
+    )
 
     with pytest.raises(InvalidCaptureProcessingStateError, match=status.value):
         orchestrator.process(CAPTURE_ID)
@@ -314,7 +332,9 @@ def test_a_wrong_starting_state_has_no_side_effects(
     """No router, no processor, no clock, no write: the capture is untouched."""
     record = make_capture(status=status, updated_at=PROCESSING_AT, raw_object=None)
     store = RecordingCaptureRecordStore(journal, records=[record])
-    orchestrator = ProcessingOrchestrator(ProcessorRouter([processor]), store, now=clock)
+    orchestrator = ProcessingOrchestrator(
+        ProcessorRouter([processor]), store, RecordingContentObjectStore(), now=clock
+    )
 
     with pytest.raises(InvalidCaptureProcessingStateError):
         orchestrator.process(CAPTURE_ID)
@@ -333,4 +353,6 @@ def test_reprocessing_a_completed_capture_is_refused(
     store = RecordingCaptureRecordStore(journal, records=[record])
 
     with pytest.raises(InvalidCaptureProcessingStateError):
-        ProcessingOrchestrator(ProcessorRouter([processor]), store, now=clock).process(CAPTURE_ID)
+        ProcessingOrchestrator(
+            ProcessorRouter([processor]), store, RecordingContentObjectStore(), now=clock
+        ).process(CAPTURE_ID)
