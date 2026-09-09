@@ -88,12 +88,23 @@ class CaptureIntake:
         Only the content itself is deferred to the raw store, and nothing about
         the envelope is ever written into those bytes.
 
+        The envelope is read once, before anything becomes durable. From the
+        moment ``create`` succeeds, the ``RECEIVED`` snapshot is the authority
+        on every capture fact carried into ``STORED``: the two snapshots
+        describe one capture, and re-reading a caller-held object across a
+        store call is how they would come to disagree.
+
         Nothing is rolled back if a later step fails, and nothing is retried.
         The raw object store has no delete and shares no transaction with the
         record store, so a failure after step 2 leaves a truthful ``RECEIVED``
         record rather than a fabricated ``FAILED`` one.
         """
         data = self._materialize(envelope)
+        mime_type = envelope.payload.mime_type
+
+        # Read from the envelope once, here, and never again. Everything below
+        # descends from this snapshot instead of re-reading the caller's object.
+        context = envelope.context.model_copy(deep=True)
 
         received = CaptureRecord(
             id=envelope.id,
@@ -108,26 +119,37 @@ class CaptureIntake:
             # snapshot gets its own deep copies, so neither the envelope the
             # caller still holds nor the other snapshot shares a mutable
             # ``CaptureIntent.tags`` list with this one.
-            context=envelope.context.model_copy(deep=True),
+            context=context,
             intent=None if envelope.intent is None else envelope.intent.model_copy(deep=True),
             title=envelope.payload.title,
         )
         self._record_store.create(received)
 
-        raw_object = self._raw_store.store_bytes(data, mime_type=envelope.payload.mime_type)
+        raw_object = self._raw_store.store_bytes(data, mime_type=mime_type)
 
+        # ``received`` is now durable, which makes it the authority on every
+        # capture fact — not the envelope. The raw store ran in between, and a
+        # caller (or a store that was handed the envelope elsewhere) may have
+        # mutated it since; re-reading it here would let ``stored`` silently
+        # disagree with the snapshot already on record. Only status, the
+        # timestamp, and the reference to the bytes are new.
+        #
+        # ``context`` is the very object ``received`` carries, kept in hand
+        # because the field is optional on the model and required only from
+        # schema 0.2 — copying it from the local says the same thing as
+        # ``received.context`` without pretending the None case is reachable.
         stored = CaptureRecord(
             id=received.id,
             status=CaptureStatus.STORED,
             received_at=received.received_at,
             updated_at=self._now(),
-            source=envelope.source.model_copy(deep=True),
+            source=received.source.model_copy(deep=True),
             payload_type=received.payload_type,
             raw_object=raw_object,
             error=None,
-            context=envelope.context.model_copy(deep=True),
-            intent=None if envelope.intent is None else envelope.intent.model_copy(deep=True),
-            title=envelope.payload.title,
+            context=context.model_copy(deep=True),
+            intent=None if received.intent is None else received.intent.model_copy(deep=True),
+            title=received.title,
         )
         self._record_store.replace(stored)
         return stored

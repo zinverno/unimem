@@ -10,8 +10,10 @@ import pytest
 
 from core.contracts import (
     CaptureEnvelope,
+    CaptureSourceType,
     CaptureStatus,
     IntentAction,
+    RawObjectRef,
 )
 from core.intake import CaptureIntake
 from core.persistence import CaptureRecordPersistenceError
@@ -272,3 +274,99 @@ def test_two_captures_of_one_text_keep_their_own_metadata(
     assert record_store.get("cap_b").title == "From the CLI"
     assert record_store.get("cap_a").intent is not None
     assert record_store.get("cap_b").intent is None
+
+
+class EnvelopeMutatingRawObjectStore(FakeRawObjectStore):
+    """A raw store that rewrites the caller's envelope while storing the bytes.
+
+    A hostile double, but not an unrealistic one: ``store_bytes`` is a real
+    call out of intake, the caller still holds the envelope across it, and in a
+    threaded or async caller anything can happen in that window. The point is
+    that by then the ``RECEIVED`` snapshot is already durable, so what happens
+    to the envelope must not reach ``STORED``.
+    """
+
+    def __init__(self, envelope: CaptureEnvelope, journal: list[str] | None = None) -> None:
+        super().__init__(journal)
+        self._envelope = envelope
+
+    def store_bytes(self, data: bytes, *, mime_type: str | None = None) -> RawObjectRef:
+        self._envelope.source.provider = "mutated-provider"
+        self._envelope.context.device = "mutated-device"
+        self._envelope.context.application = "mutated-application"
+        assert self._envelope.intent is not None
+        self._envelope.intent.collection = "mutated-collection"
+        self._envelope.intent.tags.append("mutated-tag")
+        self._envelope.payload.title = "Mutated Title"
+        return super().store_bytes(data, mime_type=mime_type)
+
+
+def test_the_stored_snapshot_descends_from_the_receipt_not_the_envelope(
+    record_store: FakeCaptureRecordStore, journal: list[str]
+) -> None:
+    """Once the receipt is durable it is the authority, not the caller's object.
+
+    Every capture fact is checked, not just the mutable list: a snapshot that
+    re-read the envelope here would disagree with what is already on record.
+    """
+    envelope = make_envelope()
+    mutating = EnvelopeMutatingRawObjectStore(envelope, journal)
+
+    stored = CaptureIntake(mutating, record_store, now=FakeClock(RECEIVED_AT, UPDATED_AT)).accept(
+        envelope
+    )
+
+    (received,) = record_store.created
+    persisted = record_store.get(envelope.id)
+
+    # 1. the durable receipt kept the values the envelope had on arrival
+    assert received.source.provider == "cli"
+    assert received.context is not None
+    assert received.context.device == "laptop"
+    assert received.context.application == "terminal"
+    assert received.intent is not None
+    assert received.intent.collection == "reading"
+    assert received.intent.tags == ["architecture"]
+    assert received.title == "A note"
+
+    # 2. and STORED carries exactly those same values, returned and persisted
+    for snapshot in (stored, persisted):
+        assert snapshot.status is CaptureStatus.STORED
+        assert snapshot.source.provider == "cli"
+        assert snapshot.source.type is CaptureSourceType.API
+        assert snapshot.context is not None
+        assert snapshot.context.device == "laptop"
+        assert snapshot.context.application == "terminal"
+        assert snapshot.context.captured_at == CAPTURED_AT
+        assert snapshot.intent is not None
+        assert snapshot.intent.collection == "reading"
+        assert snapshot.intent.tags == ["architecture"]
+        assert snapshot.title == "A note"
+
+    # 3. none of the mutations made during store_bytes reached the snapshot
+    assert "mutated" not in stored.model_dump_json()
+    assert "mutated" not in persisted.model_dump_json()
+
+    # 4. and the two snapshots still hold their own mutable state
+    assert stored.intent is not None
+    assert stored.intent.tags is not received.intent.tags
+    assert stored.context is not received.context
+    assert stored.source is not received.source
+
+    # the envelope really was mutated, so the assertions above mean something
+    assert envelope.source.provider == "mutated-provider"
+    assert envelope.payload.title == "Mutated Title"
+
+
+def test_only_status_timestamp_and_reference_are_new_in_the_stored_snapshot(
+    intake: CaptureIntake, envelope: CaptureEnvelope, record_store: FakeCaptureRecordStore
+) -> None:
+    """Everything else on STORED is the receipt's, field for field."""
+    stored = intake.accept(envelope)
+    (received,) = record_store.created
+
+    before = received.model_dump()
+    after = stored.model_dump()
+    changed = {name for name in before if before[name] != after[name]}
+
+    assert changed == {"status", "updated_at", "raw_object"}
