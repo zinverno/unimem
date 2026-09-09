@@ -33,6 +33,29 @@ class TextDecodingError(ProcessingError):
     """
 
 
+class InvalidCaptureProcessingStateError(ProcessingError):
+    """The capture is not in a state from which processing may begin.
+
+    Phase 0H starts processing from ``stored`` and from nothing else. A capture
+    that is still ``received`` has no bytes to read yet; one that is already
+    ``processing``, ``complete``, ``partial``, or ``failed`` has been through
+    here, and starting again would be reprocessing — a decision with its own
+    questions (is the old content object superseded? was the failure
+    transient?) that this phase does not answer.
+    """
+
+
+class ProcessingOutputError(ProcessingError):
+    """A processor returned content that does not belong to the capture.
+
+    Raised when the returned ``ContentObject.source.capture_id`` is not the
+    capture that was handed in. The object may be perfectly valid on its own —
+    the contract checks its internal consistency — but it is not *this*
+    capture's content, and recording the capture complete on the strength of it
+    would attribute one capture's normalization to another.
+    """
+
+
 class ProcessorRoutingError(ProcessingError):
     """A capture could not be assigned to exactly one processor."""
 

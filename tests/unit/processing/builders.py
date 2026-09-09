@@ -15,6 +15,14 @@ from core.contracts import (
     CaptureSource,
     CaptureSourceType,
     CaptureStatus,
+    ContentObject,
+    ContentSource,
+    ContentType,
+    OriginalReference,
+    Provenance,
+    ProvenanceSourceType,
+    Segment,
+    SegmentType,
 )
 from tests.unit.processing.doubles import InMemoryRawObjectStore
 
@@ -52,3 +60,29 @@ def store_and_capture(
     raw_object = store.store_bytes(data, mime_type=mime_type)
     store.accesses.clear()
     return make_capture(raw_object=raw_object, **overrides)
+
+
+def make_content(capture_id: str = "cap_text_01", **overrides: Any) -> ContentObject:
+    """A minimal valid content object attributed to one capture.
+
+    Orchestration never inspects content beyond the capture it is attributed
+    to, so this is deliberately the smallest thing the contract accepts.
+    """
+    fields: dict[str, Any] = {
+        "id": "con_01",
+        "type": ContentType.TEXT,
+        "source": ContentSource(capture_id=capture_id),
+        "original": OriginalReference(),
+        "segments": [
+            Segment(
+                id="seg_01",
+                type=SegmentType.TEXT,
+                text="normalized text",
+                provenance=Provenance(
+                    capture_id=capture_id,
+                    source_type=ProvenanceSourceType.ORIGINAL,
+                ),
+            )
+        ],
+    }
+    return ContentObject(**(fields | overrides))

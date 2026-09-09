@@ -91,7 +91,11 @@ class TextProcessor:
     """Normalizes ``text`` captures into canonical text content objects."""
 
     name = "text"
-    version = "0.1"
+    #: 0.2 carries the capture's submitted title onto the content object.
+    #: ``version`` describes processing semantics, so output that changed for
+    #: an unchanged input changes it — and the new value travels automatically
+    #: onto every ``Provenance`` and ``ProcessingRecord`` this processor emits.
+    version = "0.2"
 
     def __init__(self, raw_store: RawObjectStore) -> None:
         """Take the store the immutable original will be read through.
@@ -111,6 +115,9 @@ class TextProcessor:
         The capture record is only read, never written: its lifecycle status is
         not advanced, and the raw original is not modified. Whether the capture
         is ``stored``, ``queued``, or anything else is orchestration's business.
+
+        ``capture.title`` is copied onto the content object exactly as given,
+        and stays ``None`` when the capture carried none.
 
         Storage failures are not translated. If the store cannot produce the
         bytes it raises its own typed
@@ -165,6 +172,15 @@ class TextProcessor:
                 mime_type=raw_object.mime_type,
                 sha256=raw_object.sha256,
             ),
+            # The submitter's title, verbatim or not at all. Plain text has no
+            # competing extracted title — no heading to read, no ``<title>``,
+            # no document properties — so if the capture carried one it *is*
+            # the title. Nothing is inferred from the first line, the file
+            # name, or the URL, and no title is minted when the capture had
+            # none. A processor that really does extract titles (webpage,
+            # document) will need a precedence rule; this one does not, and
+            # inventing the rule here would be inventing the problem too.
+            title=capture.title,
             segments=[segment],
             assets=[original],
             processing=[

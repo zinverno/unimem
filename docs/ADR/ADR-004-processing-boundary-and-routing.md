@@ -1,6 +1,7 @@
 # ADR-004: Processors produce canonical ContentObjects, and routing requires one explicit match
 
-Status: accepted (Phase 0C)
+Status: accepted (Phase 0C); the orchestration it excluded arrived in Phase 0H
+([ADR-009](ADR-009-processing-orchestration.md)).
 
 ## Context
 
@@ -143,3 +144,32 @@ Costs:
   either a partial `ContentObject` or a new result type, and Phase 0C has
   nowhere to record a failed run. Raising a typed error loses nothing while the
   orchestration layer is unwritten.
+
+## Amendment (Phase 0H): the missing orchestration now exists
+
+This decision drew the processor boundary by saying what a processor does *not*
+do — persist, advance `CaptureRecord.status`, mutate the capture or the
+original, render — and noted that "persistence and orchestration live outside
+the processor, and do not exist yet". Phase 0H supplied them. See
+[ADR-009](ADR-009-processing-orchestration.md).
+
+Nothing above is walked back. `ProcessingOrchestrator` takes a capture id,
+loads the authoritative record, requires `stored`, calls
+`ProcessorRouter.select`, writes `processing` durably, runs the one selected
+processor, and records `complete` — or `failed`, but only for a
+`ProcessingError`, which is a verdict about the capture rather than about the
+run. Processors remain exactly as pure as this ADR made them: every lifecycle
+write in the system happens in the orchestrator, and a processor is still
+testable with no database in sight.
+
+Two points here are worth re-reading in that light. The router's insistence on
+*exactly one* match is what lets orchestration select before writing any state,
+so a wiring mistake leaves the capture untouched at `stored`. And
+`ProcessorRouter.process` — described here as "convenience only" — is
+deliberately *not* used by the orchestrator: selection has already happened, and
+routing a second time across a durable state change could run something other
+than what the record was marked `processing` for.
+
+`TextProcessor` moved to version 0.2 in the same phase, for a semantic reason
+this ADR anticipated: it now copies the capture's submitted title onto the
+content object, so its output changed for an unchanged input.
