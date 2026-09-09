@@ -32,4 +32,6 @@ jobs:
         run: mypy
 
       - name: pytest
-        run: pytest --cov=core
+        # Both packages, so the delivery surface is measured too and the
+        # coverage floor applies to it rather than only to the kernel.
+        run: pytest --cov=core --cov=unimem_api
