@@ -12,8 +12,12 @@ Implemented so far:
 - **Phase 0B — local immutable raw-object storage.** A `RawObjectStore` port
   and a local content-addressed backend that persists original bytes, addressed
   by SHA-256 and never modified once stored.
+- **Phase 0C — processing foundation and UTF-8 text normalization.** A
+  `Processor` port, a `ProcessorRouter` that requires exactly one matching
+  processor, and `TextProcessor`, which turns a stored UTF-8 original into a
+  canonical `ContentObject`.
 
-There is no HTTP, database, queueing, extraction, or AI code.
+There is no HTTP, database, queueing, rendering, or AI code.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 
@@ -22,6 +26,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 ```
 src/core/contracts/   canonical domain contracts (Pydantic v2 models)
 src/core/storage/     raw object store port and local backend
+src/core/processing/  processor port, router, and the UTF-8 text processor
 tests/                unit and integration tests
 docs/                 architecture notes and ADRs
 ```

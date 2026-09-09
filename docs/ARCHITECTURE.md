@@ -15,8 +15,12 @@ flowing through this system?" Pydantic models, enums, and validation rules in
 
 **Phase 0B — immutable raw object storage.** Answers "how does UniMem persist
 immutable original bytes?" A storage port and one local backend in
-`src/core/storage/`. Nothing else is implemented: no capture persistence, no
-extraction, no processors, no transport.
+`src/core/storage/`.
+
+**Phase 0C — processing foundation.** Answers "how does a stored raw object
+become a canonical `ContentObject`?" A processor port, a router, and one real
+processor for UTF-8 text in `src/core/processing/`. Still not implemented:
+capture persistence, transport, rendering, and every non-text modality.
 
 ## Future data flow
 
@@ -24,7 +28,7 @@ extraction, no processors, no transport.
 Source
   -> Capture            (CaptureEnvelope, CaptureRecord)
   -> Raw Original       (immutable bytes, stored by RawObjectStore — Phase 0B)
-  -> Ingestion          (processors; recorded as ProcessingRecord)
+  -> Processing         (processors; recorded as ProcessingRecord — Phase 0C)
   -> ContentObject      (canonical, with Segments + Provenance + Assets)
   -> Representations    (JSON, Markdown, ... all derived)
   -> later: retrieval
@@ -32,7 +36,8 @@ Source
   -> later: agents
 ```
 
-Only the contract shapes exist today; every arrow is future work.
+The capture, raw-original, processing, and content steps exist today for
+UTF-8 text; everything below them is future work.
 
 ## The canonical ContentObject
 
@@ -136,6 +141,126 @@ Phase 0B trust boundary.
 sidecars, extraction and processors, renderers, HTTP, queues and workers,
 remote or cloud backends, and encryption at rest.
 
+## Processing (Phase 0C)
+
+A capture that has been accepted and whose bytes are stored is not yet usable:
+nothing downstream wants to know that this one was text and that one was a
+video. Processing is the step that removes that difference.
+
+```
+RawObject          (immutable bytes, Phase 0B)
+    |
+CaptureRecord      (what was captured, and its reference to those bytes)
+    |
+ProcessorRouter    (capability-based selection — exactly one match)
+    |
+Processor          (normalization for one modality)
+    |
+ContentObject      (canonical: Segments + Provenance + Assets + ProcessingRecord)
+```
+
+**What a processor consumes.** A `CaptureRecord` — the accepted capture context
+— plus whatever explicit dependency it needs to reach the immutable original.
+For `TextProcessor` that dependency is the `RawObjectStore` port, handed to it
+at construction. The raw object is the source of truth for processing, not the
+envelope's payload: the bytes that were stored are the bytes that get
+normalized.
+
+**What a processor produces.** One valid `ContentObject`, with segments, their
+mandatory provenance, the assets they reference, and a `ProcessingRecord`
+describing the run.
+
+**What a processor does not do.** It does not persist a capture or a content
+object, does not advance `CaptureRecord.status`, does not mutate the capture
+record or the raw original, does not render, and does not call an AI service.
+Persistence and orchestration live outside the processor, and do not exist yet.
+A processor therefore accepts a capture in any lifecycle state: whether the
+record says `stored`, `queued`, or `processing` is not its concern.
+
+**Routing is capability-based and requires exactly one match.** `Processor
+.supports()` is a pure question about the capture record — no storage reads, no
+mutation, no failure when the original is missing. The router asks every
+registered processor and then insists on a single yes:
+
+- one match — that processor is selected;
+- no match — `NoProcessorError`;
+- several matches — `AmbiguousProcessorError`.
+
+**First-match precedence is rejected.** With one processor, first-match and
+exact-match routing behave identically; with a web, image, and document
+processor in the same list, first-match turns the order of a list into
+undeclared precedence, and an overlap gets resolved silently by whoever
+happened to register first. Priorities are not introduced here either: if
+overlapping processors ever need an order, that is an explicit decision to
+make then. See [ADR-004](ADR/ADR-004-processing-boundary-and-routing.md).
+
+**Registration is explicit.** `ProcessorRouter([...])` takes the processors it
+routes to. There is no registry, no decorator, no entry point, no plugin
+discovery, and no configuration-driven class loading.
+
+**The first implementation is `TextProcessor`.** It handles
+`CapturePayloadType.TEXT` only, decodes the stored bytes as **strict UTF-8**,
+and emits one text `Segment` carrying the decoded string exactly: no encoding
+detection, no Unicode normalization, no line-ending rewriting, no whitespace
+trimming, and no chunking. Chunking is a retrieval concern and belongs to the
+phase that needs it. Bytes that are not valid UTF-8 raise `TextDecodingError`,
+and material a canonical segment cannot be built from — zero bytes, or nothing
+but whitespace — raises `ProcessingInputError` rather than surfacing as a
+validation traceback from inside `Segment`.
+
+**Failures are typed, and storage failures stay storage failures.**
+`ProcessingError` covers input problems, decoding problems, and routing
+problems. Errors from the raw object store are *not* folded into it: a
+`RawObjectNotFoundError` or `InvalidRawObjectRefError` propagates with its own
+type, because "the store could not give me the bytes" and "this capture will
+never process" are different situations for a caller deciding whether to retry.
+No `OSError` escapes a processor — the storage port does not raise one.
+
+**Failed runs raise; they do not return.** A processor never returns a partial
+or invalid `ContentObject` in order to carry a `FAILED` `ProcessingRecord`.
+There is nowhere to persist such a record today, and inventing a place for it
+is orchestration's problem, not the contract's.
+
+**Identifiers.** `ContentObject`, `Segment`, and `Asset` ids are minted as
+UUID4 strings. That is this producer's implementation choice, not a new contract
+rule: Phase 0A deliberately leaves identifier format open, and ids stay opaque
+to consumers. None of them is derived from the raw SHA-256 — that address
+identifies bytes, and two captures of the same bytes are two content objects.
+
+**The original stays reachable from the content object.** `OriginalReference`
+carries identity (`asset_id`, `sha256`, and the declared MIME type, preserved as
+declared) but has nowhere to put a reference. So the raw original is also
+recorded as one `Asset` with role `original`, whose `ref` is the storage-neutral
+handle the store returned. Without it, retrieving the original from a content
+object would require every consumer to know that raw storage happens to be
+content-addressed — knowledge that belongs to `core.storage`, not to a
+consumer. `Asset.mime_type` is required by the contract, so a text capture that
+declared no MIME type gets the documented `text/plain` fallback *on the asset
+only*; `ContentObject.original.mime_type` stays `None`, so an undeclared MIME
+type still looks undeclared.
+
+**Asset identity is not raw object identity.** An `Asset` is a record *inside
+one content object* that points at an original; it is not the original. Its id
+is minted per processing run, while the raw object's identity travels on `ref`
+and `sha256`, where it belongs. So processing the same stored bytes twice
+produces two content objects whose original assets carry the same `ref` and the
+same digest under two different asset ids — the same layering as ADR-003's
+`RawObject` identity versus capture identity, one level further down. Reusing
+the raw id as the asset id would make a SHA-256 name a record within a content
+object as well as the bytes it addresses, and that overload is exactly what
+ADR-003 rules out. Storage deduplication is unaffected: it is decided by the
+digest, which nothing here changes.
+
+**Rendering is deliberately absent.** "How do we derive readable
+representations from a `ContentObject`?" is a separate question with a separate
+answer, and mixing it into normalization would make the canonical object
+optional. There is no `Renderer`, no Markdown, and no JSON view here.
+
+**Out of scope here:** capture record persistence, capture intake and
+idempotency, HTTP, queues and workers, every non-text modality (HTML, images,
+OCR, documents, video, transcription), chunking, embeddings, AI analysis, and
+renderers.
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
@@ -150,7 +275,8 @@ remote or cloud backends, and encryption at rest.
    of that object.
 6. Domain contracts are explicitly schema-versioned
    ([ADR-002](ADR/ADR-002-versioned-domain-contracts.md)).
-7. Processors added later must produce `ContentObject`s.
+7. Processors must produce `ContentObject`s, and nothing else may. Implemented
+   in Phase 0C: the `Processor` port returns a `ContentObject` or raises.
 8. `CaptureEnvelope` describes input, not analysis results.
 9. The canonical contracts do not depend on PostgreSQL, HTTP, filesystem
    storage, AI providers, or browser APIs.
@@ -167,8 +293,10 @@ the models and covered by tests.
   validators. See *Mutation semantics* below for what this does and does not
   guarantee.
 - Datetimes are timezone-aware (`AwareDatetime`); naive input is rejected.
-- Identifiers are non-blank strings. No UUID/ULID format is imposed yet —
-  how identifiers are minted is an open decision.
+- Identifiers are non-blank strings. No UUID/ULID format is imposed by the
+  contracts, and none is planned: how a producer mints ids is the producer's
+  choice (Phase 0C's `TextProcessor` uses UUID4), and consumers treat them as
+  opaque.
 - `metadata` fields are `dict[str, JsonValue]`, so contracts cannot hold
   values that do not survive JSON.
 - Enum values are lowercase, stable, and part of the wire format.
@@ -240,8 +368,15 @@ src/core/storage/
   raw.py          RawObjectStore port, sha256:<digest> reference format
   local.py        LocalRawObjectStore, the content-addressed local backend
   errors.py       typed storage errors
+src/core/processing/
+  base.py         the Processor port
+  router.py       ProcessorRouter, exactly-one-match routing
+  text.py         TextProcessor, UTF-8 text normalization
+  errors.py       typed processing and routing errors
 tests/unit/contracts/
 tests/unit/storage/
+tests/unit/processing/
 tests/integration/storage/
+tests/integration/processing/
 docs/
 ```
