@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from core.contracts import (
+    CaptureContext,
     CapturePayloadType,
     CaptureRecord,
     CaptureSource,
@@ -21,7 +22,7 @@ from core.contracts import (
 from core.processing import TextProcessor
 from core.rendering import JsonRenderer, MarkdownRenderer
 from core.storage import LocalRawObjectStore
-from tests.unit.processing.builders import RECEIVED_AT
+from tests.unit.processing.builders import CAPTURED_AT, RECEIVED_AT
 
 GREETING = "Привет, мир — 你好 🌍"
 NOTES = f"# Notes\r\n\r\n{GREETING}\n\n\tindented line   \n"
@@ -43,6 +44,7 @@ def content(tmp_path: Path) -> ContentObject:
         ),
         payload_type=CapturePayloadType.TEXT,
         raw_object=raw_object,
+        context=CaptureContext(captured_at=CAPTURED_AT),
     )
     return TextProcessor(store).process(capture)
 

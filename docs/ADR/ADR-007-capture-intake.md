@@ -1,6 +1,7 @@
 # ADR-007: Intake registers the capture before it stores the bytes
 
-Status: accepted (Phase 0F)
+Status: accepted (Phase 0F); the metadata limitation below was resolved in
+Phase 0G ([ADR-008](ADR-008-durable-capture-metadata-and-schema-0.2.md)).
 
 ## Context
 
@@ -162,7 +163,8 @@ provide.
 `ProcessorRouter` is consulted, no `ContentObject` is built or persisted,
 nothing is rendered or exported, and there is no HTTP, CLI, or browser surface.
 
-**Envelope-only metadata is dropped, visibly.** `CaptureRecord` has no field for
+**Envelope-only metadata is dropped, visibly.** *(Resolved in Phase 0G — see
+the amendment at the end of this ADR.)* `CaptureRecord` has no field for
 `context` (captured_at, device, application), `intent` (action, collection,
 tags), or `payload.title`. Phase 0F durably retains only what the current
 contract can represent — id, source, payload type, status, timestamps, raw
@@ -197,12 +199,12 @@ Costs:
   points at. It is recoverable — the digest is recomputable from the same text,
   if the text is resubmitted — but Phase 0F provides no resume, sweeper, or
   reconciliation, and a real deployment will need one.
-- **Envelope metadata is lost today.** Device, application, capture time,
-  intent, collection, tags, and title are accepted and then dropped. This is the
-  most pressing gap in the whole system: it must be solved — as a deliberate
-  contract change with durable fields — **before any real connector**, because a
-  browser extension's whole value is context, and a lossy intake would silently
-  discard it at scale.
+- **Envelope metadata is lost today.** *(Resolved in Phase 0G.)* Device,
+  application, capture time, intent, collection, tags, and title are accepted
+  and then dropped. This is the most pressing gap in the whole system: it must
+  be solved — as a deliberate contract change with durable fields — **before any
+  real connector**, because a browser extension's whole value is context, and a
+  lossy intake would silently discard it at scale.
 - **Two writes per capture.** `create` then `replace` costs a second round trip
   compared with writing `STORED` once. That is the price of the receipt, and it
   is the right trade at any volume this system will see before it has a queue.
@@ -268,3 +270,26 @@ Costs:
   destroy the distinction between "the disk failed", "the database failed", and
   "this id is taken", which is the only thing a caller can act on. Intake
   defines errors for its own failures and lets the others through.
+
+## Amendment (Phase 0G): the metadata gap is closed
+
+The limitation this ADR named as "the most pressing gap in the whole system"
+was resolved in Phase 0G, as a deliberate contract change rather than a
+workaround. See
+[ADR-008](ADR-008-durable-capture-metadata-and-schema-0.2.md).
+
+`CaptureRecord` at schema version `0.2` carries `context`, `intent`, and
+`title`, reusing the `CaptureContext` and `CaptureIntent` models the envelope
+already used. Intake now copies all three into the **`RECEIVED`** snapshot —
+before raw storage, not after — so the receipt ordering this ADR argued for
+keeps its full value: a capture stranded by a raw-store or `replace` failure
+still knows when, where, and why it was taken. Each snapshot receives its own
+deep copies, so no `CaptureIntent.tags` list is ever shared between the
+envelope and a record or between the two snapshots.
+
+Everything else in this decision stands unchanged: the ordering, the identity
+rule, the exact UTF-8 materialization, the error split, the duplicate-id
+behaviour, the refusal to fabricate a `FAILED` status, and the cross-store
+atomicity gap — which remains open, and is now the outstanding limitation here.
+Content still lives only in the raw store; what became durable is metadata
+*about* the capture, never the capture itself.

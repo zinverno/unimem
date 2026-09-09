@@ -14,14 +14,20 @@ from pathlib import Path
 
 import pytest
 
-from core.contracts import CaptureRecord, CaptureStatus
+from core.contracts import CaptureRecord, CaptureStatus, IntentAction, RawObjectRef
 from core.intake import CaptureIntake
 from core.persistence import (
     CaptureRecordAlreadyExistsError,
     SqliteCaptureRecordStore,
 )
-from core.storage import LocalRawObjectStore
-from tests.unit.intake.builders import AWKWARD_TEXT, TEXT, make_envelope, make_payload
+from core.storage import LocalRawObjectStore, RawObjectWriteError
+from tests.unit.intake.builders import (
+    AWKWARD_TEXT,
+    CAPTURED_AT,
+    TEXT,
+    make_envelope,
+    make_payload,
+)
 
 RECEIVED_AT = datetime(2026, 8, 9, 10, 11, 12, 130000, tzinfo=UTC)
 UPDATED_AT = datetime(2026, 8, 9, 10, 11, 13, tzinfo=UTC)
@@ -38,6 +44,13 @@ class SteppedClock:
         instant = self._instants[min(self._reads, len(self._instants) - 1)]
         self._reads += 1
         return instant
+
+
+class FailingRawObjectStore(LocalRawObjectStore):
+    """A real local store that refuses to write, to strand a receipt."""
+
+    def store_bytes(self, data: bytes, *, mime_type: str | None = None) -> RawObjectRef:
+        raise RawObjectWriteError("disk gave up")
 
 
 @pytest.fixture
@@ -161,3 +174,63 @@ def finalized(root: Path) -> list[Path]:
     """Every finalized raw object under a store root."""
     objects = root / "sha256"
     return sorted(path for path in objects.rglob("*") if path.is_file())
+
+
+def test_capture_metadata_survives_the_whole_stack(intake: CaptureIntake, database: Path) -> None:
+    """Envelope context, intent, and title, through intake and real SQLite."""
+    accepted = intake.accept(make_envelope())
+
+    persisted = SqliteCaptureRecordStore(database).get(accepted.id)
+    assert persisted == accepted
+    assert persisted.schema_version == "0.2"
+    assert persisted.context is not None
+    assert persisted.context.captured_at == CAPTURED_AT
+    assert persisted.context.device == "laptop"
+    assert persisted.context.application == "terminal"
+    assert persisted.intent is not None
+    assert persisted.intent.action is IntentAction.SAVE
+    assert persisted.intent.collection == "reading"
+    assert persisted.intent.tags == ["architecture"]
+    assert persisted.title == "A note"
+
+
+def test_the_metadata_is_durable_before_the_bytes_are(raw_root: Path, database: Path) -> None:
+    """A raw-store failure strands a receipt that still knows its capture facts."""
+    record_store = SqliteCaptureRecordStore(database)
+    failing = FailingRawObjectStore(raw_root)
+
+    with pytest.raises(RawObjectWriteError):
+        CaptureIntake(failing, record_store, now=SteppedClock(RECEIVED_AT, UPDATED_AT)).accept(
+            make_envelope()
+        )
+
+    stranded = SqliteCaptureRecordStore(database).get("cap_intake_01")
+    assert stranded.status is CaptureStatus.RECEIVED
+    assert stranded.raw_object is None
+    assert stranded.context is not None
+    assert stranded.context.captured_at == CAPTURED_AT
+    assert stranded.title == "A note"
+
+
+def test_captured_at_and_received_at_stay_distinct_in_the_database(
+    intake: CaptureIntake, database: Path
+) -> None:
+    accepted = intake.accept(make_envelope())
+
+    persisted = SqliteCaptureRecordStore(database).get(accepted.id)
+    assert persisted.received_at == RECEIVED_AT
+    assert persisted.context is not None
+    assert persisted.context.captured_at == CAPTURED_AT
+    assert persisted.context.captured_at < persisted.received_at
+
+
+def test_the_raw_bytes_hold_the_text_and_nothing_else(
+    intake: CaptureIntake, raw_root: Path
+) -> None:
+    accepted = intake.accept(make_envelope())
+
+    assert accepted.raw_object is not None
+    data = LocalRawObjectStore(raw_root).read_bytes(accepted.raw_object)
+    assert data == TEXT.encode("utf-8")
+    for absent in (b"A note", b"laptop", b"terminal", b"reading", b"architecture"):
+        assert absent not in data

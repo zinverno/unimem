@@ -127,13 +127,25 @@ def test_the_title_is_not_smuggled_into_the_bytes(
     assert stored_bytes(raw_store) == b"body only"
 
 
-def test_envelope_metadata_is_not_smuggled_into_the_record(
+def test_envelope_metadata_never_reaches_the_raw_bytes(
+    intake: CaptureIntake, raw_store: FakeRawObjectStore
+) -> None:
+    """Metadata is durable in the record; the bytes stay the content alone."""
+    intake.accept(make_envelope(payload=make_payload(text="body only", title="A Title")))
+
+    written = stored_bytes(raw_store)
+    assert written == b"body only"
+    for absent in (b"A Title", b"laptop", b"terminal", b"reading", b"architecture", b"save"):
+        assert absent not in written
+
+
+def test_metadata_lands_in_its_own_fields_not_in_error(
     intake: CaptureIntake, envelope: CaptureEnvelope
 ) -> None:
-    """Context, intent, and title are dropped, not stuffed into ``error``."""
+    """Context, intent, and title have real homes now, so nothing is improvised."""
     accepted = intake.accept(envelope)
 
     assert accepted.error is None
-    serialized = accepted.model_dump_json()
-    for absent in ("laptop", "terminal", "reading", "architecture", "A note"):
-        assert absent not in serialized
+    assert accepted.context is not None
+    assert accepted.intent is not None
+    assert accepted.title == "A note"

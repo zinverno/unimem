@@ -2,7 +2,8 @@
 
 Core domain contracts, immutable raw-object storage, capture-record
 persistence, and text capture intake for a universal multimodal capture and
-ingestion layer.
+ingestion layer. Canonical contracts are at schema version **0.2**; `0.1`
+documents remain readable and are rewritten as `0.1`.
 
 Implemented so far:
 
@@ -32,6 +33,13 @@ Implemented so far:
   envelope's text as exact UTF-8 bytes, then replaces the record with `STORED`
   and the raw reference. Inline text only; the capture record keeps the
   envelope's id, and a duplicate id is an error rather than a silent retry.
+- **Phase 0G — durable capture metadata, and schema 0.2.** `CaptureRecord`
+  gains `context`, `intent`, and `title`, reusing the models `CaptureEnvelope`
+  already used, so capture-time facts survive intake instead of being dropped.
+  Intake writes them into the `RECEIVED` snapshot, before the bytes are stored.
+  `context` is required at 0.2; `intent` and `title` are optional and never
+  fabricated. Content stays in the raw store, and no database migration was
+  needed.
 
 There is no HTTP, queueing, or AI code, and no ORM.
 

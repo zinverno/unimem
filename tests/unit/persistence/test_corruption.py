@@ -74,7 +74,7 @@ def test_an_unsupported_schema_version_is_a_typed_corruption(
 ) -> None:
     """A payload from a future contract is refused, not read with today's rules."""
     future = json.loads(make_record(id="cap_future").model_dump_json())
-    future["schema_version"] = "0.2"
+    future["schema_version"] = "0.3"
     plant(database, "cap_future", json.dumps(future))
 
     with pytest.raises(CaptureRecordCorruptError):
