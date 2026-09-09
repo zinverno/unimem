@@ -1,7 +1,8 @@
 # capture-core
 
-Core domain contracts, immutable raw-object storage, and capture-record
-persistence for a universal multimodal capture and ingestion layer.
+Core domain contracts, immutable raw-object storage, capture-record
+persistence, and text capture intake for a universal multimodal capture and
+ingestion layer.
 
 Implemented so far:
 
@@ -26,6 +27,11 @@ Implemented so far:
   adapter over the standard library's `sqlite3`. Records are stored as whole
   validated snapshots of their own contract JSON, keyed by the record's own id.
   No delete, listing, query, upsert, or migration framework.
+- **Phase 0F — text capture intake.** `CaptureIntake.accept(envelope)`, the
+  first orchestration: it registers a `RECEIVED` capture record, stores the
+  envelope's text as exact UTF-8 bytes, then replaces the record with `STORED`
+  and the raw reference. Inline text only; the capture record keeps the
+  envelope's id, and a duplicate id is an error rather than a silent retry.
 
 There is no HTTP, queueing, or AI code, and no ORM.
 
@@ -39,6 +45,7 @@ src/core/storage/     raw object store port and local backend
 src/core/processing/  processor port, router, and the UTF-8 text processor
 src/core/rendering/   renderer port and the JSON and Markdown projections
 src/core/persistence/ capture record store port and the SQLite adapter
+src/core/intake/      capture intake, the envelope-to-stored-capture flow
 tests/                unit and integration tests
 docs/                 architecture notes and ADRs
 ```
