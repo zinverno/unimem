@@ -1,7 +1,7 @@
 # capture-core
 
-Core domain contracts and immutable raw-object storage for a universal
-multimodal capture and ingestion layer.
+Core domain contracts, immutable raw-object storage, and capture-record
+persistence for a universal multimodal capture and ingestion layer.
 
 Implemented so far:
 
@@ -21,8 +21,13 @@ Implemented so far:
   round-trips back into the object, and `MarkdownRenderer`, a deliberately
   lossy title-and-text projection for humans and LLMs. Renderers return
   strings; nothing is written or exported.
+- **Phase 0E — capture record persistence.** A `CaptureRecordStore` port with
+  `create`, `get`, and `replace`, and `SqliteCaptureRecordStore`, a file-backed
+  adapter over the standard library's `sqlite3`. Records are stored as whole
+  validated snapshots of their own contract JSON, keyed by the record's own id.
+  No delete, listing, query, upsert, or migration framework.
 
-There is no HTTP, database, queueing, or AI code.
+There is no HTTP, queueing, or AI code, and no ORM.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 
@@ -33,6 +38,7 @@ src/core/contracts/   canonical domain contracts (Pydantic v2 models)
 src/core/storage/     raw object store port and local backend
 src/core/processing/  processor port, router, and the UTF-8 text processor
 src/core/rendering/   renderer port and the JSON and Markdown projections
+src/core/persistence/ capture record store port and the SQLite adapter
 tests/                unit and integration tests
 docs/                 architecture notes and ADRs
 ```
@@ -48,4 +54,5 @@ uv pip install --python .venv/bin/python -e ".[dev]"
 .venv/bin/mypy                                          # type checking
 ```
 
-Runtime dependencies: **pydantic** only.
+Runtime dependencies: **pydantic** only. Persistence uses the standard
+library's `sqlite3`.

@@ -23,15 +23,21 @@ processor for UTF-8 text in `src/core/processing/`.
 
 **Phase 0D — derived representations.** Answers "how do we derive an external
 readable representation from an existing `ContentObject`?" A `Renderer` port
-and two pure projections — JSON and Markdown — in `src/core/rendering/`. Still
-not implemented: capture persistence, transport, persistence or export of
-rendered output, and every non-text modality.
+and two pure projections — JSON and Markdown — in `src/core/rendering/`.
+
+**Phase 0E — capture record persistence.** Answers "how is a valid
+`CaptureRecord` durably stored and retrieved without coupling domain code to a
+database?" A `CaptureRecordStore` port and one file-backed SQLite adapter in
+`src/core/persistence/`. Still not implemented: capture intake, orchestration
+of the capture lifecycle, persistence of `ContentObject`s or rendered output,
+transport, and every non-text modality.
 
 ## Future data flow
 
 ```
 Source
   -> Capture            (CaptureEnvelope, CaptureRecord)
+  -> Capture Record     (durable snapshot, stored by CaptureRecordStore — Phase 0E)
   -> Raw Original       (immutable bytes, stored by RawObjectStore — Phase 0B)
   -> Processing         (processors; recorded as ProcessingRecord — Phase 0C)
   -> ContentObject      (canonical, with Segments + Provenance + Assets)
@@ -41,8 +47,10 @@ Source
   -> later: agents
 ```
 
-The capture, raw-original, processing, content, and representation steps exist
-today for UTF-8 text; everything below them is future work.
+The capture, capture-record, raw-original, processing, content, and
+representation steps exist today for UTF-8 text; everything below them is
+future work. Nothing yet *drives* that sequence: each step is a component a
+future orchestrator will call, and the orchestrator is not written.
 
 ## The canonical ContentObject
 
@@ -142,9 +150,10 @@ operation. Retention and deletion policy is a later decision. Modification of
 files inside the storage root by something other than the store is outside the
 Phase 0B trust boundary.
 
-**Out of scope here:** capture record persistence, metadata storage or
-sidecars, extraction and processors, renderers, HTTP, queues and workers,
-remote or cloud backends, and encryption at rest.
+**Out of scope here:** capture record persistence (Phase 0E, and in its own
+layer — nothing about a capture record is stored beside the bytes), metadata
+storage or sidecars, extraction and processors, renderers, HTTP, queues and
+workers, remote or cloud backends, and encryption at rest.
 
 ## Processing (Phase 0C)
 
@@ -263,7 +272,8 @@ object optional. No `Renderer`, Markdown, or JSON view lives in
 `core.processing`; rendering is Phase 0D, below, and it consumes a finished
 content object without knowing which processor produced it.
 
-**Out of scope here:** capture record persistence, capture intake and
+**Out of scope here:** capture record persistence (Phase 0E — a processor
+still neither loads nor saves the record it is handed), capture intake and
 idempotency, HTTP, queues and workers, every non-text modality (HTML, images,
 OCR, documents, video, transcription), chunking, embeddings, AI analysis, and
 renderers.
@@ -360,6 +370,132 @@ records, HTML/PDF/image/video renderers, templates and themes, YAML
 frontmatter, chunking for retrieval, embeddings, and any renderer that consults
 something other than the content object it was given.
 
+## Capture record persistence (Phase 0E)
+
+A `CaptureRecord` has existed since Phase 0A and has never had anywhere to
+live: processors take one as an argument and tests build it by hand. Phase 0E
+answers one question — how is a valid `CaptureRecord` durably stored and
+retrieved without coupling domain code to a database? — and answers nothing
+else.
+
+```
+CaptureRecord
+    |
+CaptureRecordStore        (port: create / get / replace)
+    |
+SqliteCaptureRecordStore  (adapter)
+    |
+SQLite file               (one table: capture_records)
+```
+
+**The port is three synchronous methods.**
+
+```python
+class CaptureRecordStore(Protocol):
+    def create(self, record: CaptureRecord) -> None: ...
+    def get(self, capture_id: str) -> CaptureRecord: ...
+    def replace(self, record: CaptureRecord) -> None: ...
+```
+
+No `save`, `upsert`, `delete`, `list`, `search`, `filter`, transaction handle,
+lifecycle-transition call, or async surface. Domain code depends on this
+protocol and on nothing beneath it, so invariant 9 holds: no contract gains a
+table, a column, a session, or a database path. See
+[ADR-006](ADR/ADR-006-capture-record-persistence.md).
+
+**`create` and `replace` are explicit.** `create` inserts one snapshot and
+raises `CaptureRecordAlreadyExistsError` if the id is taken, leaving the stored
+record untouched. `replace` swaps the snapshot under `record.id` and raises
+`CaptureRecordNotFoundError` if there is nothing there — replace never creates.
+There is deliberately no `save` that picks between them by looking at the
+database: that turns an id-collision bug into a silent overwrite, which is the
+one failure a capture store exists to catch.
+
+**A record is stored as a whole validated snapshot.** The payload is the
+contract's own `model_dump_json()`, read back with
+`CaptureRecord.model_validate_json(...)`. There is no field-by-field mapping to
+keep in step with the contract, so a new contract field is persisted without
+anyone remembering it. `JsonRenderer` is *not* used and
+`core.persistence` does not import `core.rendering`: rendering is an external
+representation layer with its own audience and version, and letting the
+database read it back would make a projection the storage format.
+
+**Persistence is snapshot-based, not live-object tracking.** `create`
+serializes immediately, so mutating the caller's object afterwards cannot reach
+the database; `get` returns a newly validated object, so mutating *it* changes
+nothing until an explicit `replace`. There is no identity map, dirty tracking,
+session, unit of work, or lazy loading.
+
+**The store stores; it decides nothing.** It never mints an id, sets or
+advances `updated_at`, chooses a `status`, or invents an `error`. `updated_at`
+is orchestration-owned — a persistence layer that stamped it would make every
+stored timestamp a fact about when a write happened rather than about the
+capture — and the store never mutates the record it is handed.
+
+**Persistence holds no lifecycle policy.** Any valid `CaptureRecord` may be
+stored in any status, and any valid snapshot may replace any other. Whether
+`stored -> processing -> complete` is a legal move is orchestration's decision,
+and orchestration does not exist yet.
+
+**Capture identity is the record's own `id`.** Duplicate detection is that and
+only that. Two capture records with different ids referencing the same
+`RawObjectRef` and the same SHA-256 are two independent records; nothing here
+deduplicates by digest, URL, source, or payload. This is ADR-003's layering
+carried into the one place it was most likely to be lost.
+
+**The schema is one table of two columns.**
+
+```sql
+CREATE TABLE IF NOT EXISTS capture_records (
+    id      TEXT PRIMARY KEY,
+    payload TEXT NOT NULL
+)
+```
+
+A key and a payload. No status, timestamp, source, or digest column is
+duplicated out of the payload: nothing in this phase queries, sorts, or
+filters, so nothing would read one, and a duplicated column is a second
+definition of the contract to keep in step with the first. The database file is
+an adapter argument and never appears in a domain contract.
+
+**Each operation is one transaction, and connections are per-operation.**
+`create` is a single `INSERT` and `replace` a single `UPDATE` on the primary
+key, each committed through the connection's context manager, so a failed write
+rolls back and the previous valid snapshot stands. Values are always bound as
+parameters — no id or payload is formatted into SQL text. Each call opens its
+own connection and closes it, so the store owns no resource a caller must
+release, holds no lock between calls, is not bound to a thread, and two
+instances over one file are interchangeable and see the same records. There is
+no distributed locking, retry loop, WAL tuning, connection pool, or
+cross-process coordination beyond what a SQLite transaction gives, and no
+optimistic version check — two callers that read, modify, and replace the same
+record can still lose one of the updates.
+
+**Errors are typed, and no backend leaks.** `CaptureRecordStoreError` is the
+base, with `CaptureRecordAlreadyExistsError`, `CaptureRecordNotFoundError`,
+`CaptureRecordCorruptError`, and `CaptureRecordPersistenceError` beneath it.
+`sqlite3` exceptions, `OSError`, and Pydantic's `ValidationError` do not cross
+the port, and chaining is preserved so the original stays reachable. A stored
+payload that is not text, is not JSON, is not a valid record, carries an
+unsupported `schema_version`, or embeds an id disagreeing with the key it was
+filed under surfaces as corruption, never as a raw `ValidationError`.
+Classification runs both ways: a duplicate id is never reported as a generic
+failure, and a constraint failure that is not a primary-key conflict is never
+reported as a duplicate.
+
+**No migration strategy is claimed.** The adapter runs `CREATE TABLE IF NOT
+EXISTS` at construction and stops. There is no migration framework, version
+table, or upgrade path, because there is no deployed data and no second schema.
+`schema_version` stays `0.1`, and a payload declaring anything else is refused
+rather than reinterpreted. SQLite is the first local durable adapter, not a
+permanent database choice — that is what the port is for.
+
+**Out of scope here:** capture intake and envelope acceptance, orchestration of
+the capture lifecycle, persistence of `ContentObject`s, `Asset`s, or rendered
+output, delete and retention policy, listing, querying, filtering, and search,
+submission idempotency, transactions spanning more than one record, migrations,
+remote or hosted databases, connection pooling, and async I/O.
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
@@ -381,11 +517,17 @@ something other than the content object it was given.
    in Phase 0C: the `Processor` port returns a `ContentObject` or raises.
 8. `CaptureEnvelope` describes input, not analysis results.
 9. The canonical contracts do not depend on PostgreSQL, HTTP, filesystem
-   storage, AI providers, or browser APIs.
+   storage, AI providers, or browser APIs. Reaffirmed in Phase 0E: capture
+   records are persisted behind the `CaptureRecordStore` port, and no contract
+   gains a table, column, session, or database path.
 10. Phase 0A contains domain semantics, not infrastructure.
+11. `RawObject` identity is not capture identity. Implemented in Phase 0B for
+    raw storage and in Phase 0E for capture persistence: a capture record is
+    keyed by its own opaque `id`, never by a raw SHA-256, and records sharing a
+    digest coexist.
 
-Invariants 1, 4, 7 and 10 are design commitments; 2, 3, 5, 6, 8 and 9 are
-enforced by the models and renderers and covered by tests.
+Invariants 1, 4, 7 and 10 are design commitments; 2, 3, 5, 6, 8, 9 and 11 are
+enforced by the models, renderers and stores and covered by tests.
 
 ## Contract rules
 
@@ -479,12 +621,18 @@ src/core/rendering/
   base.py         the Renderer port
   json.py         JsonRenderer, the full-fidelity projection
   markdown.py     MarkdownRenderer, the lossy readable projection
+src/core/persistence/
+  base.py         the CaptureRecordStore port
+  sqlite.py       SqliteCaptureRecordStore, the file-backed SQLite adapter
+  errors.py       typed persistence errors
 tests/unit/contracts/
 tests/unit/storage/
 tests/unit/processing/
 tests/unit/rendering/
+tests/unit/persistence/
 tests/integration/storage/
 tests/integration/processing/
 tests/integration/rendering/
+tests/integration/persistence/
 docs/
 ```
