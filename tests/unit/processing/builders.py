@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from core.contracts import (
+    CaptureContext,
     CapturePayloadType,
     CaptureRecord,
     CaptureSource,
@@ -18,6 +19,9 @@ from core.contracts import (
 from tests.unit.processing.doubles import InMemoryRawObjectStore
 
 RECEIVED_AT = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
+
+#: When the user captured, as distinct from when intake received it.
+CAPTURED_AT = datetime(2026, 3, 4, 5, 0, 0, tzinfo=UTC)
 
 
 def make_capture(**overrides: Any) -> CaptureRecord:
@@ -32,6 +36,7 @@ def make_capture(**overrides: Any) -> CaptureRecord:
             url="https://example.com/notes",
         ),
         "payload_type": CapturePayloadType.TEXT,
+        "context": CaptureContext(captured_at=CAPTURED_AT, device="laptop"),
     }
     return CaptureRecord(**(fields | overrides))
 

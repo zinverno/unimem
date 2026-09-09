@@ -6,11 +6,18 @@ generated tags. Those belong to :mod:`core.contracts.content`, and unknown
 fields are rejected so they cannot sneak in.
 """
 
-from typing import Self
+from typing import Any, Final, Self
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import (
+    AwareDatetime,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from core.contracts.base import (
+    LEGACY_SCHEMA_VERSION,
     SCHEMA_VERSION,
     DomainModel,
     Identifier,
@@ -114,10 +121,30 @@ class RawObjectRef(DomainModel):
     ref: NonBlankStr | None = None
 
 
+#: The fields schema version 0.2 added to :class:`CaptureRecord`. A 0.1
+#: document neither carries them nor may claim them, and one read by this build
+#: is written back out without them.
+CAPTURE_METADATA_FIELDS: Final = ("context", "intent", "title")
+
+
 class CaptureRecord(DomainModel):
     """The internal lifecycle record created after accepting an envelope.
 
-    Phase 0A defines the contract only; nothing persists it.
+    It holds what the system knows *about* a capture. The captured material
+    itself is never here: content lives in the raw object store, and
+    ``raw_object`` is how this record reaches it.
+
+    Since schema version 0.2 the record also carries the capture-time facts a
+    submitter supplied — ``context``, ``intent``, and ``title`` — because they
+    are properties of the capture event and there is nowhere else to keep them.
+    ``context`` is required at 0.2: a capture that cannot say when it was taken
+    is not worth much later, and the one field the client always has is
+    ``captured_at``. ``intent`` and ``title`` are genuinely optional, and
+    ``title`` means the title the submitter provided, never a generated one.
+
+    ``received_at`` and ``context.captured_at`` are different facts —
+    when the system accepted the capture, and when the user took it — and
+    neither is ever substituted for the other.
     """
 
     schema_version: SchemaVersion = SCHEMA_VERSION
@@ -129,9 +156,50 @@ class CaptureRecord(DomainModel):
     payload_type: CapturePayloadType
     raw_object: RawObjectRef | None = None
     error: str | None = None
+    context: CaptureContext | None = None
+    intent: CaptureIntent | None = None
+    title: NonBlankStr | None = None
 
     @model_validator(mode="after")
     def _check_timestamps(self) -> Self:
         if self.updated_at is not None and self.updated_at < self.received_at:
             raise ValueError("updated_at must not be earlier than received_at")
         return self
+
+    @model_validator(mode="after")
+    def _check_metadata_matches_schema_version(self) -> Self:
+        """Tie the 0.2 metadata fields to the version that introduced them.
+
+        A 0.1 document predates them, so carrying one is not a lenient old
+        record — it is a document whose version is wrong about its own shape,
+        and reading it as 0.1 would then lose data on the way back out. A 0.2
+        record, conversely, must carry ``context``.
+        """
+        if self.schema_version == LEGACY_SCHEMA_VERSION:
+            claimed = [name for name in CAPTURE_METADATA_FIELDS if getattr(self, name) is not None]
+            if claimed:
+                raise ValueError(
+                    f"schema version {LEGACY_SCHEMA_VERSION} has no "
+                    f"{', '.join(claimed)}; it was added in {SCHEMA_VERSION}"
+                )
+        elif self.context is None:
+            raise ValueError(f"context is required from schema version {SCHEMA_VERSION}")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize_for_its_own_schema_version(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        """Emit a 0.1 record as a 0.1 document, with no 0.2 keys at all.
+
+        Every contract sets ``extra="forbid"``, so a reader built against 0.1
+        rejects an unknown key rather than ignoring it — ``"context": null``
+        would be as fatal to it as a populated one. A 0.1 record therefore goes
+        back out shaped exactly as it came in, and stays readable by the build
+        that wrote it.
+        """
+        data: dict[str, Any] = handler(self)
+        if self.schema_version == LEGACY_SCHEMA_VERSION:
+            for name in CAPTURE_METADATA_FIELDS:
+                data.pop(name, None)
+        return data

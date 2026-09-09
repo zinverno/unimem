@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from core.contracts import (
+    CaptureContext,
     CaptureEnvelope,
     CapturePayload,
     CapturePayloadType,
@@ -22,7 +23,7 @@ from tests.unit.contracts.builders import CAPTURED_AT
 
 
 def test_valid_envelope_carries_what_was_captured(envelope: CaptureEnvelope) -> None:
-    assert envelope.schema_version == "0.1"
+    assert envelope.schema_version == "0.2"
     assert envelope.source.type is CaptureSourceType.BROWSER
     assert envelope.payload.type is CapturePayloadType.WEBPAGE
     assert envelope.context.captured_at == CAPTURED_AT
@@ -136,6 +137,7 @@ def test_capture_record_round_trips_through_json() -> None:
         updated_at=CAPTURED_AT + timedelta(seconds=2),
         source=CaptureSource(type=CaptureSourceType.UPLOAD),
         payload_type=CapturePayloadType.DOCUMENT,
+        context=CaptureContext(captured_at=CAPTURED_AT),
         raw_object=RawObjectRef(
             id="raw_01",
             mime_type="application/pdf",
@@ -169,6 +171,7 @@ def test_capture_record_failure_does_not_require_an_error_message() -> None:
         received_at=datetime.now(tz=UTC),
         source=CaptureSource(type=CaptureSourceType.API),
         payload_type=CapturePayloadType.TEXT,
+        context=CaptureContext(captured_at=CAPTURED_AT),
     )
     assert record.error is None
 

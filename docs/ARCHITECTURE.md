@@ -33,9 +33,15 @@ database?" A `CaptureRecordStore` port and one file-backed SQLite adapter in
 **Phase 0F — text capture intake.** Answers "how does a valid inline-text
 `CaptureEnvelope` become an immutable raw object plus a durably registered
 `CaptureRecord`?" The first orchestration: `CaptureIntake` in
-`src/core/intake/`. Still not implemented: orchestration of *processing*,
-persistence of `ContentObject`s or rendered output, durable capture metadata,
-transport, and every non-text modality.
+`src/core/intake/`.
+
+**Phase 0G — durable capture metadata, and schema version 0.2.** Answers "how
+does capture-time metadata survive intake durably, without being smuggled into
+raw bytes or unrelated fields?" `CaptureRecord` gains `context`, `intent`, and
+`title`, and the canonical contract set advances to `0.2` while staying able to
+read and rewrite `0.1` documents. Still not implemented: orchestration of
+*processing*, persistence of `ContentObject`s or rendered output, transport,
+recovery from a partial intake, and every non-text modality.
 
 ## Future data flow
 
@@ -605,22 +611,105 @@ another capture shares. Phase 0F records recoverable incompleteness instead of
 claiming consistency it cannot provide, and a real deployment will need a
 resume or reconciliation pass that this phase does not provide.
 
-**Envelope-only metadata is dropped, visibly.** `CaptureRecord` has no durable
-field for `context` (captured_at, device, application), `intent` (action,
-collection, tags), or `payload.title`. Phase 0F retains only what the current
-contract can represent — id, source, payload type, status, timestamps, raw
-reference — plus the raw content bytes. None of the rest is smuggled into
-`error`, `source`, the stored bytes, or an improvised field, and the contract is
-not changed here to make room for it. **Durable capture metadata is a required
-boundary before any real connector:** a browser extension's whole value is
-context, and a lossy intake would discard it at scale.
+**Capture metadata is durable, from the receipt onward.** Intake copies the
+envelope's `context`, `intent`, and `payload.title` into the **`RECEIVED`**
+snapshot — before raw storage, not after — so a capture stranded by a failure
+still knows when, where, and why it was taken. Each snapshot gets its own deep
+copies: a `CaptureIntent` holds a mutable `tags` list, and in-place mutation of
+a list never reaches a validator, so an alias shared with the envelope or with
+the other snapshot would be a way to change a stored capture by appending to a
+list somebody else holds. None of it is smuggled into `error`, `source`, or the
+stored bytes — the fields are real, validated, and versioned (Phase 0G, below).
 
 **Out of scope here:** every non-text payload type (no `file_ref` resolution,
 URL fetching, HTML parsing, file reading, images, documents, or video), any
 connector, processing (no `ProcessorRouter`, no `TextProcessor`, no
 `ContentObject`), rendering and export, `ContentObject` persistence, HTTP, CLI,
-browser surfaces, queues and workers, idempotency and replay, recovery and
-reconciliation, and durable capture metadata.
+browser surfaces, queues and workers, idempotency and replay, and recovery and
+reconciliation.
+
+## Durable capture metadata and schema 0.2 (Phase 0G)
+
+A capture is an event in a context, and until Phase 0G the system threw the
+context away. `CaptureEnvelope` had carried it since Phase 0A — a
+`CaptureContext`, an optional `CaptureIntent`, a `payload.title` — and
+`CaptureRecord` had nowhere to put any of it. Phase 0G answers one question:
+how does that metadata survive intake durably, without being smuggled into raw
+bytes or unrelated fields?
+
+**`CaptureRecord` gains three fields, reusing models the system already had.**
+
+```python
+context: CaptureContext | None = None  # required from 0.2
+intent: CaptureIntent | None = None  # genuinely optional
+title: NonBlankStr | None = None  # the submitter's title, never a generated one
+```
+
+No envelope blob, no generic metadata dict, no sidecar, no second table.
+`CaptureContext` and `CaptureIntent` were designed for exactly these facts, and
+a second representation of them would be one more thing to keep in step. See
+[ADR-008](ADR/ADR-008-durable-capture-metadata-and-schema-0.2.md).
+
+**`context` is required at 0.2; `intent` and `title` are optional.** A capture
+that cannot say when it was taken is worth much less later, and `captured_at`
+is the one thing every client has. Nothing is fabricated: an absent title stays
+absent, and no title is inferred from the id, the text, or the URL.
+
+**`received_at` and `context.captured_at` stay different facts** — when the
+system accepted the capture, and when the user took it — and neither is ever
+substituted for the other.
+
+**Content stays out.** `payload.text`, HTML, and file bytes are never copied
+into the record. Content lives in the raw object store, reached through
+`raw_object`. What became durable is metadata *about* the capture.
+
+**The canonical contract set advances to `0.2`.**
+
+```python
+SCHEMA_VERSION = "0.2"
+SchemaVersion = Literal["0.1", "0.2"]
+SUPPORTED_SCHEMA_VERSIONS == {"0.1", "0.2"}
+```
+
+`0.3` and every other unrecognized value stay rejected — the literal was
+widened to admit a version this build can actually read, and no tolerance was
+added. One version continues to name the whole set: `CaptureEnvelope` and
+`ContentObject` changed no field and their version advances anyway, because
+these contracts are designed, reviewed, and released together.
+
+**`0.1` documents remain readable, and remain writable as `0.1`.** Two rules on
+`CaptureRecord` do it:
+
+- a `0.1` record may omit the three new fields and **may not carry them** — a
+  `0.1` document with a `title` is wrong about its own shape, and reading it as
+  `0.1` would lose that data on the way back out; a `0.2` record must carry
+  `context`;
+- a `0.1` record serializes **without the three keys at all**, not as nulls.
+  Every contract sets `extra="forbid"`, so a reader built against `0.1` rejects
+  an unknown key rather than ignoring it, and `"context": null` would be as
+  fatal to it as a populated one.
+
+The second rule is the easy one to skip: reading an old document is worth
+little if writing it back breaks the build that wrote it. It is a version-aware
+wrap serializer on the one model that changed, not a migration framework.
+
+**No database migration was needed.** The SQLite table stores whole
+`CaptureRecord` JSON in `(id, payload)`, so a contract that grows fields grows
+its payload; no column was added and no DDL ran. `CaptureRecordStore` is
+untouched, and an unsupported version in a stored payload is still
+`CaptureRecordCorruptError` at the boundary. This is Phase 0E's schema decision
+paying for itself the first time it was tested.
+
+**Nothing propagates into `ContentObject` yet.** `title` now exists on a capture
+record and `TextProcessor` still does not read it. Whether a processor should
+seed `ContentObject.title` from the capture — and what happens when a submitted
+title and an extracted one disagree — is a processing decision with its own
+trade-offs, not a side effect of the field becoming reachable.
+
+**Out of scope here:** any connector, processing and rendering changes,
+`ContentObject` persistence, a migration framework, SQL columns or indexes for
+metadata, backfilling or fabricating context for legacy records, and per-contract
+version numbers.
 
 ## Architectural invariants
 
@@ -656,9 +745,19 @@ reconciliation, and durable capture metadata.
     in Phase 0F: `RECEIVED` is durable before raw storage, `STORED` replaces it
     afterwards, and a failure in between leaves the truthful `RECEIVED` record
     rather than an invented `FAILED` one.
+13. Capture-time metadata is durable and typed, and content is not metadata.
+    Implemented in Phase 0G: `context`, `intent`, and `title` are validated
+    fields on `CaptureRecord`, written into the first durable snapshot, and
+    never smuggled into `error`, `source`, or the raw bytes — which continue to
+    hold the captured content exactly and nothing else.
+14. A document written by an older supported version stays readable *and*
+    rewritable by this build. Implemented in Phase 0G: a `0.1` `CaptureRecord`
+    loads, may not claim `0.2` fields, and serializes back out with no `0.2`
+    keys — not even null ones, which `extra="forbid"` would reject.
 
-Invariants 1, 4, 7 and 10 are design commitments; 2, 3, 5, 6, 8, 9, 11 and 12
-are enforced by the models, renderers, stores and intake and covered by tests.
+Invariants 1, 4, 7 and 10 are design commitments; 2, 3, 5, 6, 8, 9, 11, 12, 13
+and 14 are enforced by the models, renderers, stores and intake and covered by
+tests.
 
 ## Contract rules
 
@@ -675,6 +774,8 @@ are enforced by the models, renderers, stores and intake and covered by tests.
 - `metadata` fields are `dict[str, JsonValue]`, so contracts cannot hold
   values that do not survive JSON.
 - Enum values are lowercase, stable, and part of the wire format.
+- `schema_version` is `0.2` today, and `0.1` remains readable. One version
+  names the whole canonical contract set, not one model.
 - Serialization uses plain Pydantic: `model_dump(mode="json")` and
   `model_validate`. There is no custom serialization framework.
 
@@ -772,3 +873,6 @@ tests/integration/persistence/
 tests/integration/intake/
 docs/
 ```
+
+Schema versions live in `src/core/contracts/base.py`: `SCHEMA_VERSION` is the
+current one, and `SUPPORTED_SCHEMA_VERSIONS` every version this build can read.

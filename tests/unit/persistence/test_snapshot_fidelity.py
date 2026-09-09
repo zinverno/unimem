@@ -28,7 +28,7 @@ def test_every_field_survives_the_round_trip(store: SqliteCaptureRecordStore) ->
 
     restored = store.get(record.id)
 
-    assert restored.schema_version == "0.1"
+    assert restored.schema_version == "0.2"
     assert restored.id == record.id
     assert restored.status is CaptureStatus.STORED
     assert restored.received_at == RECEIVED_AT

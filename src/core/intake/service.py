@@ -6,7 +6,7 @@ store persists snapshots — but nothing called them in order. Intake is the fir
 code that owns a sequence, and the sequence is the whole of it::
 
     CaptureEnvelope(TEXT)
-        -> CaptureRecord(RECEIVED)   created first, so the capture is on record
+        -> CaptureRecord(RECEIVED)   created first, with the capture metadata
         -> RawObjectStore            the immutable original
         -> CaptureRecord(STORED)     replaced with the reference to those bytes
 
@@ -78,9 +78,15 @@ class CaptureIntake:
         The order is the contract:
 
         1. refuse anything it cannot materialize, before any side effect;
-        2. create a ``RECEIVED`` record — the receipt, written first;
+        2. create a ``RECEIVED`` record — the receipt, written first, and
+           already carrying the envelope's capture-time metadata;
         3. store the exact UTF-8 bytes of the text;
         4. replace the receipt with a ``STORED`` record carrying the reference.
+
+        The metadata is durable from step 2, not step 4: a capture stranded by
+        a failure in between still knows when, where, and why it was taken.
+        Only the content itself is deferred to the raw store, and nothing about
+        the envelope is ever written into those bytes.
 
         Nothing is rolled back if a later step fails, and nothing is retried.
         The raw object store has no delete and shares no transaction with the
@@ -98,6 +104,13 @@ class CaptureIntake:
             payload_type=envelope.payload.type,
             raw_object=None,
             error=None,
+            # Capture-time facts, durable from the very first snapshot. Each
+            # snapshot gets its own deep copies, so neither the envelope the
+            # caller still holds nor the other snapshot shares a mutable
+            # ``CaptureIntent.tags`` list with this one.
+            context=envelope.context.model_copy(deep=True),
+            intent=None if envelope.intent is None else envelope.intent.model_copy(deep=True),
+            title=envelope.payload.title,
         )
         self._record_store.create(received)
 
@@ -108,10 +121,13 @@ class CaptureIntake:
             status=CaptureStatus.STORED,
             received_at=received.received_at,
             updated_at=self._now(),
-            source=received.source.model_copy(deep=True),
+            source=envelope.source.model_copy(deep=True),
             payload_type=received.payload_type,
             raw_object=raw_object,
             error=None,
+            context=envelope.context.model_copy(deep=True),
+            intent=None if envelope.intent is None else envelope.intent.model_copy(deep=True),
+            title=envelope.payload.title,
         )
         self._record_store.replace(stored)
         return stored

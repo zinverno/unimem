@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from core.contracts import (
+    CaptureContext,
     CapturePayloadType,
     CaptureRecord,
     CaptureSource,
@@ -25,7 +26,7 @@ from core.contracts import (
 )
 from core.processing import ProcessorRouter, TextProcessor
 from core.storage import LocalRawObjectStore, RawObjectNotFoundError, build_raw_ref
-from tests.unit.processing.builders import RECEIVED_AT
+from tests.unit.processing.builders import CAPTURED_AT, RECEIVED_AT
 
 GREETING = "Привет, мир"
 NOTES = f"# Notes\r\n\r\n{GREETING}\n\n\tindented line   \n"
@@ -44,6 +45,7 @@ def capture_for(raw_object: RawObjectRef, *, capture_id: str = "cap_int_01") -> 
         ),
         payload_type=CapturePayloadType.TEXT,
         raw_object=raw_object,
+        context=CaptureContext(captured_at=CAPTURED_AT),
     )
 
 

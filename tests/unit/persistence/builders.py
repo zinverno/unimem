@@ -10,14 +10,18 @@ from datetime import UTC, datetime
 from typing import Any
 
 from core.contracts import (
+    CaptureContext,
+    CaptureIntent,
     CapturePayloadType,
     CaptureRecord,
     CaptureSource,
     CaptureSourceType,
     CaptureStatus,
+    IntentAction,
     RawObjectRef,
 )
 
+CAPTURED_AT = datetime(2026, 7, 8, 9, 0, 0, tzinfo=UTC)
 RECEIVED_AT = datetime(2026, 7, 8, 9, 10, 11, 120000, tzinfo=UTC)
 UPDATED_AT = datetime(2026, 7, 8, 9, 12, 13, tzinfo=UTC)
 
@@ -54,6 +58,13 @@ def make_record(**overrides: Any) -> CaptureRecord:
         "payload_type": CapturePayloadType.WEBPAGE,
         "raw_object": make_raw_object(),
         "error": UNICODE_ERROR,
+        "context": CaptureContext(
+            captured_at=CAPTURED_AT, device="laptop", application="browser-extension"
+        ),
+        "intent": CaptureIntent(
+            action=IntentAction.ANALYZE, collection="reading", tags=["arch", "\u4f60\u597d"]
+        ),
+        "title": "A note \u2014 \U0001f30d",
     }
     return CaptureRecord(**(fields | overrides))
 
@@ -66,5 +77,6 @@ def make_minimal_record(**overrides: Any) -> CaptureRecord:
         "received_at": RECEIVED_AT,
         "source": CaptureSource(type=CaptureSourceType.API),
         "payload_type": CapturePayloadType.TEXT,
+        "context": CaptureContext(captured_at=CAPTURED_AT),
     }
     return CaptureRecord(**(fields | overrides))

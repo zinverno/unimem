@@ -15,17 +15,26 @@ from pydantic import (
     StringConstraints,
 )
 
-#: The schema version every canonical contract is emitted with today.
-SCHEMA_VERSION: Final = "0.1"
+#: The schema version every canonical contract is emitted with today. It names
+#: the whole canonical contract *set*, not one model: the contracts are
+#: designed, reviewed, and released together, so they carry one version even
+#: when a given release changes only one of them.
+SCHEMA_VERSION: Final = "0.2"
 
 #: Type of the ``schema_version`` field on versioned contracts. Kept as an
 #: explicit ``Literal`` so unknown versions — including newer ones — fail
-#: validation instead of being interpreted with today's assumptions.
-SchemaVersion = Literal["0.1"]
+#: validation instead of being interpreted with today's assumptions. Older
+#: versions stay listed for exactly as long as this build can still read
+#: documents written with them.
+SchemaVersion = Literal["0.1", "0.2"]
 
 #: Schema versions this build of the contracts accepts on input, derived from
 #: the field type so the two cannot drift apart.
 SUPPORTED_SCHEMA_VERSIONS: Final[frozenset[str]] = frozenset(get_args(SchemaVersion))
+
+#: The version before the current one, named so that version-dependent rules
+#: read as rules rather than as string comparisons.
+LEGACY_SCHEMA_VERSION: Final = "0.1"
 
 
 def _reject_blank(value: str) -> str:
