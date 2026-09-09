@@ -84,6 +84,23 @@ never take part in identity — the same bytes offered as `image/png` and as
 **Deduplication is exact.** Same digest, same object. Perceptual, semantic, and
 near-duplicate matching are different problems, solved elsewhere if at all.
 
+**RawObject identity is not capture identity.** These are different layers.
+Storing identical bytes yields one RawObject identity and one physical stored
+object; it does *not* yield one `CaptureRecord`.
+
+```
+capture event  -> references    -> RawObject
+many captures  -> may reference -> one RawObject
+```
+
+A capture is an event in a context, and two captures of identical bytes may
+legitimately differ in source, URL, capture timestamp, device, application,
+intent, provenance, and future capture-specific metadata. A RawObject SHA-256
+must therefore never be used as `CaptureRecord` identity or as implicit
+capture-submission idempotency; if such idempotency is introduced later it needs
+an explicit request identity defined at the capture layer. See
+[ADR-003](ADR/ADR-003-content-addressed-raw-storage.md).
+
 **References stay storage-neutral.** The store returns the Phase 0A
 `RawObjectRef` with `ref = "sha256:<digest>"`, and `id` and `sha256` set to the
 digest. No local path, drive letter, `file://` URL, or bucket name ever appears

@@ -43,14 +43,52 @@ Deduplication is exact binary deduplication only. Perceptual hashing,
 near-duplicate text, normalized HTML, and URL identity are different problems
 and are not solved here.
 
+### Identity layers
+
+RawObject identity and Capture identity are **different layers**, and exact-byte
+deduplication belongs only to the first.
+
+```
+capture event  -> references    -> RawObject
+many captures  -> may reference -> one RawObject
+```
+
+Exact deduplication means:
+
+```
+same bytes -> one RawObject identity -> one physical stored raw object
+```
+
+It does **not** mean:
+
+```
+same bytes -> one CaptureRecord
+```
+
+A capture is an *event in a context*; a RawObject is *bytes*. One RawObject may
+legitimately be referenced by many distinct `CaptureRecord`s that differ in
+source, URL, capture timestamp, device, application, intent, provenance, and
+whatever capture-specific metadata later phases add. Saving the same PDF twice
+from two different pages, on two days, from two machines, is two captures of
+one RawObject — collapsing them would destroy exactly the context the capture
+layer exists to record.
+
+Therefore a RawObject SHA-256 **must not** be used as `CaptureRecord` identity,
+nor as implicit capture-submission idempotency. If capture-submission
+idempotency is introduced later, it must use an explicit request/idempotency
+identity whose semantics are defined at the capture layer. That mechanism is
+deliberately not designed here.
+
 ## Consequences
 
 Positive:
 
 - **Deterministic identity.** Two components that see the same bytes compute
   the same address without coordinating.
-- **Exact deduplication.** Re-capturing the same file costs nothing; the
-  duplicate write converges on the object already stored.
+- **Exact deduplication of bytes.** Re-storing identical raw bytes does not
+  create another physical RawObject; the duplicate write converges on the
+  object already stored. This is a storage-layer saving, not a statement about
+  captures — see *Identity layers* above.
 - **The address is an integrity check.** A stored object can always be verified
   against the name it is filed under.
 - **A foundation for reprocessing.** A future extractor can be re-run over an
@@ -75,8 +113,11 @@ Costs:
 
 ## Alternatives considered
 
-- **UUID or ULID object ids.** Rejected: two captures of identical bytes would
-  produce two stored copies, and nothing would tie a reference to its content.
+- **UUID or ULID object ids.** Rejected: storing identical bytes twice would
+  produce two physical copies, and nothing would tie a reference to its
+  content. (Identifier policy for `CaptureRecord`, `ContentObject`, `Segment`,
+  and `Asset` is untouched by this ADR: content-derived ids apply to raw binary
+  objects only.)
 - **Filename or URL as identity.** Rejected: neither is stable, and both are
   attacker- or user-controlled input on a path.
 - **Storing metadata alongside the bytes to form identity.** Rejected: it makes
