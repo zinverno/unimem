@@ -46,10 +46,17 @@ Implemented so far:
   — or `failed`, but only for a `ProcessingError`; an infrastructure failure
   leaves the capture `processing` rather than inventing a terminal state.
   `TextProcessor` 0.2 carries the capture's submitted title onto the content
-  object. The `ContentObject` is returned to the caller and is not yet
-  persisted anywhere.
+  object.
+- **Phase 0I — canonical content persistence.** A `ContentObjectStore` port
+  (`create`, `get`, `get_for_capture`) and `SqliteContentObjectStore`, storing
+  the `ContentObject` contract's own JSON — never a renderer's output. The
+  orchestrator stores the canonical object *before* it writes `complete`, so
+  `complete` now means the content is durable. One canonical object per
+  capture, enforced by a `UNIQUE` key; no `replace`, upsert, or delete.
 
-There is no HTTP, queueing, or AI code, and no ORM.
+**This closes the Phase-0 foundation.** A text capture can be accepted, stored,
+normalized, and completed, and everything up to canonical content survives a
+restart. There is no HTTP, queueing, or AI code, and no ORM.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 

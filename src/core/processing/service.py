@@ -12,7 +12,8 @@ records what happened. This is that thing, and only that thing::
         -> CaptureRecord(PROCESSING)       durable before any processor I/O
         -> Processor.process
         -> ContentObject
-        -> CaptureRecord(COMPLETE)         durable before the caller sees it
+        -> ContentObjectStore.create       the canonical object, durable first
+        -> CaptureRecord(COMPLETE)         durable only once the content is
         -> return the ContentObject
 
 The processor stays exactly as pure about lifecycle as ADR-004 made it: it is
@@ -25,18 +26,26 @@ Two rules shape the failure behaviour, and they are not the same rule:
   UTF-8, this record has no raw object, this output belongs to someone else.
   Trying again changes nothing, so the capture is durably marked ``failed`` and
   the original error is re-raised untouched.
-* **Anything else** — a raw-store failure, a bug, an interrupted process — says
-  something about the run, not about the capture. The record stays
-  ``processing``, which is true, and nothing terminal is invented. This is
-  Phase 0F's rule against fabricating terminal state from infrastructure
-  failure, one layer up.
+* **Anything else** — a raw-store failure, a content-store failure, a bug, an
+  interrupted process — says something about the run, not about the capture.
+  The record stays ``processing``, which is true, and nothing terminal is
+  invented. This is Phase 0F's rule against fabricating terminal state from
+  infrastructure failure, one layer up.
+
+Since Phase 0I the canonical content object is stored *before* the capture is
+marked ``complete``, so ``complete`` now means the normalized object is durable
+and not merely that it once existed in memory. The two stores share no
+transaction, so the reverse ordering has its own cost: content can be durable
+while the capture still says ``processing``. That state is recoverable —
+``ContentObjectStore.get_for_capture`` finds it — and reconciling it is a later
+decision, not a rollback this layer may improvise.
 """
 
 from collections.abc import Callable
 from datetime import UTC, datetime
 
 from core.contracts import CaptureRecord, CaptureStatus, ContentObject
-from core.persistence import CaptureRecordStore
+from core.persistence import CaptureRecordStore, ContentObjectStore
 from core.processing.errors import (
     InvalidCaptureProcessingStateError,
     ProcessingError,
@@ -61,22 +70,29 @@ def utc_now() -> datetime:
 class ProcessingOrchestrator:
     """Takes a capture from ``stored`` to ``complete`` — or to a truthful failure.
 
-    The router and the record store arrive as their existing types, and the
+    The router and the two stores arrive as their existing types, and the
     clock as a plain callable, for the same reason as in intake: a test needs
     to control time, and a function already does that. There is no worker,
     queue, task system, scheduler, retry engine, registry, DI container, or
     async surface. One capture, one call, synchronously.
+
+    The two stores stay two ports. Even where both happen to be backed by the
+    same SQLite file, nothing here opens a transaction across them: that would
+    couple lifecycle orchestration to one adapter's backend and quietly make
+    the ports un-swappable.
     """
 
     def __init__(
         self,
         router: ProcessorRouter,
         record_store: CaptureRecordStore,
+        content_store: ContentObjectStore,
         *,
         now: Callable[[], datetime] = utc_now,
     ) -> None:
         self._router = router
         self._record_store = record_store
+        self._content_store = content_store
         self._now = now
 
     def process(self, capture_id: str) -> ContentObject:
@@ -87,12 +103,19 @@ class ProcessingOrchestrator:
         holding is a decision about the past. What the store returns now is the
         authority.
 
+        The canonical content object is stored before the capture is marked
+        ``complete``, and the completion clock is not read until that write has
+        succeeded. A capture that says ``complete`` therefore has content that
+        exists; a capture whose content could not be stored stays ``processing``
+        rather than being given a status it has not earned.
+
         Raises :class:`~core.processing.errors.InvalidCaptureProcessingStateError`
         if the capture is not ``stored``, a routing error if the set of
         processors does not resolve to exactly one, and the processor's own
-        errors as described in the module docstring. Store errors keep their
-        own types *and their own causes* throughout: nothing here re-chains
-        one, so a persistence error still names the backend failure beneath it.
+        errors as described in the module docstring. Store errors — from either
+        store — keep their own types *and their own causes* throughout: nothing
+        here re-chains one, so a persistence error still names the backend
+        failure beneath it.
         """
         stored = self._record_store.get(capture_id)
         if stored.status is not STARTING_STATUS:
@@ -142,6 +165,15 @@ class ProcessingOrchestrator:
             failed = self._advance(processing, CaptureStatus.FAILED, error=str(processing_error))
             self._record_store.replace(failed)
             raise
+
+        # Canonical content first, lifecycle second. `complete` is a claim
+        # that this capture normalized into something that still exists, so it
+        # must not be written until that something is durable. A failure here
+        # leaves the capture `processing` and propagates unchanged: not being
+        # able to *store* the result says nothing about whether the capture
+        # could be normalized, so it is no more a `failed` verdict than a
+        # database timeout is.
+        self._content_store.create(content)
 
         complete = self._advance(processing, CaptureStatus.COMPLETE)
         self._record_store.replace(complete)

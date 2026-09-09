@@ -35,6 +35,7 @@ from tests.unit.processing.builders import make_capture, make_content
 from tests.unit.processing.doubles import (
     FakeClock,
     RecordingCaptureRecordStore,
+    RecordingContentObjectStore,
     SpyProcessor,
 )
 
@@ -79,8 +80,16 @@ def orchestrate(
     processors: list[SpyProcessor],
     record_store: RecordingCaptureRecordStore,
     clock: FakeClock,
+    content_store: RecordingContentObjectStore | None = None,
 ) -> ProcessingOrchestrator:
-    return ProcessingOrchestrator(ProcessorRouter(processors), record_store, now=clock)
+    return ProcessingOrchestrator(
+        ProcessorRouter(processors),
+        record_store,
+        content_store
+        if content_store is not None
+        else RecordingContentObjectStore(record_store.journal),
+        now=clock,
+    )
 
 
 def test_no_matching_processor_leaves_the_capture_stored(
@@ -354,6 +363,7 @@ def test_a_failure_to_persist_complete_leaves_the_capture_processing(
         "records.get",
         "records.replace(processing)",
         "processor.process",
+        "content.create",
         "records.replace(complete)",
     ]
 

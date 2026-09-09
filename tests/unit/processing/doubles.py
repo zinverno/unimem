@@ -23,6 +23,8 @@ from core.contracts import CaptureRecord, ContentObject, RawObjectRef
 from core.persistence import (
     CaptureRecordAlreadyExistsError,
     CaptureRecordNotFoundError,
+    ContentObjectAlreadyExistsError,
+    ContentObjectNotFoundError,
 )
 from core.storage import RawObjectNotFoundError, build_raw_ref
 from core.storage.raw import ReadableBinaryStream
@@ -222,3 +224,61 @@ class SpyProcessor:
         if self._content is None:
             raise AssertionError(f"processor {self.name!r} was not given content to return")
         return self._content
+
+
+class RecordingContentObjectStore:
+    """A ``ContentObjectStore``-compatible store that journals and can fail.
+
+    Snapshots go in as their own contract JSON, so a caller mutating the object
+    it handed over cannot reach the store — the same guarantee the real adapter
+    makes. Both uniqueness rules are reproduced, because orchestration depends
+    on the second one: one capture, one canonical object.
+    """
+
+    def __init__(
+        self, journal: list[str] | None = None, *, fail_create_with: Exception | None = None
+    ) -> None:
+        self.journal = journal if journal is not None else []
+        self.created: list[ContentObject] = []
+        self._by_id: dict[str, str] = {}
+        self._by_capture: dict[str, str] = {}
+        self._fail_create_with = fail_create_with
+
+    def create(self, content: ContentObject) -> None:
+        self.journal.append("content.create")
+        if self._fail_create_with is not None:
+            raise self._fail_create_with
+        capture_id = content.source.capture_id
+        if content.id in self._by_id:
+            raise ContentObjectAlreadyExistsError(
+                f"content object {content.id!r} is already stored"
+            )
+        if capture_id in self._by_capture:
+            raise ContentObjectAlreadyExistsError(
+                f"capture {capture_id!r} already has a stored content object"
+            )
+        self.created.append(content)
+        self._by_id[content.id] = content.model_dump_json()
+        self._by_capture[capture_id] = content.id
+
+    def get(self, content_id: str) -> ContentObject:
+        try:
+            payload = self._by_id[content_id]
+        except KeyError:
+            raise ContentObjectNotFoundError(
+                f"content object {content_id!r} is not stored"
+            ) from None
+        return ContentObject.model_validate_json(payload)
+
+    def get_for_capture(self, capture_id: str) -> ContentObject:
+        try:
+            content_id = self._by_capture[capture_id]
+        except KeyError:
+            raise ContentObjectNotFoundError(
+                f"capture {capture_id!r} has no stored content object"
+            ) from None
+        return self.get(content_id)
+
+    def stored_ids(self) -> list[str]:
+        """Every stored content id, without journalling the read."""
+        return sorted(self._by_id)

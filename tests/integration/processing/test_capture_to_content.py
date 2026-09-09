@@ -28,13 +28,14 @@ from core.contracts import (
     IntentAction,
 )
 from core.intake import CaptureIntake
-from core.persistence import SqliteCaptureRecordStore
+from core.persistence import SqliteCaptureRecordStore, SqliteContentObjectStore
 from core.processing import (
     InvalidCaptureProcessingStateError,
     ProcessingOrchestrator,
     ProcessorRouter,
     TextProcessor,
 )
+from core.rendering import JsonRenderer, MarkdownRenderer
 from core.storage import LocalRawObjectStore
 
 CAPTURED_AT = datetime(2026, 5, 6, 7, 0, 0, tzinfo=UTC)
@@ -81,6 +82,12 @@ def record_store(database: Path) -> SqliteCaptureRecordStore:
     return SqliteCaptureRecordStore(database)
 
 
+@pytest.fixture
+def content_store(database: Path) -> SqliteContentObjectStore:
+    """The canonical content store, sharing the capture database file."""
+    return SqliteContentObjectStore(database)
+
+
 def make_envelope(capture_id: str = "cap_e2e_01", *, title: str | None = TITLE) -> CaptureEnvelope:
     return CaptureEnvelope(
         id=capture_id,
@@ -108,11 +115,14 @@ def capture_id(raw_store: LocalRawObjectStore, record_store: SqliteCaptureRecord
 
 @pytest.fixture
 def orchestrator(
-    raw_store: LocalRawObjectStore, record_store: SqliteCaptureRecordStore
+    raw_store: LocalRawObjectStore,
+    record_store: SqliteCaptureRecordStore,
+    content_store: SqliteContentObjectStore,
 ) -> ProcessingOrchestrator:
     return ProcessingOrchestrator(
         ProcessorRouter([TextProcessor(raw_store)]),
         record_store,
+        content_store,
         now=SteppedClock(PROCESSING_AT, COMPLETED_AT),
     )
 
@@ -221,21 +231,116 @@ def test_the_same_capture_cannot_be_processed_twice(
         orchestrator.process(capture_id)
 
 
-def test_the_content_object_is_not_persisted_anywhere(
-    orchestrator: ProcessingOrchestrator,
-    capture_id: str,
-    raw_root: Path,
-    database: Path,
+def test_the_content_object_is_durable(
+    orchestrator: ProcessingOrchestrator, capture_id: str, database: Path
 ) -> None:
-    """The documented durability limit: ``complete`` is about the capture only.
+    """The limitation Phase 0H had to name is now closed.
 
-    Nothing on disk holds the normalized object. The raw bytes are still there,
-    so it could be produced again — but reprocessing does not exist yet, which
-    is exactly why this limitation is written down rather than hidden behind a
-    store that does not exist.
+    ``complete`` used to mean only that normalization had happened in memory.
+    It now means the canonical object is in the database, reachable both by its
+    own id and by the capture it came from.
     """
     content = orchestrator.process(capture_id)
 
+    reopened = SqliteContentObjectStore(database)
+    assert reopened.get(content.id) == content
+    assert reopened.get_for_capture(capture_id) == content
+
+
+def test_the_content_object_never_reaches_the_raw_store(
+    orchestrator: ProcessingOrchestrator, capture_id: str, raw_root: Path
+) -> None:
+    """Raw storage still holds the original bytes and nothing derived from them."""
+    content = orchestrator.process(capture_id)
+
     stored_bytes = b"".join(path.read_bytes() for path in raw_root.rglob("*") if path.is_file())
+    assert stored_bytes == NOTES.encode("utf-8")
     assert content.id.encode() not in stored_bytes
-    assert content.id not in database.read_bytes().decode("utf-8", errors="ignore")
+
+
+def test_the_content_is_reachable_both_ways(
+    orchestrator: ProcessingOrchestrator, capture_id: str, content_store: SqliteContentObjectStore
+) -> None:
+    """By its own id, and by the capture it normalized from."""
+    content = orchestrator.process(capture_id)
+
+    assert content_store.get(content.id) == content
+    assert content_store.get_for_capture(capture_id) == content
+    assert content_store.get(content.id).id != capture_id
+
+
+def test_everything_survives_a_restart(
+    orchestrator: ProcessingOrchestrator,
+    capture_id: str,
+    database: Path,
+    raw_root: Path,
+) -> None:
+    """Fresh adapter objects against the same files find the whole result.
+
+    This is what durability means in practice: nothing is held in the objects
+    that did the work.
+    """
+    content = orchestrator.process(capture_id)
+    del orchestrator
+
+    records = SqliteCaptureRecordStore(database)
+    contents = SqliteContentObjectStore(database)
+    originals = LocalRawObjectStore(raw_root)
+
+    record = records.get(capture_id)
+    restored = contents.get_for_capture(capture_id)
+
+    assert record.status is CaptureStatus.COMPLETE
+    assert restored == content
+    assert restored.segments[0].text == NOTES
+    assert restored.title == TITLE
+    assert record.raw_object is not None
+    assert originals.read_bytes(record.raw_object) == NOTES.encode("utf-8")
+
+
+def test_the_restored_content_keeps_its_provenance_and_digest(
+    orchestrator: ProcessingOrchestrator, capture_id: str, database: Path
+) -> None:
+    content = orchestrator.process(capture_id)
+
+    restored = SqliteContentObjectStore(database).get(content.id)
+    assert restored.source.capture_id == capture_id
+    assert restored.segments[0].provenance.capture_id == capture_id
+    assert restored.segments[0].provenance.processor_version == "0.2"
+    assert restored.original.sha256 == content.original.sha256
+    assert restored.assets[0].ref == content.assets[0].ref
+
+
+def test_the_restored_content_still_renders(
+    orchestrator: ProcessingOrchestrator, capture_id: str, database: Path
+) -> None:
+    """Rendering is unchanged, and reads the object persistence handed back.
+
+    The stored JSON is the canonical contract, not a rendering — a renderer
+    still derives its own output from the object, exactly as before.
+    """
+    content = orchestrator.process(capture_id)
+
+    restored = SqliteContentObjectStore(database).get(content.id)
+    assert JsonRenderer().render(restored) == JsonRenderer().render(content)
+    assert MarkdownRenderer().render(restored) == MarkdownRenderer().render(content)
+    assert NOTES in MarkdownRenderer().render(restored)
+
+
+def test_a_second_processing_attempt_is_still_refused_after_restart(
+    orchestrator: ProcessingOrchestrator,
+    capture_id: str,
+    raw_store: LocalRawObjectStore,
+    database: Path,
+) -> None:
+    orchestrator.process(capture_id)
+
+    fresh = ProcessingOrchestrator(
+        ProcessorRouter([TextProcessor(raw_store)]),
+        SqliteCaptureRecordStore(database),
+        SqliteContentObjectStore(database),
+        now=SteppedClock(PROCESSING_AT, COMPLETED_AT),
+    )
+
+    with pytest.raises(InvalidCaptureProcessingStateError, match="complete"):
+        fresh.process(capture_id)
