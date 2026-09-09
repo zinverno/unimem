@@ -57,8 +57,29 @@ class DomainModel(BaseModel):
     * ``extra="forbid"`` — unknown fields are an error, not silently kept or
       dropped. This is what keeps derived data (summaries, OCR text, ...) out
       of contracts that must not carry it.
-    * ``validate_assignment=True`` — mutating a model re-runs validation, so an
-      object cannot be edited into an invalid state after construction.
+    * ``validate_assignment=True`` — assigning to a field re-runs that model's
+      validators, including its cross-field ones.
+
+    The assignment guarantee is narrower than it looks, and callers should not
+    over-trust it. It covers *direct assignment to a field of this model*
+    (``content.segments = [...]``). It does **not** cover:
+
+    * in-place mutation of a mutable container held in a field —
+      ``content.segments.append(...)`` or ``content.metadata["k"] = ...``
+      never reaches a validator;
+    * assignment to a field of a *nested* model — ``segment.provenance
+      .capture_id = ...`` revalidates ``Provenance`` alone, and the enclosing
+      ``ContentObject``'s invariants are not rechecked;
+    * **rollback of a rejected assignment.** A value that fails a field's own
+      rules is never written, but a value that passes those and is then
+      rejected by a model-level validator has already been assigned when the
+      error is raised. Catching the ``ValidationError`` therefore leaves the
+      instance holding the offending value.
+
+    Instances are therefore validated snapshots, not continuously enforced
+    objects. Build a new instance (or re-validate an existing one with
+    ``Model.model_validate(instance.model_dump())``) rather than editing one
+    in place and assuming the invariants still hold.
     """
 
     model_config = ConfigDict(

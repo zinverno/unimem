@@ -90,7 +90,9 @@ the models and covered by tests.
 
 - `extra="forbid"` everywhere: unknown fields are errors. This is what keeps
   derived data (summaries, OCR text, embeddings) out of `CaptureEnvelope`.
-- `validate_assignment=True`: an object cannot be edited into an invalid state.
+- `validate_assignment=True`: assigning to a field re-runs that model's
+  validators. See *Mutation semantics* below for what this does and does not
+  guarantee.
 - Datetimes are timezone-aware (`AwareDatetime`); naive input is rejected.
 - Identifiers are non-blank strings. No UUID/ULID format is imposed yet —
   how identifiers are minted is an open decision.
@@ -99,6 +101,47 @@ the models and covered by tests.
 - Enum values are lowercase, stable, and part of the wire format.
 - Serialization uses plain Pydantic: `model_dump(mode="json")` and
   `model_validate`. There is no custom serialization framework.
+
+## Mutation semantics
+
+Canonical contract instances are **validated snapshots**: they are checked when
+constructed and when a field is assigned. They are not continuously enforced
+objects, and callers must not treat them as such.
+
+What is guaranteed:
+
+- construction through `Model(...)` or `Model.model_validate(...)` runs every
+  validator, including the cross-field ones;
+- direct assignment to a field of that model — `content.segments = [...]` —
+  re-runs the same validators, so a replacement list that breaks the
+  provenance, uniqueness, or asset-reference invariants is rejected.
+
+What is **not** guaranteed:
+
+- **In-place mutation of a mutable field.** `content.segments.append(segment)`
+  and `content.metadata["k"] = value` mutate the container directly and never
+  reach a validator. A segment from a foreign capture, a duplicate id, or a
+  non-JSON metadata value can all be introduced this way.
+- **Assignment on a nested model.** `segment.provenance.capture_id = "other"`
+  revalidates `Provenance` on its own; the enclosing `ContentObject` does not
+  recheck that the segment still traces back to its capture.
+- **Rollback of a rejected assignment.** A value that violates a field's own
+  rules (a blank `title`) is never written. A value that passes those and is
+  then rejected by a model-level validator (a segment list that breaks the
+  provenance invariant) has already been assigned by the time the error is
+  raised — so an instance whose `ValidationError` was caught and swallowed may
+  be holding the rejected value. Discard such an instance rather than
+  continuing to use it.
+
+The rule for callers: build a new instance rather than editing one in place. If
+an object has been mutated and the invariants matter, re-validate it explicitly
+with `Model.model_validate(instance.model_dump())`, which runs the full
+validator set again.
+
+This is a deliberate boundary, not a defect to design around. Closing it would
+mean frozen models, custom collection types, or a mutation API — machinery that
+Phase 0A does not need, since contracts are built once at ingestion time and
+then serialized.
 
 ## Tooling
 
