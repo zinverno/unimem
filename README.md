@@ -40,6 +40,14 @@ Implemented so far:
   `context` is required at 0.2; `intent` and `title` are optional and never
   fabricated. Content stays in the raw store, and no database migration was
   needed.
+- **Phase 0H — processing orchestration.** `ProcessingOrchestrator.process(capture_id)`
+  loads the authoritative record, requires `stored`, routes it, marks it
+  `processing` durably, runs the one selected processor, and records `complete`
+  — or `failed`, but only for a `ProcessingError`; an infrastructure failure
+  leaves the capture `processing` rather than inventing a terminal state.
+  `TextProcessor` 0.2 carries the capture's submitted title onto the content
+  object. The `ContentObject` is returned to the caller and is not yet
+  persisted anywhere.
 
 There is no HTTP, queueing, or AI code, and no ORM.
 
@@ -50,7 +58,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 ```
 src/core/contracts/   canonical domain contracts (Pydantic v2 models)
 src/core/storage/     raw object store port and local backend
-src/core/processing/  processor port, router, and the UTF-8 text processor
+src/core/processing/  processor port, router, text processor, and the lifecycle orchestrator
 src/core/rendering/   renderer port and the JSON and Markdown projections
 src/core/persistence/ capture record store port and the SQLite adapter
 src/core/intake/      capture intake, the envelope-to-stored-capture flow

@@ -39,9 +39,16 @@ database?" A `CaptureRecordStore` port and one file-backed SQLite adapter in
 does capture-time metadata survive intake durably, without being smuggled into
 raw bytes or unrelated fields?" `CaptureRecord` gains `context`, `intent`, and
 `title`, and the canonical contract set advances to `0.2` while staying able to
-read and rewrite `0.1` documents. Still not implemented: orchestration of
-*processing*, persistence of `ContentObject`s or rendered output, transport,
-recovery from a partial intake, and every non-text modality.
+read and rewrite `0.1` documents.
+
+**Phase 0H — processing orchestration.** Answers "how does a durably `stored`
+capture become `processing`, get normalized by exactly one processor, and end
+`complete` or in a truthful incomplete state?" `ProcessingOrchestrator` in
+`src/core/processing/service.py`, plus `TextProcessor` 0.2, which carries the
+capture's submitted title onto the content object. Still not implemented:
+persistence of `ContentObject`s or rendered output, reprocessing and recovery,
+safe concurrent processing of one capture, transport, and every non-text
+modality.
 
 ## Future data flow
 
@@ -60,10 +67,11 @@ Source
 
 The capture, capture-record, raw-original, processing, content, and
 representation steps exist today for UTF-8 text; everything below them is
-future work. Phase 0F drives the first arc of that sequence — envelope to
-stored capture record — and stops there. Nothing yet drives processing: a
-`ContentObject` is still produced only when a caller invokes a processor
-directly.
+future work. Two orchestrators drive that sequence: Phase 0F's `CaptureIntake`
+takes an envelope to a stored capture record, and Phase 0H's
+`ProcessingOrchestrator` takes that record to a canonical `ContentObject` and a
+completed capture. The content object is returned to the caller and is not yet
+persisted anywhere.
 
 ## The canonical ContentObject
 
@@ -711,6 +719,143 @@ trade-offs, not a side effect of the field becoming reachable.
 metadata, backfilling or fabricating context for legacy records, and per-contract
 version numbers.
 
+## Processing orchestration (Phase 0H)
+
+Phase 0C built the processing parts and deliberately left out the thing that
+calls them in order. Phase 0H is that thing, and only that thing.
+
+```
+capture_id
+    |
+CaptureRecordStore.get      the authoritative snapshot, loaded by id
+    |
+require STORED
+    |
+ProcessorRouter.select      routing is pure: no state written yet
+    |
+CaptureRecord(PROCESSING)   durable before any processor I/O
+    |
+Processor.process           the one selected processor, once
+    |
+ContentObject
+    |
+CaptureRecord(COMPLETE)     durable before the caller is handed anything
+```
+
+**The API is one class and one method.**
+
+```python
+ProcessingOrchestrator(
+    router: ProcessorRouter,
+    record_store: CaptureRecordStore,
+    *,
+    now: Callable[[], datetime] = utc_now,
+)
+process(capture_id: str) -> ContentObject
+```
+
+No worker, queue, task system, scheduler, retry engine, registry, DI container,
+or async surface. See [ADR-009](ADR/ADR-009-processing-orchestration.md).
+
+**Processors stay pure.** Nothing in ADR-004 is walked back: a processor is
+handed a record, returns content or raises, and writes no status and no bytes.
+*Every* lifecycle write in the system happens in the orchestrator.
+
+**The capture is loaded by id, never accepted as an object.** A lifecycle
+decision taken against a snapshot the caller has been holding is a decision
+about the past.
+
+**Exactly `stored` may begin.** Any other status raises
+`InvalidCaptureProcessingStateError` before the router is consulted, the clock
+is read, or anything is written. Reprocessing a `complete` or `failed` capture
+is a decision with its own questions and is not made here.
+
+**Routing happens before `processing` is written.** `select` is pure, so a
+`NoProcessorError` or `AmbiguousProcessorError` leaves the capture exactly
+`stored`, unmarked. A wiring problem should not leave a trace on the capture.
+
+**`processing` is durable before the processor does any I/O**, so a run that
+dies mid-processor leaves evidence it was started — Phase 0F's
+receipt-before-bytes ordering, one state later. The selected processor is then
+called **directly and once**, with its own deep copy of the snapshot;
+`router.process` is not used, because routing again across a durable state
+change could run something other than what the record was marked for.
+
+**The output must belong to this capture.** `content.source.capture_id` is
+checked against the record, and a mismatch is `ProcessingOutputError`. The
+`ContentObject` contract already validates its own internal consistency; this
+is the one thing it cannot check.
+
+**The failure split is the heart of the phase.**
+
+| what happened | durable result | what the caller sees |
+| --- | --- | --- |
+| not `stored` | unchanged | `InvalidCaptureProcessingStateError` |
+| no / ambiguous processor | still `stored` | the routing error, unchanged |
+| `ProcessingError` from the processor | `failed`, `error = str(exc)` | the original error, unchanged |
+| `RawObjectStoreError`, `RuntimeError`, anything else | still `processing` | the error, unchanged |
+| `failed` write itself fails | still `processing` | the persistence error, chained to the processing error |
+| `complete` write fails | still `processing` | the persistence error; no content returned |
+
+A `ProcessingError` is a verdict about the capture — not UTF-8, no raw object,
+content for someone else — and repeating the run changes nothing, so it is
+durably `failed`. Anything else describes the *run*, so the record stays
+`processing`, which is true. Nothing terminal is fabricated and nothing rolls
+back to `stored`: erasing the evidence would make "never attempted" and
+"attempted and lost" indistinguishable. This is Phase 0F's rule against
+inventing terminal state from infrastructure failure, one layer up.
+
+**Snapshot lineage: the last durable snapshot is the authority for the next.**
+`stored -> processing` derives from `stored`; `processing -> complete` and
+`processing -> failed` derive from `processing`. Nothing is re-read from a
+caller object or an earlier snapshot across a side-effect boundary. Snapshots
+are constructed and revalidated, never mutated in place, and nested models are
+deep-copied so no two share a mutable `CaptureIntent.tags` list — the rule
+intake settled in Phase 0G, applied to a three-step lifecycle.
+
+**A legacy record keeps its version.** A `stored` schema-0.1 capture processes
+normally and its `processing`/`complete`/`failed` snapshots stay `0.1`;
+upgrading it would require inventing the `context` that 0.2 demands. The
+`ContentObject` it produces is a new document and carries the current version.
+
+**`TextProcessor` 0.2 uses the capture's title.** `ContentObject.title =
+capture.title`, exactly, or `None` when the capture carried none — no
+first-line heuristic, no heading parsing, no filename or URL derivation.
+Because output changed for an unchanged input, `version` moved `0.1 -> 0.2`,
+and that value travels onto every `Provenance` and `ProcessingRecord` the
+processor emits. Plain text has no competing extracted title, so no precedence
+framework was built. Orchestration never edits the returned content object.
+
+**The orchestration clock owns lifecycle timestamps only** — read once entering
+`processing` and once writing `complete` or `failed`, and not at all for a
+missing capture, a wrong starting status, a routing failure, or a `processing`
+write that fails. `TextProcessor`'s internal `ProcessingRecord` timestamps are
+untouched.
+
+**`COMPLETE` does not mean the content object is durable.** It means
+normalization succeeded *and the capture lifecycle completion was recorded*.
+The `ContentObject` is returned synchronously and stored nowhere, so a crash
+after `complete` but before the caller uses it loses the normalized
+representation. The immutable raw bytes make it reproducible in principle, but
+reprocessing is refused by the starting-state rule, so such a capture is stuck
+at `complete` with nothing to show. Canonical content persistence is the next
+boundary; adding a store here to make the word "complete" sound better would be
+building that boundary in a hurry.
+
+**Concurrent processing of one capture is not safe.** `CaptureRecordStore` has
+no compare-and-swap, version, or lease, so two workers can both read `stored`
+before either writes `processing`, and both will run. Phase 0H does not solve
+this and deliberately reaches for none of the available answers — locks,
+leases, optimistic version fields, queues, advisory locks, worker-ownership
+columns, or SQLite-specific transactions inside orchestration. Each implies a
+model of ownership and of how a dead worker is detected, and that needs its own
+decision.
+
+**Out of scope here:** `ContentObject` persistence, reprocessing, resume,
+reconciliation, retry, queues and workers, locks/leases/compare-and-swap,
+scheduling, batch or scanning APIs, HTTP and CLI surfaces, renderer changes,
+and every non-text modality.
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
@@ -755,9 +900,15 @@ version numbers.
     loads, may not claim `0.2` fields, and serializes back out with no `0.2`
     keys — not even null ones, which `extra="forbid"` would reject.
 
-Invariants 1, 4, 7 and 10 are design commitments; 2, 3, 5, 6, 8, 9, 11, 12, 13
-and 14 are enforced by the models, renderers, stores and intake and covered by
-tests.
+15. Lifecycle state is written only by orchestration, and only a status the
+    system has evidence for. Implemented in Phase 0H: processors write no
+    status, a `ProcessingError` becomes a durable `failed`, and an
+    infrastructure failure leaves the capture `processing` rather than being
+    given a terminal state it has not earned.
+
+Invariants 1, 4, 7 and 10 are design commitments; 2, 3, 5, 6, 8, 9, 11, 12, 13,
+14 and 15 are enforced by the models, renderers, stores, intake and
+orchestration and covered by tests.
 
 ## Contract rules
 
@@ -848,7 +999,8 @@ src/core/processing/
   base.py         the Processor port
   router.py       ProcessorRouter, exactly-one-match routing
   text.py         TextProcessor, UTF-8 text normalization
-  errors.py       typed processing and routing errors
+  service.py      ProcessingOrchestrator, the stored-to-complete lifecycle
+  errors.py       typed processing, routing and lifecycle errors
 src/core/rendering/
   base.py         the Renderer port
   json.py         JsonRenderer, the full-fidelity projection

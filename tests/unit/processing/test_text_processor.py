@@ -444,3 +444,81 @@ def test_processing_reads_the_original_rather_than_the_capture_payload(
 
     assert content.segments[0].text == stored
     assert store.accesses == ["read_bytes"]
+
+
+class TestTitle:
+    """The capture's submitted title becomes the content object's title.
+
+    Phase 0G made ``CaptureRecord.title`` durable; version 0.2 of this
+    processor is the first thing that reads it. Plain text has no competing
+    extracted title — no heading to parse, no ``<title>`` element, no document
+    properties — so when the capture carried one it simply *is* the title, and
+    when it did not, nothing is invented.
+    """
+
+    def test_the_capture_title_is_copied_exactly(
+        self, store: InMemoryRawObjectStore, processor: TextProcessor
+    ) -> None:
+        capture = store_and_capture(store, b"some notes", title="  A Submitted Title  ")
+
+        assert processor.process(capture).title == "  A Submitted Title  "
+
+    def test_a_unicode_title_survives(
+        self, store: InMemoryRawObjectStore, processor: TextProcessor
+    ) -> None:
+        capture = store_and_capture(store, b"some notes", title="Заметка — 你好 🌍")
+
+        assert processor.process(capture).title == "Заметка — 你好 🌍"
+
+    def test_no_title_stays_no_title(
+        self, store: InMemoryRawObjectStore, processor: TextProcessor
+    ) -> None:
+        capture = store_and_capture(store, b"some notes", title=None)
+
+        assert processor.process(capture).title is None
+
+    def test_the_title_is_not_taken_from_the_first_line(
+        self, store: InMemoryRawObjectStore, processor: TextProcessor
+    ) -> None:
+        """No heading parsing, no first-line heuristic, no filename or URL."""
+        capture = store_and_capture(store, b"# Looks Like A Heading\n\nbody text", title=None)
+
+        content = processor.process(capture)
+
+        assert content.title is None
+        assert content.segments[0].text == "# Looks Like A Heading\n\nbody text"
+
+    def test_the_title_does_not_leak_into_the_segment_text(
+        self, store: InMemoryRawObjectStore, processor: TextProcessor
+    ) -> None:
+        capture = store_and_capture(store, b"body text", title="A Submitted Title")
+
+        assert processor.process(capture).segments[0].text == "body text"
+
+
+class TestProcessorVersion:
+    """0.2: the output changed for an unchanged input, so the version changed."""
+
+    def test_the_processor_version_is_the_current_one(self) -> None:
+        assert TextProcessor.name == "text"
+        assert TextProcessor.version == "0.2"
+
+    def test_provenance_records_the_current_version(
+        self, store: InMemoryRawObjectStore, processor: TextProcessor
+    ) -> None:
+        capture = store_and_capture(store, b"some notes")
+
+        provenance = processor.process(capture).segments[0].provenance
+
+        assert provenance.processor == "text"
+        assert provenance.processor_version == "0.2"
+
+    def test_the_processing_record_records_the_current_version(
+        self, store: InMemoryRawObjectStore, processor: TextProcessor
+    ) -> None:
+        capture = store_and_capture(store, b"some notes")
+
+        (record,) = processor.process(capture).processing
+
+        assert record.processor == "text"
+        assert record.processor_version == "0.2"

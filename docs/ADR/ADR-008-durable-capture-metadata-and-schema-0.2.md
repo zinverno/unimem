@@ -135,12 +135,13 @@ unchecked `model_copy(update=...)`.
 context, intent, and title. The envelope is not rewritten; it stays the `0.1`
 document it was.
 
-**Nothing propagates into `ContentObject` yet.** `title` now exists on a capture
-record, and `TextProcessor` still does not read it. Whether a processor should
-seed `ContentObject.title` from the capture — and what happens when they
-disagree, or when an extractor finds a better title in the content — is a
-processing decision with its own trade-offs. It is not made here just because
-the field became reachable.
+**Nothing propagates into `ContentObject` yet.** *(Taken up in Phase 0H — see
+the note at the end.)* `title` now exists on a capture record, and
+`TextProcessor` still does not read it. Whether a processor should seed
+`ContentObject.title` from the capture — and what happens when they disagree,
+or when an extractor finds a better title in the content — is a processing
+decision with its own trade-offs. It is not made here just because the field
+became reachable.
 
 **Zero new runtime dependencies.**
 
@@ -242,3 +243,20 @@ Costs:
   and an extracted one, and about what a processor does when they conflict.
   Making it a side effect of "the field now exists" is how undesigned behaviour
   gets in.
+
+## Note (Phase 0H): `TextProcessor` 0.2 consumes `capture.title`
+
+The title question this ADR deferred was answered for plain text in Phase 0H
+([ADR-009](ADR-009-processing-orchestration.md)). `TextProcessor` version 0.2
+copies `capture.title` onto `ContentObject.title` exactly, or leaves it `None`
+when the capture carried none — no first-line heuristic, no heading parsing, no
+filename or URL derivation, and nothing minted from nothing.
+
+It needed no precedence rule, because plain text has no competing extracted
+title: there is no `<title>` element and no document properties to disagree
+with the submitter. A webpage or document processor will face a real conflict
+and will have to decide, per processor, as its own versioned semantics. The
+general framework this ADR declined to build is still not built.
+
+Nothing about the contract changed. `title` was already durable at 0.2; Phase
+0H is simply the first code that reads it.
