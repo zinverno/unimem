@@ -1,11 +1,19 @@
 # capture-core
 
-Core domain contracts for a universal multimodal capture and ingestion layer.
+Core domain contracts and immutable raw-object storage for a universal
+multimodal capture and ingestion layer.
 
-This repository is at **Phase 0A**: it defines the stable domain language —
-`CaptureEnvelope`, `CaptureRecord`, `ContentObject`, `Segment`, `Provenance`,
-`Asset`, `ProcessingRecord` — and the validation rules the rest of the system
-will depend on. It contains **no** storage, HTTP, queueing, or AI code.
+Implemented so far:
+
+- **Phase 0A — domain contracts.** The stable domain language:
+  `CaptureEnvelope`, `CaptureRecord`, `ContentObject`, `Segment`, `Provenance`,
+  `Asset`, `ProcessingRecord`, and the validation rules the rest of the system
+  depends on.
+- **Phase 0B — local immutable raw-object storage.** A `RawObjectStore` port
+  and a local content-addressed backend that persists original bytes, addressed
+  by SHA-256 and never modified once stored.
+
+There is no HTTP, database, queueing, extraction, or AI code.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 
@@ -13,7 +21,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 
 ```
 src/core/contracts/   canonical domain contracts (Pydantic v2 models)
-tests/unit/contracts/ unit tests for those contracts
+src/core/storage/     raw object store port and local backend
+tests/                unit and integration tests
 docs/                 architecture notes and ADRs
 ```
 

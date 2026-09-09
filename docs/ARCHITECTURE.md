@@ -7,22 +7,23 @@ it takes heterogeneous digital content — text, webpages, images, documents,
 video, code, files — and normalizes it into a versioned canonical
 representation that a larger shared-memory / AI context system can build on.
 
-## Current scope: Phase 0A
+## Current scope
 
-Phase 0A defines **domain contracts only**. It answers "what are the
-fundamental objects flowing through this system?" and deliberately does not
-answer how they are stored, processed, or exposed.
+**Phase 0A — domain contracts.** Answers "what are the fundamental objects
+flowing through this system?" Pydantic models, enums, and validation rules in
+`src/core/contracts/`, with no dependency on storage, transport, or AI.
 
-Everything in this repository today is in `src/core/contracts/`: Pydantic
-models, enums, and validation rules. There is no storage, no transport, no
-processing, and no AI code.
+**Phase 0B — immutable raw object storage.** Answers "how does UniMem persist
+immutable original bytes?" A storage port and one local backend in
+`src/core/storage/`. Nothing else is implemented: no capture persistence, no
+extraction, no processors, no transport.
 
 ## Future data flow
 
 ```
 Source
   -> Capture            (CaptureEnvelope, CaptureRecord)
-  -> Raw Original       (immutable bytes, referenced by Asset / RawObjectRef)
+  -> Raw Original       (immutable bytes, stored by RawObjectStore — Phase 0B)
   -> Ingestion          (processors; recorded as ProcessingRecord)
   -> ContentObject      (canonical, with Segments + Provenance + Assets)
   -> Representations    (JSON, Markdown, ... all derived)
@@ -64,13 +65,85 @@ queues and workers, extraction (HTML, OCR, transcription, vision), AI
 providers, embeddings and vector search, browser extensions or companion apps,
 `ctxalloc` integration, agent routing, authentication.
 
+## Raw object storage (Phase 0B)
+
+Raw originals are the only irreplaceable thing in the system: every future
+extractor is a function of those bytes. Phase 0B is the implementation of
+invariant 4 — originals are immutable once stored — and nothing more.
+
+**Role in the flow.** A capture yields bytes; those bytes are stored once, up
+front, and everything downstream refers to them. Storing is not ingestion:
+nothing here parses, extracts, or interprets what it is given.
+
+**Identity is the content.** An object is addressed by the SHA-256 of its
+bytes. MIME type, filename, source URL, and capture time describe a capture and
+never take part in identity — the same bytes offered as `image/png` and as
+`application/octet-stream` are one object. See
+[ADR-003](ADR/ADR-003-content-addressed-raw-storage.md).
+
+**Deduplication is exact.** Same digest, same object. Perceptual, semantic, and
+near-duplicate matching are different problems, solved elsewhere if at all.
+
+**RawObject identity is not capture identity.** These are different layers.
+Storing identical bytes yields one RawObject identity and one physical stored
+object; it does *not* yield one `CaptureRecord`.
+
+```
+capture event  -> references    -> RawObject
+many captures  -> may reference -> one RawObject
+```
+
+A capture is an event in a context, and two captures of identical bytes may
+legitimately differ in source, URL, capture timestamp, device, application,
+intent, provenance, and future capture-specific metadata. A RawObject SHA-256
+must therefore never be used as `CaptureRecord` identity or as implicit
+capture-submission idempotency; if such idempotency is introduced later it needs
+an explicit request identity defined at the capture layer. See
+[ADR-003](ADR/ADR-003-content-addressed-raw-storage.md).
+
+**References stay storage-neutral.** The store returns the Phase 0A
+`RawObjectRef` with `ref = "sha256:<digest>"`, and `id` and `sha256` set to the
+digest. No local path, drive letter, `file://` URL, or bucket name ever appears
+in a canonical reference. The local layout —
+`<root>/sha256/<d0:2>/<d2:4>/<digest>` — is an implementation detail, derived
+only from a validated digest. Arbitrary `ref` text is never turned into a path:
+a strict parser validates the scheme and digest first, so a reference like
+`sha256:../../etc/passwd` is rejected rather than resolved.
+
+**Streaming ingestion.** Sources are consumed in bounded chunks from their
+current position, hashing and staging in the same pass. The stream is never
+rewound and seek support is not required, so a multi-gigabyte video never has
+to fit in memory.
+
+**Atomic finalization.** Staging happens in a temporary file inside the store
+root — same filesystem, name from `tempfile`, never from caller input. Once the
+digest is known, the object is published with a single `os.link` into its
+content-addressed path. A reader therefore never observes a half-written
+object, and `os.link` failing with `FileExistsError` *is* the deduplication
+path: the bytes are already stored, the existing object stands untouched, and
+the staged copy is discarded. Concurrent writers of identical bytes converge on
+one file with no locking. On any failure the staging file is removed and no
+finalized object appears. This assumes a single filesystem supporting hard
+links; durability across power loss is not claimed, as staged data is not
+fsynced.
+
+**Immutability is structural.** There is no update, overwrite, or delete
+operation. Retention and deletion policy is a later decision. Modification of
+files inside the storage root by something other than the store is outside the
+Phase 0B trust boundary.
+
+**Out of scope here:** capture record persistence, metadata storage or
+sidecars, extraction and processors, renderers, HTTP, queues and workers,
+remote or cloud backends, and encryption at rest.
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
 2. Markdown is not a source of truth.
 3. Derived representations must be reproducible from a `ContentObject`.
 4. Raw originals are immutable once stored; contracts reference them, they do
-   not embed or mutate them.
+   not embed or mutate them. Implemented in Phase 0B: content-addressed, with
+   no mutation API.
 5. Every `Segment` carries `Provenance`. Within a `ContentObject`, every
    segment's `provenance.capture_id` must match the object's
    `source.capture_id`, and any `provenance.asset_id` must resolve to an asset
@@ -163,6 +236,12 @@ src/core/contracts/
   provenance.py   Provenance
   asset.py        Asset
   processing.py   ProcessingRecord
+src/core/storage/
+  raw.py          RawObjectStore port, sha256:<digest> reference format
+  local.py        LocalRawObjectStore, the content-addressed local backend
+  errors.py       typed storage errors
 tests/unit/contracts/
+tests/unit/storage/
+tests/integration/storage/
 docs/
 ```
