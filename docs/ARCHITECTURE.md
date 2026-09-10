@@ -1061,7 +1061,10 @@ The decisions that shape it:
   storage errors name the database file and the staging directory on purpose and
   those must not reach a caller.
 - **No idempotency.** A duplicate capture id is `409`. Two different ids carrying
-  identical text both succeed, sharing one deduplicated raw object.
+  identical text both succeed, sharing one deduplicated raw object. *(Narrowed by
+  Phase 1 PR 3, below: the identical request against an already-complete capture
+  is answered `200` with that capture's existing result. Every other duplicate is
+  still `409`, and two different ids still make two captures.)*
 - **No authentication, authorization, API keys, TLS, or CORS.** The CLI therefore
   binds `127.0.0.1` by default, and that default is a control rather than a
   convenience. **Do not expose this server to an untrusted network.**
@@ -1135,13 +1138,18 @@ The decisions that shape it:
   server-side failure.
 - **The capture id is a client-generated opaque UUID**, minted before the POST
   and derived from nothing — not the URL, the text, a digest, or the clock.
-- **POST exactly once, and no automatic retry.** A real HTTP error is a definite
-  answer and is reported as one; `409` is a conflict, not idempotent success.
-- **Network ambiguity is resolved by observation.** If the POST never reaches an
-  HTTP response, the connector performs at most one read-only
+- **No retry policy, and one bounded resend.** A real HTTP error is a definite
+  answer and is reported as one, never repeated; `409` is a conflict, not
+  idempotent success. *(Phase 1 PR 3: a POST that fails at the network layer —
+  and only that — is followed by exactly one resend of the byte-identical
+  envelope under the same capture id, which the server answers as a completed
+  replay when it can.)*
+- **Network ambiguity is resolved by observation, last.** When no POST produced
+  an answer the connector can act on, it performs at most one read-only
   `GET /v1/captures/{id}` on the id it already minted and reports what it finds —
-  complete, some other durable state, not found, or unknown. It never re-POSTs
-  and never mutates anything: lifecycle stays core-owned.
+  complete, some other durable state, not found, or unknown. It never mutates
+  anything: lifecycle stays core-owned. The hard bound for one user action is two
+  POSTs and one GET.
 - **No persistent client state**, no telemetry, and a badge plus a title as the
   entire UI, scoped to the clicked tab so one page's result never becomes every
   tab's badge. The selected text never appears in that UI or in a log, and
@@ -1153,6 +1161,66 @@ Scope, stated as scope rather than omission: Chromium MV3 only, top-level
 document selection only, `http(s)` pages only, a fixed API address, and selection
 only — no whole-page or HTML capture, which needs a webpage processor that does
 not exist yet.
+
+
+## Completed-capture replay (Phase 1)
+
+Phase 1 PR 3, and the first idempotency in the system. It exists because the
+connector produced a concrete requirement the earlier phases correctly declined
+to guess at: **a client that loses the response to its POST holds the identical
+envelope and needs to resend it, without creating a second capture and without
+the server mistaking a different request for the original one.**
+
+```
+POST /v1/captures  ──► intake refuses: the id is taken
+                        │
+                        ├─ COMPLETE + provably the same request ──► 200 + existing result
+                        └─ anything else ────────────────────────► 409 capture_already_exists
+```
+
+- **The client-generated `CaptureEnvelope.id` is the replay identity.** No
+  `Idempotency-Key` header, request token, nonce, fingerprint, idempotency table,
+  second store, new contract field, or schema `0.3`. The client already mints one
+  opaque id per capture before the POST, and the `CaptureRecord` primary key
+  remains the only authority on who won creation.
+- **The status code carries the distinction.** `201` — this attempt created and
+  completed the capture. `200` — this was an equivalent replay of one already
+  complete. The body is identical in both, deliberately: no `replayed` field
+  restates the status line.
+- **Resolved only after intake reports a duplicate.** No preflight read on the
+  ordinary path, so no check-then-create window is opened and a normal POST costs
+  what it always did.
+- **Equivalence is proven, never assumed.** Every observable semantic fact must
+  match the durable record — id, schema version, `source`, `context`, `intent`,
+  `title`, `mime_type` — and the exact submitted bytes are verified by hashing
+  `payload.text.encode("utf-8")` against the raw object's SHA-256. Nothing is
+  trimmed, case-folded, Unicode-normalized, or line-ending rewritten first.
+  `captured_at` is compared as an instant rather than as a string.
+- **What the record cannot represent refuses replay.** A `TEXT` payload carrying
+  `html` or `file_ref` is not replayable: the durable text record stores neither,
+  so equivalence cannot be proven, and unprovable is not equivalent.
+- **Server-generated lifecycle facts are not request identity.** `received_at`,
+  `updated_at`, and processing timestamps are not compared.
+- **Completed only.** `RECEIVED`, `STORED`, `QUEUED`, `PROCESSING`, `PARTIAL`,
+  and `FAILED` duplicates all stay `409`. Nothing is resumed, retried, marked
+  complete, polled, or reconciled — stranded captures remain Phase 1's open
+  problem, and `GET /v1/captures/{id}` remains how they are observed.
+- **A replay writes nothing.** No processing run, no second `ContentObject`, no
+  re-stored bytes, no rewritten record, no touched timestamp. The helper is
+  read-only by construction.
+- **`COMPLETE` with no canonical content is a server integrity failure** —
+  Phase 0I's invariant violated — and answers `500 data_integrity_error` with the
+  existing fixed public message. Not a replay success, not a `404`, not a `409`.
+- **No concurrency claim.** A duplicate arriving while the first request is still
+  `PROCESSING` gets `409`, and that is acceptable. There are no locks, leases,
+  condition variables, waiting, or server-side polling. The guarantee is only:
+  once a capture is durably complete, an equivalent resubmission can be answered
+  with its result.
+- **The policy is delivery-layer.** `src/unimem_api/replay.py`, plus one API-layer
+  error type. `src/core/` is unchanged — intake still treats a duplicate id as an
+  error — and no route was added.
+
+See [ADR-013](ADR/ADR-013-completed-capture-replay.md).
 
 
 ## Architectural invariants

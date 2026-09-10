@@ -46,10 +46,16 @@ class FakeRawObjectStore:
     def __init__(self, *, fail_with: Exception | None = None) -> None:
         self._objects: dict[str, bytes] = {}
         self._fail_with = fail_with
+        #: Every accepted write, in order. Counting writes is how "this request
+        #: stored nothing" is checked: content addressing makes a second write
+        #: of identical bytes invisible in ``_objects``, so the dictionary alone
+        #: cannot tell a replay from a re-store.
+        self.writes: list[bytes] = []
 
     def store_bytes(self, data: bytes, *, mime_type: str | None = None) -> RawObjectRef:
         if self._fail_with is not None:
             raise self._fail_with
+        self.writes.append(data)
         digest = hashlib.sha256(data).hexdigest()
         reference = build_raw_ref(digest)
         self._objects[reference] = data
@@ -130,12 +136,27 @@ class FakeCaptureRecordStore:
 
 
 class FakeContentObjectStore:
-    """A dictionary-backed ``ContentObjectStore``, with the capture uniqueness rule."""
+    """A dictionary-backed ``ContentObjectStore``, with the capture uniqueness rule.
 
-    def __init__(self, *, fail_create_with: Exception | None = None) -> None:
+    ``fail_get_for_capture_with`` covers the read side: a store that holds
+    something it cannot hand back, which is what a corrupt canonical snapshot
+    looks like to a caller.
+    """
+
+    def __init__(
+        self,
+        *,
+        fail_create_with: Exception | None = None,
+        fail_get_for_capture_with: Exception | None = None,
+    ) -> None:
         self._by_id: dict[str, str] = {}
         self._by_capture: dict[str, str] = {}
         self._fail_create_with = fail_create_with
+        self._fail_get_for_capture_with = fail_get_for_capture_with
+        #: Every capture id ``get_for_capture`` was asked about, in order. What
+        #: this proves is a negative: that a duplicate of a capture which is not
+        #: complete is answered without the content store being consulted.
+        self.capture_lookups: list[str] = []
 
     def create(self, content: ContentObject) -> None:
         if self._fail_create_with is not None:
@@ -162,12 +183,34 @@ class FakeContentObjectStore:
             ) from None
 
     def get_for_capture(self, capture_id: str) -> ContentObject:
+        self.capture_lookups.append(capture_id)
+        if self._fail_get_for_capture_with is not None:
+            raise self._fail_get_for_capture_with
         try:
             return ContentObject.model_validate_json(self._by_capture[capture_id])
         except KeyError:
             raise ContentObjectNotFoundError(
                 f"capture {capture_id!r} has no stored content object"
             ) from None
+
+    def stored_content_ids(self) -> set[str]:
+        """A test-only view: which content objects exist at all.
+
+        Counting them is how "the replay created nothing" is checked from
+        outside the API, rather than from the API's own account of itself.
+        """
+        return set(self._by_id)
+
+    def drop_for_capture(self, capture_id: str) -> None:
+        """Test-only: delete a capture's content, leaving its record alone.
+
+        This manufactures the one state Phase 0I says cannot happen — a
+        ``COMPLETE`` capture with no canonical content — by breaking it the way
+        reality would, rather than by injecting an error a store would not
+        raise.
+        """
+        payload = self._by_capture.pop(capture_id)
+        self._by_id.pop(ContentObject.model_validate_json(payload).id, None)
 
     def get_or_none(self, capture_id: str) -> ContentObject | None:
         """A test-only convenience: "did this capture produce content?"."""

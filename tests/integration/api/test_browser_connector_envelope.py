@@ -207,14 +207,23 @@ class TestTheEnvelopeSurvivesTheWholePipeline:
         expected = supplied if supplied is not None and supplied.strip() else None
         assert content.title == expected
 
-    def test_a_second_click_would_be_a_conflict_not_a_silent_success(
+    def test_a_second_click_carrying_different_text_is_a_conflict(
         self, client: TestClient, case: dict[str, Any]
     ) -> None:
         """The connector mints a fresh id per click, so this cannot happen — but
-        if it ever did, the server still refuses rather than replaying."""
+        if it ever did, a *different* selection under a used id is refused
+        rather than answered with the first click's content.
+
+        The other shape of second POST — the identical envelope, resent because
+        the connector never saw the reply — is the completed replay this phase
+        added, and it is proven end to end in ``test_completed_capture_replay``.
+        """
         client.post("/v1/captures", json=case["envelope"])
 
-        repeated = client.post("/v1/captures", json=case["envelope"])
+        conflicting = json.loads(json.dumps(case["envelope"]))
+        conflicting["payload"]["text"] = f"{conflicting['payload']['text']} and more"
+
+        repeated = client.post("/v1/captures", json=conflicting)
 
         assert repeated.status_code == 409
         assert repeated.json()["error"]["code"] == "capture_already_exists"

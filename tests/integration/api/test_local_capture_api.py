@@ -168,11 +168,25 @@ class TestTheHappyPathOverRealHttp:
         assert two.raw_object is not None
         assert one.raw_object.sha256 == two.raw_object.sha256
 
-    def test_the_same_capture_id_twice_conflicts(self, client: TestClient) -> None:
-        body = text_envelope()
-        client.post("/v1/captures", json=body)
+    def test_the_same_capture_id_carrying_a_different_request_conflicts(
+        self, client: TestClient
+    ) -> None:
+        """An id is a claim, not proof. Two different requests under one id
+        remain a conflict; the *same* request resent is the replay case, and
+        lives in ``test_completed_capture_replay.py``."""
+        client.post("/v1/captures", json=text_envelope())
 
-        response = client.post("/v1/captures", json=body)
+        response = client.post(
+            "/v1/captures",
+            json=text_envelope(
+                payload={
+                    "type": "text",
+                    "mime_type": "text/plain",
+                    "text": "not the text the first request carried",
+                    "title": TITLE,
+                }
+            ),
+        )
 
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "capture_already_exists"
@@ -225,13 +239,21 @@ class TestSurvivingARestart:
 
         assert after == before
 
-    def test_a_duplicate_id_still_conflicts_after_a_restart(self, data_dir: Path) -> None:
-        """There is no idempotency, and a restart does not accidentally add some."""
+    def test_a_conflicting_duplicate_id_still_conflicts_after_a_restart(
+        self, data_dir: Path
+    ) -> None:
+        """Replay is narrow, and a restart does not accidentally widen it.
+
+        A fresh application over the same directory answers a duplicate exactly
+        as the first one would: this request is not the request that made the
+        capture, so it is still a conflict.
+        """
         with TestClient(build_local_app(data_dir)) as first:
             assert first.post("/v1/captures", json=text_envelope()).status_code == 201
 
         with TestClient(build_local_app(data_dir)) as second:
-            assert second.post("/v1/captures", json=text_envelope()).status_code == 409
+            conflicting = text_envelope(context={"captured_at": "2026-05-05T05:05:05+00:00"})
+            assert second.post("/v1/captures", json=conflicting).status_code == 409
 
     def test_a_fresh_app_can_still_accept_new_captures(self, data_dir: Path) -> None:
         with TestClient(build_local_app(data_dir)) as first:

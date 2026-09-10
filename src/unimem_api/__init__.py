@@ -19,9 +19,15 @@ uvicorn, status codes, routing, and the command line all live here, on this side
 of the boundary, and the dependency points one way only.
 
 Four routes, and deliberately no fifth. There is no list, search, batch,
-re-process, or delete endpoint, no authentication, and no idempotency — a
-duplicate capture id is a conflict, not a retry. Those become real work when a
-connector produces a real requirement for them; the connector is the next PR.
+re-process, or delete endpoint, and no authentication. Those become real work
+when a connector produces a real requirement for them.
+
+The one requirement a connector *did* produce is the narrow completed replay in
+:mod:`unimem_api.replay`: a client whose response was lost may resend the same
+capture id with the same request, and an already-complete capture answers with
+the result it already produced rather than a conflict. It is the whole of the
+idempotency here — no key, no table, no store — and every other duplicate id is
+still a conflict.
 
 See :class:`~unimem_api.app.create_app` for the API over injected services, and
 :func:`~unimem_api.wiring.build_local_app` for the one local composition that

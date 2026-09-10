@@ -19,6 +19,7 @@ const SECRET = "correct horse battery staple";
 /** Every result shape the connector can produce, in one place. */
 const ALL_RESULTS = [
   { outcome: OUTCOME.COMPLETE, confirmedBy: "post" },
+  { outcome: OUTCOME.COMPLETE, confirmedBy: "replay" },
   { outcome: OUTCOME.COMPLETE, confirmedBy: "probe", probed: true },
   { outcome: OUTCOME.BLANK_SELECTION },
   { outcome: OUTCOME.UNSUPPORTED_PAGE },
@@ -72,6 +73,38 @@ describe("titles", () => {
     const title = feedbackFor({ outcome: OUTCOME.COMPLETE, probed: true }).title;
     assert.match(title, /saved/);
     assert.match(title, /confirmed/);
+  });
+
+  it("says saved for a capture the server replayed", () => {
+    const title = feedbackFor({ outcome: OUTCOME.COMPLETE, confirmedBy: "replay" }).title;
+
+    assert.equal(title, "UniMem: saved (confirmed retry)");
+  });
+
+  it("shows OK for a replay, because a replay is a saved capture", () => {
+    assert.equal(feedbackFor({ outcome: OUTCOME.COMPLETE, confirmedBy: "replay" }).badge, BADGE_OK);
+  });
+
+  it("reads as reassurance rather than as an error", () => {
+    /* The user clicked once and their selection is saved once. Nothing here may
+     * suggest a failure, a duplicate, or something needing their attention. */
+    const title = feedbackFor({ outcome: OUTCOME.COMPLETE, confirmedBy: "replay" }).title;
+
+    assert.match(title, /saved/);
+    for (const alarming of [/error/i, /fail/i, /duplicate/i, /conflict/i, /warning/i, /409/]) {
+      assert.doesNotMatch(title, alarming);
+    }
+  });
+
+  it("keeps the three confirmations distinguishable", () => {
+    const titleFor = (confirmedBy) => feedbackFor({ outcome: OUTCOME.COMPLETE, confirmedBy }).title;
+
+    assert.equal(new Set(["post", "replay", "probe"].map(titleFor)).size, 3);
+  });
+
+  it("still says saved for a success it has no vocabulary for", () => {
+    assert.equal(feedbackFor({ outcome: OUTCOME.COMPLETE }).title, "UniMem: saved");
+    assert.equal(feedbackFor({ outcome: OUTCOME.COMPLETE, confirmedBy: "new-thing" }).title, "UniMem: saved");
   });
 
   it("asks for a selection when there was none", () => {
@@ -157,6 +190,27 @@ describe("what feedback must never contain", () => {
 
     assert.ok(!title.includes("/var/lib"));
     assert.ok(!title.includes("sqlite3"));
+  });
+
+  it("never leaks a capture through the replay path either", () => {
+    /* The success path now carries a capture id and a content id in the result.
+     * Neither is secret, and neither belongs in a tooltip — and the selection,
+     * smuggled in beside them, must not appear whatever the path. */
+    const smuggled = {
+      outcome: OUTCOME.COMPLETE,
+      confirmedBy: "replay",
+      captureId: "3f1b2c7e-9a4d-4e51-8b6f-0c2d7a1e5b93",
+      contentId: "1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9",
+      text: SECRET,
+      message: SECRET,
+    };
+
+    const { badge, title } = feedbackFor(smuggled);
+
+    assert.ok(!title.includes(SECRET));
+    assert.ok(!badge.includes(SECRET));
+    assert.ok(!title.includes("3f1b2c7e"));
+    assert.ok(!title.includes("1a2b3c4d"));
   });
 
   it("never contains a raw exception message or stack", () => {

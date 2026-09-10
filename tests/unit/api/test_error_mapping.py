@@ -51,6 +51,7 @@ from tests.unit.api.doubles import (
     FakeRawObjectStore,
 )
 from unimem_api.errors import ERROR_MAPPINGS, HttpError
+from unimem_api.replay import CaptureReplayIntegrityError
 
 #: A path-like string planted inside every injected error message. If any of it
 #: reaches a 5xx body, the safe-message rule has been broken.
@@ -99,6 +100,9 @@ MAPPED_ERRORS: list[Exception] = [
     CaptureRecordPersistenceError(f"the database at {BACKEND_DETAIL} could not read"),
     ContentObjectPersistenceError(f"the database at {BACKEND_DETAIL} could not read"),
     RawObjectStoreError(f"the raw store at {BACKEND_DETAIL} could not read"),
+    # The one row this package raises itself. It goes through the same probe as
+    # every core failure, because the rule it has to obey is the same one.
+    CaptureReplayIntegrityError(f"complete but no content, per {BACKEND_DETAIL}"),
 ]
 
 

@@ -71,6 +71,15 @@ Phase 1 builds the first product surface around it:
   becomes a canonical `CaptureEnvelope` POSTed to the local API. The first real
   client of the Phase-1 surface, and the first end-to-end product path — see
   *Browser selection capture*, below.
+- **Phase 1, PR 3 — completed-capture replay.** The connector's first real
+  requirement: a client that loses the response to its POST can resend the
+  identical envelope under the identical capture id and be handed the capture it
+  already made. `201` means this request created and completed the capture;
+  `200` means it was an equivalent replay of one already complete. Equivalence is
+  *proven* from the durable record and the raw object's SHA-256 — same id and any
+  difference is still `409`, and a duplicate that is not complete is still `409`.
+  No idempotency key, no idempotency table, no schema change, and no change under
+  `src/core/`.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 
@@ -132,11 +141,21 @@ itself, not a rendering):
 curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_01/content
 ```
 
-Errors come back as `{"error": {"code": ..., "message": ...}}`. There is no
-idempotency yet: posting the same capture id twice is `409
-capture_already_exists`. Only inline `text` payloads are processed today; a
-valid image, webpage, or document envelope is accepted by the contract and
-refused with `422 unsupported_payload`.
+Errors come back as `{"error": {"code": ..., "message": ...}}`.
+
+Posting the same capture id twice is `409 capture_already_exists` — **unless** it
+is the identical request against a capture that is already complete, which is
+answered `200` with that capture's existing result. That is the whole of the
+idempotency here: it lets a client whose response was lost resend safely, and it
+is granted only when every submitted fact matches the durable record and the
+submitted text hashes to the stored raw object. A capture that is still
+`processing`, or that failed, is `409` like any other duplicate; nothing is
+resumed, reprocessed, or reconciled. See
+[ADR-013](docs/ADR/ADR-013-completed-capture-replay.md).
+
+Only inline `text` payloads are processed today; a valid image, webpage, or
+document envelope is accepted by the contract and refused with
+`422 unsupported_payload`.
 
 `GET /health` reports process liveness only and checks nothing else.
 
@@ -169,7 +188,9 @@ The badge is the whole UI:
 | `!` | not saved, or not confirmed |
 
 Hover the toolbar icon for the detail (`UniMem: saved`, `UniMem: select some text
-first`, `UniMem: service unavailable`, and so on).
+first`, `UniMem: service unavailable`, and so on). A capture confirmed after a
+lost response reads `UniMem: saved (confirmed retry)` — still one capture, and
+still `OK`.
 
 The capture goes through the same path as any other client: your selection
 becomes a canonical `CaptureEnvelope`, is POSTed to
@@ -188,9 +209,15 @@ Current limitations, all deliberate for this phase:
 - **Only `http://` and `https://` pages.** Clicking on `chrome://`, extension,
   or `file://` pages fails locally and sends nothing.
 - **No server authentication.** Keep the API on localhost.
-- **No automatic retries.** A capture is POSTed exactly once. If the request
-  fails at the network layer, the extension makes one read-only check to see
-  whether the capture landed, and tells you what it found — it never re-sends.
+- **No general retry policy — one bounded resend.** A capture that gets any HTTP
+  response is never sent again: the server answered, and that is the answer. Only
+  a request that fails at the *network* layer, where the outcome is genuinely
+  unknown, is resent — once, as the byte-identical envelope under the same
+  capture id, because the server answers such a resend with the capture it
+  already made. If that resend is also lost, or comes back as a conflict the
+  connector cannot interpret, it makes one read-only check and tells you what it
+  found. The hard limit for one click is two POSTs and one read; there is no
+  loop, no backoff, and no queue.
 - **No extension history.** The extension stores nothing; the server is the only
   record of what was captured.
 - **Selection only.** No whole-page capture, no HTML, no screenshots.

@@ -10,7 +10,9 @@
  * password they highlighted by accident or a paragraph from a private document,
  * and a browser action title is visible to anyone looking at the screen and
  * lands in screenshots. It is request payload data and nothing else, so it
- * never appears here, and it is not logged either.
+ * never appears here, and it is not logged either. Nor do a capture id, a
+ * content id, or a URL: they are not wrong to show, they are simply not what a
+ * person reading a tooltip needs.
  */
 
 import { OUTCOME } from "./outcomes.js";
@@ -55,16 +57,47 @@ export function busyFeedback() {
   return { badge: BADGE_BUSY, title: BUSY_TITLE };
 }
 
+/**
+ * How a confirmed capture came to be confirmed, as a sentence.
+ *
+ * All three are the same success — the capture is durable and normalized — and
+ * all three get `OK`. They read differently only because the user who just
+ * watched the badge sit on `...` is owed a word about why, and "we resent it
+ * and the server already had it" is a more reassuring thing to read than
+ * silence.
+ *
+ * `post` is the ordinary case and says nothing extra, because nothing happened
+ * worth mentioning.
+ */
+const CONFIRMATION_TITLES = Object.freeze({
+  post: "UniMem: saved",
+  replay: "UniMem: saved (confirmed retry)",
+  probe: "UniMem: saved (confirmed after a network error)",
+});
+
 /** What to show once the attempt has resolved, one way or the other. */
 export function feedbackFor(result) {
   const outcome = result?.outcome;
   if (outcome === OUTCOME.COMPLETE) {
-    return {
-      badge: BADGE_OK,
-      title: result.probed ? "UniMem: saved (confirmed after a network error)" : "UniMem: saved",
-    };
+    return { badge: BADGE_OK, title: successTitle(result) };
   }
   return { badge: BADGE_FAIL, title: failureTitle(result, outcome) };
+}
+
+/**
+ * Word a success by how it was confirmed, and fall back to plain "saved".
+ *
+ * A capture this module has no confirmation vocabulary for is still a capture
+ * the server called complete, so the fallback says the true thing rather than
+ * the detailed one. `probed` is honoured too, so a result shaped by an older
+ * path still reads correctly.
+ */
+function successTitle(result) {
+  const known = CONFIRMATION_TITLES[result?.confirmedBy];
+  if (known !== undefined) {
+    return known;
+  }
+  return result?.probed === true ? CONFIRMATION_TITLES.probe : CONFIRMATION_TITLES.post;
 }
 
 function failureTitle(result, outcome) {

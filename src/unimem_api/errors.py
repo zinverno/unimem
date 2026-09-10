@@ -24,6 +24,14 @@ What is deliberately *not* mapped matters as much as what is. A bare
 invents — none of them appear below, so none is quietly given a friendly status
 code. They fall through to the ASGI server's ordinary 500, which is what an
 unhandled bug should look like. ``BaseException`` is never caught.
+
+One row is not core's. :class:`~unimem_api.replay.CaptureReplayIntegrityError`
+is raised by this package, when a capture that says ``COMPLETE`` turns out to
+have no canonical content — a broken server invariant rather than a failed
+store. It is declared where it is raised instead of being smuggled in as a core
+persistence error for the sake of a convenient status code, and it lands on the
+same fixed ``data_integrity_error`` message every other unreadable-stored-data
+failure does, because it means the same thing to a client.
 """
 
 from collections.abc import Callable
@@ -56,6 +64,7 @@ from core.processing import (
 )
 from core.storage import RawObjectStoreError
 from unimem_api.models import ErrorBody, ErrorResponse
+from unimem_api.replay import CaptureReplayIntegrityError
 
 
 @dataclass(frozen=True)
@@ -135,6 +144,7 @@ ERROR_MAPPINGS: Final[tuple[tuple[type[Exception], HttpError], ...]] = (
     (AmbiguousProcessorError, _ROUTING_MISCONFIGURED),
     (CaptureRecordCorruptError, _DATA_INTEGRITY),
     (ContentObjectCorruptError, _DATA_INTEGRITY),
+    (CaptureReplayIntegrityError, _DATA_INTEGRITY),
     (CaptureRecordPersistenceError, _STORAGE_UNAVAILABLE),
     (ContentObjectPersistenceError, _STORAGE_UNAVAILABLE),
     (RawObjectStoreError, _STORAGE_UNAVAILABLE),
