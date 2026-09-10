@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "UniMem selection capture",
+  "version": "0.1.0",
+  "description": "Save the text you select on a page to your local UniMem capture API.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Save selected text to UniMem"
+  }
+}
