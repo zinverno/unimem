@@ -6,13 +6,14 @@
  * `outcome` alone — never from an exception, a stack, a response body, or the
  * selected text.
  *
- * That last one matters. The selection is the user's content: it may be a
- * password they highlighted by accident or a paragraph from a private document,
- * and a browser action title is visible to anyone looking at the screen and
- * lands in screenshots. It is request payload data and nothing else, so it
- * never appears here, and it is not logged either. Nor do a capture id, a
- * content id, or a URL: they are not wrong to show, they are simply not what a
- * person reading a tooltip needs.
+ * That last one matters. The captured material is the user's content: a
+ * selection may be a password they highlighted by accident or a paragraph from a
+ * private document, and a page snapshot is an entire document including whatever
+ * was on screen behind a login. A browser action title is visible to anyone
+ * looking at the screen and lands in screenshots. Both are request payload data
+ * and nothing else, so neither ever appears here, and neither is logged. Nor do
+ * a capture id, a content id, or a URL: they are not wrong to show, they are
+ * simply not what a person reading a tooltip needs.
  */
 
 import { OUTCOME } from "./outcomes.js";
@@ -24,7 +25,18 @@ export const BADGE_OK = "OK";
 /** Anything else — not saved, or not confirmed. */
 export const BADGE_FAIL = "!";
 
-const BUSY_TITLE = "UniMem: saving selection...";
+/**
+ * What "saving..." says, per capture intent.
+ *
+ * Two words of honesty: a whole-page capture that reported "saving selection"
+ * would be describing something the user did not ask for. The fallback is the
+ * selection wording, so a busy report from a caller that names no kind reads
+ * exactly as it always has.
+ */
+const BUSY_TITLES = Object.freeze({
+  selection: "UniMem: saving selection...",
+  page: "UniMem: saving page...",
+});
 
 /** The one fallback, used for any outcome this map has not been taught. */
 const FALLBACK_TITLE = "UniMem: capture failed";
@@ -46,15 +58,17 @@ const SERVER_ERROR_TITLES = Object.freeze({
   unsupported_payload: "UniMem: this kind of capture is not supported yet",
   invalid_capture_envelope: "UniMem: the capture was rejected as invalid",
   invalid_request: "UniMem: the capture was rejected as invalid",
-  processing_failed: "UniMem: the selection could not be processed",
+  // Modality-neutral since whole-page capture: an HTML snapshot the server
+  // finds no visible text in reaches this code too, and it is not a selection.
+  processing_failed: "UniMem: the capture could not be processed",
   processing_configuration_error: "UniMem: the server is not configured to process this",
   data_integrity_error: "UniMem: the server could not read back its own data",
   storage_unavailable: "UniMem: the capture store is unavailable",
 });
 
-/** What to show the moment the user clicks, before anything has happened. */
-export function busyFeedback() {
-  return { badge: BADGE_BUSY, title: BUSY_TITLE };
+/** What to show the moment the user acts, before anything has happened. */
+export function busyFeedback(kind) {
+  return { badge: BADGE_BUSY, title: BUSY_TITLES[kind] ?? BUSY_TITLES.selection };
 }
 
 /**
@@ -108,6 +122,10 @@ function failureTitle(result, outcome) {
       return "UniMem: cannot capture from this page";
     case OUTCOME.INJECTION_FAILED:
       return "UniMem: cannot read the selection on this page";
+    case OUTCOME.PAGE_CAPTURE_FAILED:
+      // Says only that the page could not be read. Never why, and never with
+      // any of the page in it.
+      return "UniMem: could not read this page";
     case OUTCOME.UNAVAILABLE:
       return result?.probed
         ? "UniMem: service unavailable, capture outcome unknown"

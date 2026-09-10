@@ -68,6 +68,29 @@ export function testEnvelope(overrides = {}) {
   };
 }
 
+/**
+ * The whole-page equivalent, for proving the HTTP client is modality-blind.
+ *
+ * The HTML carries edge whitespace, CRLF, a NBSP, and astral-plane characters,
+ * so a resend that "tidied" the payload would be visible as a different body
+ * rather than only as a different length.
+ */
+export const PAGE_HTML =
+  "  <html>\r\n<head><title>Å \u00a0 — 你好</title></head>" +
+  "<body><p>kept exactly 🌍</p></body>\r\n</html>  ";
+
+export function webpageTestEnvelope(overrides = {}) {
+  return {
+    schema_version: "0.2",
+    id: SUBMITTED_ID,
+    source: { type: "browser", provider: "unimem-browser-extension", url: "https://example.com/a" },
+    payload: { type: "webpage", mime_type: "text/html", html: PAGE_HTML, title: "A page" },
+    context: { captured_at: "2026-01-02T03:04:05.678Z", application: "unimem-browser-extension" },
+    intent: { action: "save" },
+    ...overrides,
+  };
+}
+
 export function createdBody(overrides = {}) {
   return {
     capture_id: SUBMITTED_ID,

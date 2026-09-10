@@ -24,6 +24,7 @@ const ALL_RESULTS = [
   { outcome: OUTCOME.BLANK_SELECTION },
   { outcome: OUTCOME.UNSUPPORTED_PAGE },
   { outcome: OUTCOME.INJECTION_FAILED },
+  { outcome: OUTCOME.PAGE_CAPTURE_FAILED },
   { outcome: OUTCOME.UNAVAILABLE },
   { outcome: OUTCOME.UNAVAILABLE, probed: true },
   { outcome: OUTCOME.UNCONFIRMED },
@@ -163,6 +164,71 @@ describe("titles", () => {
     for (const result of ALL_RESULTS) {
       assert.ok(feedbackFor(result).title.length <= 60, feedbackFor(result).title);
     }
+  });
+});
+
+describe("the vocabulary is covered", () => {
+  it("has a title for every outcome the connector can produce", () => {
+    // A new outcome with no wording falls through to "UniMem: capture failed",
+    // which is a truthful answer but rarely the useful one. This is the test
+    // that makes adding one a deliberate act.
+    const described = new Set(ALL_RESULTS.map((result) => result.outcome));
+
+    assert.deepEqual(
+      Object.values(OUTCOME).filter((outcome) => !described.has(outcome)),
+      [OUTCOME.UNEXPECTED_ERROR],
+    );
+  });
+});
+
+describe("whole-page wording", () => {
+  it("says the page could not be read, and nothing about why", () => {
+    const { badge, title } = feedbackFor({ outcome: OUTCOME.PAGE_CAPTURE_FAILED });
+
+    assert.equal(badge, BADGE_FAIL);
+    assert.equal(title, "UniMem: could not read this page");
+  });
+
+  it("never tells someone who asked to save a page to select some text", () => {
+    const title = feedbackFor({ outcome: OUTCOME.PAGE_CAPTURE_FAILED }).title;
+
+    assert.ok(!/select/i.test(title));
+    assert.ok(!/selection/i.test(title));
+  });
+
+  it("says it is saving a page while a page capture is in flight", () => {
+    assert.deepEqual(busyFeedback("page"), { badge: BADGE_BUSY, title: "UniMem: saving page..." });
+  });
+
+  it("still says it is saving a selection for the selection flow", () => {
+    assert.deepEqual(busyFeedback("selection"), {
+      badge: BADGE_BUSY,
+      title: "UniMem: saving selection...",
+    });
+  });
+
+  it("falls back to the selection wording for a busy report that names no kind", () => {
+    assert.deepEqual(busyFeedback(), busyFeedback("selection"));
+    assert.deepEqual(busyFeedback("something-else"), busyFeedback("selection"));
+  });
+
+  it("reports a confirmed page capture with the same OK the selection gets", () => {
+    assert.equal(feedbackFor({ outcome: OUTCOME.COMPLETE, confirmedBy: "post" }).badge, BADGE_OK);
+    assert.equal(feedbackFor({ outcome: OUTCOME.COMPLETE, confirmedBy: "post" }).title, "UniMem: saved");
+  });
+
+  it("never puts page markup in the title", () => {
+    const smuggled = {
+      outcome: OUTCOME.SERVER_ERROR,
+      status: 422,
+      code: "<html><body>secret</body></html>",
+      message: "<html><body>secret</body></html>",
+    };
+
+    const { title } = feedbackFor(smuggled);
+
+    assert.ok(!title.includes("<html"));
+    assert.ok(!title.includes("secret"));
   });
 });
 

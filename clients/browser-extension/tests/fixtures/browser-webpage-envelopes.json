@@ -1,0 +1,81 @@
+[
+  {
+    "name": "a live page snapshot with a script, a style, and a tab title",
+    "inputs": {
+      "id": "b41d6f2a-3c58-4e77-9a10-5d8e2f6c0741",
+      "html": "<html lang=\"en\"><head><meta charset=\"utf-8\"><title>The canonical object is not Markdown — UniMem</title><style>body{font-family:system-ui;color:#222}nav a{text-decoration:none}</style><script>window.__unimemAnalytics = {loaded: true};</script></head><body><nav><a href=\"/\">Home</a> <a href=\"/adr\">Decisions</a></nav><h1>The canonical object is not Markdown</h1><p>Å vs Å — 你好 🌍 &mdash; and&nbsp;it is still not Markdown.</p><p>This paragraph was appended by page script after the document loaded.</p><img src=\"/diagram.png\" alt=\"a diagram\"><script>document.querySelector('h1').dataset.seen = '1';</script></body></html>",
+      "url": "https://example.com/articles/canonical-content?ref=unimem#section-2",
+      "title": "The canonical object is not Markdown — UniMem",
+      "capturedAt": "2026-01-02T03:04:05.678Z"
+    },
+    "visible_text_contains": [
+      "The canonical object is not Markdown",
+      "Å vs Å — 你好 🌍",
+      "appended by page script",
+      "Decisions"
+    ],
+    "never_in_visible_text": [
+      "__unimemAnalytics",
+      "font-family",
+      "text-decoration",
+      "dataset.seen"
+    ],
+    "envelope": {
+      "schema_version": "0.2",
+      "id": "b41d6f2a-3c58-4e77-9a10-5d8e2f6c0741",
+      "source": {
+        "type": "browser",
+        "provider": "unimem-browser-extension",
+        "url": "https://example.com/articles/canonical-content?ref=unimem#section-2"
+      },
+      "payload": {
+        "type": "webpage",
+        "mime_type": "text/html",
+        "html": "<html lang=\"en\"><head><meta charset=\"utf-8\"><title>The canonical object is not Markdown — UniMem</title><style>body{font-family:system-ui;color:#222}nav a{text-decoration:none}</style><script>window.__unimemAnalytics = {loaded: true};</script></head><body><nav><a href=\"/\">Home</a> <a href=\"/adr\">Decisions</a></nav><h1>The canonical object is not Markdown</h1><p>Å vs Å — 你好 🌍 &mdash; and&nbsp;it is still not Markdown.</p><p>This paragraph was appended by page script after the document loaded.</p><img src=\"/diagram.png\" alt=\"a diagram\"><script>document.querySelector('h1').dataset.seen = '1';</script></body></html>",
+        "title": "The canonical object is not Markdown — UniMem"
+      },
+      "context": {
+        "captured_at": "2026-01-02T03:04:05.678Z",
+        "application": "unimem-browser-extension"
+      },
+      "intent": {
+        "action": "save"
+      }
+    }
+  },
+  {
+    "name": "a snapshot whose tab title is blank omits the title entirely",
+    "inputs": {
+      "id": "d7c9e103-2b64-4a8f-8e35-1f0a9b7c6d24",
+      "html": "<html><head><title>Notes on capture identity</title></head><body><p>One deliberate gesture is one capture.</p></body></html>",
+      "url": "http://localhost:3000/notes",
+      "title": "   ",
+      "capturedAt": "2026-09-09T12:00:00.000Z"
+    },
+    "visible_text_contains": [
+      "One deliberate gesture is one capture."
+    ],
+    "never_in_visible_text": [],
+    "envelope": {
+      "schema_version": "0.2",
+      "id": "d7c9e103-2b64-4a8f-8e35-1f0a9b7c6d24",
+      "source": {
+        "type": "browser",
+        "provider": "unimem-browser-extension",
+        "url": "http://localhost:3000/notes"
+      },
+      "payload": {
+        "type": "webpage",
+        "mime_type": "text/html",
+        "html": "<html><head><title>Notes on capture identity</title></head><body><p>One deliberate gesture is one capture.</p></body></html>"
+      },
+      "context": {
+        "captured_at": "2026-09-09T12:00:00.000Z",
+        "application": "unimem-browser-extension"
+      },
+      "intent": {
+        "action": "save"
+      }
+    }
+  }
+]

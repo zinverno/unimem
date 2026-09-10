@@ -36,74 +36,35 @@ failure instead. The dedicated CI job sets it.
 """
 
 import json
-import os
-import socket
-import sqlite3
-import subprocess
-import threading
-import time
-import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Final, NoReturn
+from typing import Any
 
 import pytest
 from _pytest.outcomes import Failed, Skipped
 from fastapi.testclient import TestClient
 
 from core.contracts import CaptureRecord, CaptureStatus, ContentObject
+from tests.integration.api.connector_support import (
+    CONNECTOR_PORT,
+    REPO_ROOT,
+    REQUIRE_CONNECTOR_INTEGRATION_ENV,
+    connector_integration_required,
+    connector_module,
+    feedback_for,
+    raw_files,
+    read_json,
+    require_node,
+    row_count,
+    run_driver,
+    serve,
+    unavailable,
+)
 from tests.integration.api.test_browser_connector_envelope import (
     FIXTURE_PATH,
     load_cases,
 )
 from unimem_api import DATABASE_FILENAME, build_local_app
-
-#: The repository root, for locating the connector's sources.
-REPO_ROOT = Path(__file__).resolve().parents[3]
-
-#: The connector's documented destination. Its origin is a constant it will not
-#: take from anywhere, so a test that drives the real client has to meet it here.
-CONNECTOR_PORT = 8765
-
-#: Set this in any environment where the cross-language acceptance test is not
-#: allowed to quietly not happen. It turns "run this if the machine can" into
-#: "run this, or fail" — see :func:`unavailable`.
-REQUIRE_CONNECTOR_INTEGRATION_ENV: Final = "UNIMEM_REQUIRE_CONNECTOR_INTEGRATION"
-
-
-def connector_integration_required() -> bool:
-    """Must the cross-language acceptance test actually run here?
-
-    Unset, empty, and ``"0"`` all mean no; anything else means yes. The variable
-    is read at call time rather than at import, so a test can exercise both
-    policies in one session without a subprocess.
-    """
-    return os.environ.get(REQUIRE_CONNECTOR_INTEGRATION_ENV, "") not in ("", "0")
-
-
-def unavailable(reason: str) -> NoReturn:
-    """Refuse to run, as a skip or as a failure depending on the environment.
-
-    This is the whole policy, in one place, so that every prerequisite obeys it
-    and none can be added later that skips unconditionally. A skipped acceptance
-    test and a passing one are indistinguishable in a green CI summary, which is
-    exactly the failure mode the required mode exists to remove.
-    """
-    if connector_integration_required():
-        pytest.fail(
-            f"{reason}. {REQUIRE_CONNECTOR_INTEGRATION_ENV} is set, so the "
-            "cross-language acceptance test must run rather than be skipped."
-        )
-    pytest.skip(f"{reason} (set {REQUIRE_CONNECTOR_INTEGRATION_ENV}=1 to require it)")
-
-
-def node_is_available() -> bool:
-    """Can this machine run the connector's own JavaScript?"""
-    try:
-        found = subprocess.run(["node", "--version"], capture_output=True, check=False)
-    except OSError:
-        return False
-    return found.returncode == 0
 
 
 @pytest.fixture
@@ -123,59 +84,6 @@ def envelope() -> dict[str, Any]:
     case: dict[str, Any] = load_cases()[0]
     built: dict[str, Any] = case["envelope"]
     return built
-
-
-def row_count(database: Path, table: str, capture_id: str, column: str) -> int:
-    """Count rows for one capture, read straight from SQLite.
-
-    Going around both stores is the point. "There is exactly one capture" is a
-    claim about the database, and asking the store that wrote it would be asking
-    the same code whether it did the right thing.
-    """
-    with sqlite3.connect(database) as connection:
-        found = connection.execute(
-            f"SELECT COUNT(*) FROM {table} WHERE {column} = ?", (capture_id,)
-        ).fetchone()
-    connection.close()
-    return int(found[0])
-
-
-def raw_files(data_dir: Path) -> list[Path]:
-    return sorted(path for path in (data_dir / "raw").rglob("*") if path.is_file())
-
-
-def read_json(url: str) -> dict[str, Any]:
-    """Read one JSON document over the live socket, with no client library.
-
-    ``TestClient`` would run the app in this process instead of talking to the
-    one the connector talked to, which is the whole point of these assertions.
-    """
-    with urllib.request.urlopen(url, timeout=10) as response:
-        parsed: dict[str, Any] = json.loads(response.read())
-    return parsed
-
-
-def feedback_for(result: dict[str, Any]) -> str:
-    """The badge the connector's feedback mapper would show for this result.
-
-    Run through the connector's own module rather than restated here, so this
-    cannot claim ``OK`` for a result the extension would badge ``!``.
-    """
-    feedback = REPO_ROOT / "clients" / "browser-extension" / "lib" / "feedback.js"
-    # `node -e` drops its own script from argv, so the two arguments after `--`
-    # land at indices 1 and 2 rather than at 2 and 3.
-    script = (
-        "const { feedbackFor } = await import(process.argv[1]);"
-        "console.log(feedbackFor(JSON.parse(process.argv[2])).badge);"
-    )
-    run = subprocess.run(
-        ["node", "--input-type=module", "-e", script, "--", feedback.as_uri(), json.dumps(result)],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=True,
-    )
-    return run.stdout.strip()
 
 
 class TestTheLostResponse:
@@ -333,54 +241,11 @@ class TestTheLostResponse:
         assert len(raw_files(data_dir)) == 1
 
 
-def port_is_free(port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            probe.bind(("127.0.0.1", port))
-        except OSError:
-            return False
-    return True
-
-
 @pytest.fixture
 def live_server(data_dir: Path) -> Iterator[str]:
-    """The real application, on a real socket, at the connector's own address.
-
-    ``TestClient`` is not enough here: the client under test is JavaScript in
-    another process, and it will only ever talk to ``http://127.0.0.1:8765``
-    because its destination is a constant it refuses to take from anywhere else.
-    Meeting it there is part of what this test proves.
-    """
-    import uvicorn
-
-    if not port_is_free(CONNECTOR_PORT):
-        unavailable(f"port {CONNECTOR_PORT} is already in use")
-
-    config = uvicorn.Config(
-        build_local_app(data_dir), host="127.0.0.1", port=CONNECTOR_PORT, log_level="error"
-    )
-    server = uvicorn.Server(config)
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-
-    # Never a skip, in either mode. Being unable to start the server is not a
-    # missing prerequisite — it is the thing under test failing to come up.
-    deadline = time.monotonic() + 30
-    while not server.started:
-        if time.monotonic() > deadline:  # pragma: no cover - only on a broken host
-            server.should_exit = True
-            thread.join(timeout=10)
-            pytest.fail(f"the API did not start on 127.0.0.1:{CONNECTOR_PORT}")
-        if not thread.is_alive():  # pragma: no cover - only on a broken host
-            pytest.fail(f"the API process died while starting on port {CONNECTOR_PORT}")
-        time.sleep(0.02)
-
-    try:
-        yield f"http://127.0.0.1:{CONNECTOR_PORT}"
-    finally:
-        server.should_exit = True
-        thread.join(timeout=10)
+    """The real application, on a real socket, at the connector's own address."""
+    with serve(data_dir) as base_url:
+        yield base_url
 
 
 #: Drives the connector's real `sendCapture` with a `fetch` that loses the first
@@ -436,24 +301,15 @@ class TestThroughTheConnectorItself:
         a test added later. Under
         ``UNIMEM_REQUIRE_CONNECTOR_INTEGRATION`` this is a failure, not a skip.
         """
-        if not node_is_available():
-            unavailable("node is not available")
+        require_node()
 
     @pytest.fixture
     def driven(self, live_server: str, envelope: dict[str, Any], tmp_path: Path) -> dict[str, Any]:
-        api_module = REPO_ROOT / "clients" / "browser-extension" / "lib" / "api.js"
-        driver = tmp_path / "drive-connector.mjs"
-        driver.write_text(CONNECTOR_DRIVER, encoding="utf-8")
-        run = subprocess.run(
-            ["node", str(driver), api_module.as_uri(), json.dumps(envelope)],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            env=os.environ | {"NO_COLOR": "1"},
+        return run_driver(
+            CONNECTOR_DRIVER,
+            [connector_module("lib", "api.js"), json.dumps(envelope)],
+            tmp_path,
         )
-        assert run.returncode == 0, run.stderr
-        outcome: dict[str, Any] = json.loads(run.stdout)
-        return outcome
 
     def test_the_connector_reports_a_complete_capture(self, driven: dict[str, Any]) -> None:
         """The badge the user sees is ``OK``, and it is telling the truth."""

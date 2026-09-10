@@ -1,5 +1,9 @@
 /**
- * The capture flow: what one deliberate click actually does.
+ * The selection capture flow: what one deliberate left click actually does.
+ *
+ * Its sibling is `page.js`, which is what a deliberate right click on the same
+ * icon does. This file is unchanged by that addition: a selection capture never
+ * reads the page's HTML, and nothing here knows the other flow exists.
  *
  * Every browser API this needs arrives as an injected dependency, so the whole
  * sequence — including the paths that only happen on a browser internal page or
@@ -52,11 +56,15 @@ export function readSelection() {
 }
 
 /**
- * Can a selection be captured from this URL?
+ * Can content be captured from this URL?
  *
  * Browser internal pages (`chrome://`, `edge://`), extension pages, and `file:`
  * URLs are refused locally and visibly. Broadening permissions to reach them is
  * not a trade this connector makes.
+ *
+ * Shared by both capture flows on purpose. "Which pages will UniMem touch?" is
+ * one question with one answer, and a whole-page flow with its own URL policy
+ * would be a second answer nobody compared to the first.
  */
 export function isCapturablePage(url) {
   if (typeof url !== "string" || url === "") {
@@ -74,8 +82,11 @@ export function isCapturablePage(url) {
  *
  * Returns the outcome as well as reporting it, so a test can assert on the
  * result rather than on the UI. Nothing is written anywhere but the badge and
- * title: there is no `chrome.storage`, no history, no queue, and no retry — the
- * server is the only authority on what happened.
+ * title: there is no `chrome.storage`, no history, and no persistent retry queue
+ * or state. There is no general retry loop or policy here either — but a POST
+ * that fails at the network layer leaves the outcome genuinely unknown, and
+ * `sendCapture` resolves that ambiguity with its own bounded recovery (see
+ * `api.js`). The server remains the only authority on what happened.
  */
 export async function runCapture(tab, deps) {
   const { executeScript, sendCapture, report, newId = newCaptureId, now = nowIso } = deps;
@@ -113,8 +124,13 @@ export async function runCapture(tab, deps) {
   return finish(report, await sendCapture(envelope));
 }
 
-/** Marker for the in-progress report, kept out of the outcome vocabulary. */
-const OUTCOME_BUSY = Object.freeze({ busy: true });
+/**
+ * Marker for the in-progress report, kept out of the outcome vocabulary.
+ *
+ * `kind` is what lets the badge's tooltip say which of the two captures is in
+ * flight without the feedback mapper learning anything about either flow.
+ */
+const OUTCOME_BUSY = Object.freeze({ busy: true, kind: "selection" });
 
 function finish(report, result) {
   report(result);

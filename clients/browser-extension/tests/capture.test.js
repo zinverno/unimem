@@ -6,6 +6,10 @@
  * lives in `lib/` at all: that the request destination never comes from the
  * page, that nothing is sent before the page is checked, and that the function
  * injected into the page knows nothing about UniMem.
+ *
+ * The whole-page flow's equivalents live in `page.test.js`. What stays here is
+ * the selection flow, unchanged: a left click still means the selection, and
+ * nothing in this file was relaxed to make room for the second gesture.
  */
 
 import { readFileSync } from "node:fs";
@@ -301,10 +305,43 @@ describe("the service worker's own source", () => {
     assert.ok(!workerSource.includes("indexedDB"));
   });
 
-  it("registers no context menu, alarm, or notification", () => {
-    for (const api of ["contextMenus", "alarms", "notifications", "tabs.query", "webRequest"]) {
+  it("registers no alarm, notification, tab query, or request interceptor", () => {
+    for (const api of ["alarms", "notifications", "tabs.query", "webRequest", "declarativeNet"]) {
       assert.ok(!workerSource.includes(api), api);
     }
+  });
+
+  it("registers exactly one context menu, from the installation lifecycle", () => {
+    // The only `chrome.contextMenus` use here is the click listener; creation
+    // goes through `lib/menu.js` and is reached from `onInstalled`, so a woken
+    // service worker does not add a second copy of the item.
+    assert.match(workerSource, /chrome\.runtime\.onInstalled\.addListener/);
+    assert.match(workerSource, /createWholePageMenu\(chrome\.contextMenus\)/);
+    assert.equal(workerSource.split("createWholePageMenu").length - 1, 2);
+    assert.equal(workerSource.split("chrome.contextMenus.onClicked").length - 1, 1);
+  });
+
+  it("adds no page-wide or selection context menu", () => {
+    for (const context of ['"page"', '"selection"', '"link"', '"image"', '"all"']) {
+      assert.ok(!workerSource.includes(context), context);
+    }
+  });
+
+  it("ignores context-menu clicks that are not ours before doing anything", () => {
+    assert.match(workerSource, /if \(!isWholePageMenu\(info\)\) \{\s*return;/);
+  });
+
+  it("injects the page reader for the whole-page path, and only there", () => {
+    assert.match(workerSource, /func: readPageHtml/);
+    assert.equal(workerSource.split("func: readPageHtml").length - 1, 1);
+    assert.equal(workerSource.split("func: readSelection").length - 1, 1);
+  });
+
+  it("keeps the two flows apart", () => {
+    // The click listener runs the selection flow and the menu listener runs the
+    // page flow. Neither calls the other's reader.
+    assert.match(workerSource, /chrome\.action\.onClicked[\s\S]*?runCapture\(tab/);
+    assert.match(workerSource, /chrome\.contextMenus\.onClicked[\s\S]*?runWholePageCapture\(tab/);
   });
 
   it("logs nothing", () => {
@@ -320,7 +357,7 @@ describe("the service worker's own source", () => {
 
 describe("the connector keeps no persistent state", () => {
   it("no library module touches storage", () => {
-    for (const name of ["api", "capture", "envelope", "feedback", "outcomes"]) {
+    for (const name of ["api", "capture", "envelope", "feedback", "menu", "outcomes", "page"]) {
       const source = codeOf(`../lib/${name}.js`);
       assert.ok(!source.includes("chrome.storage"), name);
       assert.ok(!source.includes("localStorage"), name);
@@ -329,7 +366,7 @@ describe("the connector keeps no persistent state", () => {
   });
 
   it("no library module schedules an automatic retry", () => {
-    for (const name of ["api", "capture"]) {
+    for (const name of ["api", "capture", "page"]) {
       const source = codeOf(`../lib/${name}.js`);
       assert.ok(!source.includes("setTimeout"), name);
       assert.ok(!source.includes("setInterval"), name);

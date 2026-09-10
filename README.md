@@ -70,7 +70,7 @@ Phase 1 builds the first product surface around it:
   `clients/browser-extension/`: select text, click the action, and the selection
   becomes a canonical `CaptureEnvelope` POSTed to the local API. The first real
   client of the Phase-1 surface, and the first end-to-end product path — see
-  *Browser selection capture*, below.
+  *Browser capture*, below.
 - **Phase 1, PR 3 — completed-capture replay.** The connector's first real
   requirement: a client that loses the response to its POST can resend the
   identical envelope under the identical capture id and be handed the capture it
@@ -80,6 +80,18 @@ Phase 1 builds the first product surface around it:
   difference is still `409`, and a duplicate that is not complete is still `409`.
   No idempotency key, no idempotency table, no schema change, and no change under
   `src/core/`.
+
+Phase 2 asks the first question about *modality*:
+
+- **Phase 2, PR 1 — HTML webpage ingestion.** An HTML-backed `webpage`
+  `CaptureEnvelope` becomes an immutable HTML original and a deterministic
+  canonical `web` `ContentObject`, through the existing lifecycle and route. No
+  contract change; the schema stays `0.2`.
+- **Phase 2, PR 2 — browser whole-page capture.** The extension learns the other
+  half: right-click its toolbar icon and choose **Save whole page to UniMem**,
+  and the current document's serialized DOM is submitted as exactly that
+  envelope. `contextMenus` is the only new permission, and it grants access to
+  no website — see *Browser capture*, below. **Nothing under `src/` changed.**
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 
@@ -240,18 +252,20 @@ A few things are worth being precise about:
   `text` or `file_ref` is refused with `422 unsupported_payload` rather than
   silently dropping one of them — a capture stores one raw original, and this
   build will not choose for you.
-- **There is no whole-page browser-extension action yet.** The extension below
-  remains selection-only; capturing a page today means POSTing its HTML, as
-  above.
+- **The extension can now capture a whole page**, by right-clicking its toolbar
+  icon — see *Browser capture*, below. What it submits is the browser's
+  serialization of the current DOM, not the page's original network source. You
+  can still POST a page's HTML yourself, exactly as above.
 - Completed replay is text-only, so resubmitting the same webpage capture id is
-  `409` even when the request is identical.
+  `409` even when the request is identical. The extension handles that: it makes
+  one read-only check and reports what the server actually holds.
 
 `GET /health` reports process liveness only and checks nothing else.
 
-## Browser selection capture
+## Browser capture
 
-The first real client of that API: a Chromium extension that saves the text you
-have selected on a page.
+The first real client of that API: a Chromium extension that saves either the
+text you have selected or the page you are looking at.
 
 1. Start the UniMem API:
 
@@ -264,11 +278,40 @@ have selected on a page.
 4. Choose **Load unpacked**.
 5. Select `clients/browser-extension`.
 6. Pin the extension if you want it visible in the toolbar.
-7. Open an ordinary `http://` or `https://` page.
-8. Select some text.
-9. Click **Save selected text to UniMem**.
 
-The badge is the whole UI:
+### Saving a selection
+
+1. Open an ordinary `http://` or `https://` page.
+2. Select some text.
+3. **Left-click** the UniMem toolbar icon.
+4. `OK` means the server confirmed a complete capture.
+
+### Saving a whole page
+
+1. Open an ordinary `http://` or `https://` page.
+2. **Right-click** the UniMem toolbar icon.
+3. Choose **Save whole page to UniMem**.
+4. `OK` means the server confirmed a complete capture.
+
+**What "whole page" means, precisely.** The extension submits
+`document.documentElement.outerHTML`: the browser's serialization of the
+document's current top-level DOM, as it is at the moment you choose the menu
+item. **It is not the original network source and not "view source".** It
+includes changes JavaScript has already made to the page, and it differs from
+what the server sent because the browser parsed the document and serialized it
+back. It does not include a doctype, shadow DOM, iframe contents, stylesheets,
+images, or any other resource — those are referenced, not contained. What UniMem
+guarantees is the narrow, true thing: the exact string the extension submitted is
+what is stored, byte for byte, and stays retrievable.
+
+Left-click is still selection capture, and right-click is the only new
+interaction. There is no popup: the click *is* the permission — it grants
+`activeTab` for that one tab and that one gesture, which is why the extension
+holds standing access to no website at all.
+
+### The badge
+
+The badge is the whole UI, for both captures:
 
 | Badge | Meaning |
 | --- | --- |
@@ -277,39 +320,78 @@ The badge is the whole UI:
 | `!` | not saved, or not confirmed |
 
 Hover the toolbar icon for the detail (`UniMem: saved`, `UniMem: select some text
-first`, `UniMem: service unavailable`, and so on). A capture confirmed after a
-lost response reads `UniMem: saved (confirmed retry)` — still one capture, and
-still `OK`.
+first`, `UniMem: could not read this page`, `UniMem: service unavailable`, and so
+on). A capture confirmed after a lost response reads `UniMem: saved (confirmed
+retry)` or `UniMem: saved (confirmed after a network error)` — still one capture,
+and still `OK`.
 
-The capture goes through the same path as any other client: your selection
-becomes a canonical `CaptureEnvelope`, is POSTed to
-`http://127.0.0.1:8765/v1/captures`, and is stored, normalized, and completed
-synchronously. Read it back with the same two `GET`s shown above.
+Either capture goes through the same path as any other client: it becomes a
+canonical `CaptureEnvelope`, is POSTed to `http://127.0.0.1:8765/v1/captures`,
+and is stored, normalized, and completed synchronously. Read it back with the
+same two `GET`s shown above.
 
-Current limitations, all deliberate for this phase:
+### Permissions
+
+```json
+"permissions": ["activeTab", "scripting", "contextMenus"],
+"host_permissions": ["http://127.0.0.1/*"]
+```
+
+That is the entire manifest's access story. `contextMenus` is what puts the item
+in the menu and grants access to no website; `host_permissions` names only the
+local API. There is no `<all_urls>`, no `tabs`, no `storage`, no `cookies`, no
+`webRequest`, and no content script — nothing touches a page until you ask.
+
+### Current limitations
+
+All deliberate for this phase:
 
 - **Chrome/Chromium MV3 only.** No Firefox or Safari port.
-- **Top-level document selection only.** A selection inside a cross-origin
-  iframe is not captured, and widening permissions to reach one is not a trade
-  this connector makes.
+- **Top-level document only**, for both captures. A selection inside a
+  cross-origin iframe is not captured, and an iframe's contents are not part of a
+  page snapshot. Widening permissions to reach them is not a trade this connector
+  makes.
+- **A page snapshot is a DOM serialization**, with the consequences described
+  above. There is no reader mode, article extraction, screenshot, or resource
+  archiving.
 - **The API address is fixed** at `http://127.0.0.1:8765`. There is no options
   page and no configurable host or port; the server's `--host`/`--port` flags
   still work, but this connector targets the documented default.
-- **Only `http://` and `https://` pages.** Clicking on `chrome://`, extension,
-  or `file://` pages fails locally and sends nothing.
+- **Only `http://` and `https://` pages.** Acting on `chrome://`, extension, or
+  `file://` pages fails locally and sends nothing.
 - **No server authentication.** Keep the API on localhost.
 - **No general retry policy — one bounded resend.** A capture that gets any HTTP
   response is never sent again: the server answered, and that is the answer. Only
   a request that fails at the *network* layer, where the outcome is genuinely
   unknown, is resent — once, as the byte-identical envelope under the same
-  capture id, because the server answers such a resend with the capture it
-  already made. If that resend is also lost, or comes back as a conflict the
+  capture id. If that resend is also lost, or comes back as a conflict the
   connector cannot interpret, it makes one read-only check and tells you what it
-  found. The hard limit for one click is two POSTs and one read; there is no
+  found. The hard limit for one gesture is two POSTs and one read; there is no
   loop, no backoff, and no queue.
+- **A lost whole-page response costs that extra check.** Completed replay is
+  text-only, so a resent page capture is answered `409` and the connector
+  confirms the outcome with the read rather than guessing from the conflict.
 - **No extension history.** The extension stores nothing; the server is the only
   record of what was captured.
-- **Selection only.** No whole-page capture, no HTML, no screenshots.
+
+### Manual acceptance checklist
+
+The automated suites cover the flows, the envelopes, the network bounds, and the
+extension's real registration in Chromium. **They do not dispatch a real toolbar
+click or right-click** — that needs browser automation this phase deliberately
+does not add. Run these by hand, with the API started as above:
+
+| | Check | Expect |
+| --- | --- | --- |
+| **A** | Select text on an ordinary page, left-click the icon | `...` then `OK`; `GET /v1/captures/{id}/content` shows the selection exactly |
+| **B** | Right-click the icon, choose **Save whole page to UniMem** | `...` then `OK`; a `web` `ContentObject` with the page's visible text |
+| **C** | Do B on a page with `<script>` and `<style>` | Script and CSS text are absent from the canonical segment; the stored original still contains them |
+| **D** | Do B on a page you have changed with JavaScript first (expand a section, or edit the DOM in DevTools) | The snapshot reflects what is on screen now, not the original source |
+| **E** | Do B on `chrome://extensions` | `!` and `UniMem: cannot capture from this page`; no request is sent |
+| **F** | Stop the API, then do A and B | `!` and a service-unavailable tooltip; nothing is queued |
+| **G** | Restart the API on the same `--data-dir` and re-read the captures from A and B | Both are still `complete`, with their content and their exact originals |
+
+Nothing here is claimed to have passed automatically.
 
 ## Layout
 

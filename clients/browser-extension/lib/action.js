@@ -7,10 +7,11 @@
  *
  * Two rules, both learned from what the naive version gets wrong.
  *
- * **Feedback is scoped to the tab that was clicked.** `chrome.action`'s badge
+ * **Feedback is scoped to the tab that was acted on.** `chrome.action`'s badge
  * and title are *global* defaults unless a `tabId` is supplied, so a capture on
  * one page would otherwise leave `OK` — or `!` — sitting on every other tab the
- * user has open, describing something that never happened there.
+ * user has open, describing something that never happened there. This holds for
+ * both gestures: a left click and a right-click menu item alike.
  *
  * **Applying feedback can never throw or reject.** The tab may have closed
  * while the capture was in flight, which makes both calls fail. There is
@@ -23,23 +24,27 @@ import { busyFeedback, feedbackFor } from "./feedback.js";
 /**
  * The `chrome.action` details fragment that scopes a call to one tab.
  *
- * Returns an empty object when there is no tab to scope to — a click whose tab
- * Chrome did not give us. Global feedback is the honest fallback there: it is
- * the only surface left, and the alternative is silence.
+ * Returns an empty object when there is no tab to scope to — a click or a menu
+ * activation whose tab Chrome did not give us. Global feedback is the honest
+ * fallback there: it is the only surface left, and the alternative is silence.
  */
 export function scopeForTab(tab) {
   return typeof tab?.id === "number" ? { tabId: tab.id } : {};
 }
 
 /**
- * Show one result on the clicked tab's action.
+ * Show one result on the acted-on tab's action.
  *
  * Terminal by construction: it returns nothing, throws nothing, and leaves no
  * pending rejection behind, so a caller can use it as the last thing that
  * happens on any path — including the path that handles a failure.
+ *
+ * A busy marker may name which capture is in flight (`kind`), which is the only
+ * thing this module knows about there being two of them. Everything else — the
+ * badge, the scoping, the swallowing — is identical for both.
  */
 export function applyFeedback(action, tab, result) {
-  const { badge, title } = result?.busy === true ? busyFeedback() : feedbackFor(result);
+  const { badge, title } = result?.busy === true ? busyFeedback(result.kind) : feedbackFor(result);
   const scope = scopeForTab(tab);
   settle(() => action.setBadgeText({ text: badge, ...scope }));
   settle(() => action.setTitle({ title, ...scope }));
