@@ -5,7 +5,7 @@ persists bytes, processors normalize, renderers project, and the capture record
 store persists snapshots — but nothing called them in order. Intake is the first
 code that owns a sequence, and the sequence is the whole of it::
 
-    CaptureEnvelope(TEXT)
+    CaptureEnvelope(TEXT | html-backed WEBPAGE)
         -> CaptureRecord(RECEIVED)   created first, with the capture metadata
         -> RawObjectStore            the immutable original
         -> CaptureRecord(STORED)     replaced with the reference to those bytes
@@ -18,6 +18,14 @@ evidence anyone ever asked for them.
 Intake orchestrates and nothing else: it does not process, route, render,
 create a ``ContentObject``, or decide a lifecycle policy beyond the two states
 it writes.
+
+Phase 2 PR 1 widened exactly one thing here: *which submitted field becomes the
+raw original*. A ``TEXT`` capture stores ``payload.text``, an HTML-backed
+``WEBPAGE`` capture stores ``payload.html``, and both store the exact UTF-8
+encoding of that string and nothing else. The lifecycle, the ordering, the
+metadata, and the text path's bytes are untouched — intake still does not parse,
+extract, or look inside the material it stores, and the HTML never appears
+anywhere on the ``CaptureRecord``.
 """
 
 from collections.abc import Callable
@@ -37,12 +45,19 @@ from core.intake.errors import (
 from core.persistence import CaptureRecordStore
 from core.storage import RawObjectStore
 
-#: The encoding inline capture text is written with. It is not a preference:
-#: Phase 0C's ``TextProcessor`` decodes stored originals as strict UTF-8, so
-#: these two must name the same encoding for a capture to survive its own
-#: pipeline. A second encoding would be a decision at both ends, not a default
-#: at one.
+#: The encoding inline capture material is written with — the submitted text of
+#: a ``TEXT`` capture, and since Phase 2 the submitted HTML of a ``WEBPAGE``
+#: one. It is not a preference: the processors decode stored originals as
+#: strict UTF-8, so these must name the same encoding for a capture to survive
+#: its own pipeline. A second encoding would be a decision at both ends, not a
+#: default at one. The name is kept from Phase 0F because the constant is
+#: exported and the value it names has not changed.
 TEXT_ENCODING: Final = "utf-8"
+
+#: The payload fields that carry submitted material a ``CaptureRecord`` could
+#: store as its one raw original. A ``WEBPAGE`` envelope naming more than one of
+#: them is refused rather than resolved: see :meth:`CaptureIntake._webpage_html`.
+MATERIAL_PAYLOAD_FIELDS: Final = ("text", "html", "file_ref")
 
 
 def utc_now() -> datetime:
@@ -57,8 +72,10 @@ class CaptureIntake:
     ``RawObjectStore`` and ``CaptureRecordStore`` and on no backend. The clock
     is injected as a plain callable for the same reason and no more: a test
     needs to control time, which a function already does. There is no clock
-    class, no service hierarchy, no container, no registry, and no router —
-    Phase 0F supports one payload type, so there is nothing to route.
+    class, no service hierarchy, no container, no registry, and no router.
+    Routing is the *processing* layer's job and stays there: intake decides only
+    whether it can turn a payload into bytes, which is a property of the
+    envelope and needs no registry to answer.
     """
 
     def __init__(
@@ -80,7 +97,7 @@ class CaptureIntake:
         1. refuse anything it cannot materialize, before any side effect;
         2. create a ``RECEIVED`` record — the receipt, written first, and
            already carrying the envelope's capture-time metadata;
-        3. store the exact UTF-8 bytes of the text;
+        3. store the exact UTF-8 bytes of the submitted material;
         4. replace the receipt with a ``STORED`` record carrying the reference.
 
         The metadata is durable from step 2, not step 4: a capture stranded by
@@ -158,26 +175,102 @@ class CaptureIntake:
     def _materialize(envelope: CaptureEnvelope) -> bytes:
         """Turn the envelope's payload into the exact bytes to store.
 
-        Encoding is the only transformation. The text is not trimmed, Unicode
-        normalized, BOM-prefixed, or line-ending rewritten, and no encoding is
-        detected or attempted other than UTF-8 — what the caller submitted is
-        what a future processor reads back.
+        Encoding is the only transformation, for every supported payload type.
+        Nothing is trimmed, Unicode normalized, BOM-prefixed, or line-ending
+        rewritten, and no encoding is detected or attempted other than UTF-8 —
+        what the caller submitted is what a future processor reads back.
 
-        The two refusals are different things. A non-``TEXT`` payload is a
-        valid envelope naming a capability this phase does not have, and a
-        later phase will accept it unchanged. A ``TEXT`` payload with no text
-        is an envelope contradicting its own contract, which no phase will
-        accept. Both are raised before the clock is read or a store is
+        Two payload types are supported, and each names exactly one submitted
+        field as the material::
+
+            TEXT                     payload.text
+            WEBPAGE (HTML-backed)    payload.html
+
+        The refusals come in two kinds, and they are different things. An
+        envelope naming a capability this build does not have is *valid* — a
+        later phase may accept it unchanged — and raises
+        :class:`~core.intake.errors.UnsupportedCapturePayloadError`. An envelope
+        contradicting its own contract raises
+        :class:`~core.intake.errors.InvalidCaptureEnvelopeError`, which no phase
+        will accept. Both are raised before the clock is read or a store is
         touched, so a refused envelope leaves nothing behind.
         """
-        if envelope.payload.type is not CapturePayloadType.TEXT:
-            raise UnsupportedCapturePayloadError(
-                f"capture {envelope.id!r} carries a {envelope.payload.type.value} payload; "
-                f"this phase accepts inline {CapturePayloadType.TEXT.value} only"
-            )
+        match envelope.payload.type:
+            case CapturePayloadType.TEXT:
+                return CaptureIntake._text(envelope).encode(TEXT_ENCODING)
+            case CapturePayloadType.WEBPAGE:
+                return CaptureIntake._webpage_html(envelope).encode(TEXT_ENCODING)
+            case _:
+                raise UnsupportedCapturePayloadError(
+                    f"capture {envelope.id!r} carries a {envelope.payload.type.value} payload; "
+                    f"this build accepts inline {CapturePayloadType.TEXT.value} and "
+                    f"html-backed {CapturePayloadType.WEBPAGE.value} captures only"
+                )
+
+    @staticmethod
+    def _text(envelope: CaptureEnvelope) -> str:
+        """The submitted text of a ``TEXT`` capture.
+
+        A ``TEXT`` payload with no text is an envelope contradicting its own
+        contract. A well-formed ``CapturePayload`` cannot reach this state — the
+        contract's own validator requires text for a text payload — but Phase 0A
+        documents that an assignment rejected by a model-level validator has
+        already been written, so a caller can hold an envelope that no longer
+        satisfies its own invariants.
+        """
         text = envelope.payload.text
         if text is None:
             raise InvalidCaptureEnvelopeError(
                 f"capture {envelope.id!r} declares a text payload but carries no text"
             )
-        return text.encode(TEXT_ENCODING)
+        return text
+
+    @staticmethod
+    def _webpage_html(envelope: CaptureEnvelope) -> str:
+        """The submitted HTML of a ``WEBPAGE`` capture, or a refusal.
+
+        Phase 2 PR 1 supports exactly one materialization of a webpage: the
+        HTML-backed form, where ``payload.html`` is the whole of the submitted
+        material. That restriction is not squeamishness, it is arithmetic. A
+        ``CaptureRecord`` holds **one** raw original reference, so an envelope
+        carrying HTML *and* ``text`` or ``file_ref`` offers more material than
+        this record can store. Silently picking the HTML would durably discard
+        something the client submitted and report success, which is the one
+        outcome worth refusing outright — so an ambiguous webpage is refused,
+        and nothing is dropped.
+
+        The canonical contract deliberately stays wider than this: it allows a
+        webpage envelope backed by ``text``, and it always will. What is
+        narrowed here is only what *this build* promises to ingest, which is why
+        the refusal is an unsupported-capability error rather than a validation
+        one — a later phase that can represent several materializations will
+        accept these identical envelopes unchanged.
+
+        No field is read for its value, and none is echoed: the refusals name
+        the payload type and the field *names* only, so no submitted markup can
+        reach an error message or a log through here.
+        """
+        payload = envelope.payload
+        if payload.html is None:
+            if payload.text is None:
+                raise InvalidCaptureEnvelopeError(
+                    f"capture {envelope.id!r} declares a webpage payload "
+                    f"but carries neither html nor text"
+                )
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries a webpage payload backed by text; "
+                f"this build ingests html-backed webpage captures only"
+            )
+        alongside = [
+            name
+            for name in MATERIAL_PAYLOAD_FIELDS
+            if name != "html" and getattr(payload, name) is not None
+        ]
+        if alongside:
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries a webpage payload with html and "
+                f"{' and '.join(alongside)}; a capture stores one raw original, and this "
+                f"build will not choose between submitted representations — resubmit with "
+                f"html alone"
+            )
+        return payload.html

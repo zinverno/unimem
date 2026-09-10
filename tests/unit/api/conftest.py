@@ -1,9 +1,10 @@
 """Fixtures for the API tests: a real pipeline over fake backends.
 
 The default stack is the genuine one — ``CaptureIntake``, ``ProcessorRouter``,
-``TextProcessor``, ``ProcessingOrchestrator`` — with only the three stores
-replaced. So a test that posts an envelope really does encode, hash, store,
-route, decode, and normalize it; what it does not do is touch a disk.
+``TextProcessor``, ``WebpageProcessor``, ``ProcessingOrchestrator`` — with only
+the three stores replaced. So a test that posts an envelope really does encode,
+hash, store, route, decode, extract, and normalize it; what it does not do is
+touch a disk.
 
 :func:`build_client` is the seam for the tests that need something else: a
 failing store, a refusing processor, an empty router. Everything it takes has a
@@ -17,7 +18,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.intake import CaptureIntake
-from core.processing import ProcessingOrchestrator, Processor, ProcessorRouter, TextProcessor
+from core.processing import (
+    ProcessingOrchestrator,
+    Processor,
+    ProcessorRouter,
+    TextProcessor,
+    WebpageProcessor,
+)
 from tests.unit.api.doubles import (
     FakeCaptureRecordStore,
     FakeContentObjectStore,
@@ -61,7 +68,13 @@ def build_stack(
     raw_store = raw_store if raw_store is not None else FakeRawObjectStore()
     record_store = record_store if record_store is not None else FakeCaptureRecordStore()
     content_store = content_store if content_store is not None else FakeContentObjectStore()
-    processors = processors if processors is not None else [TextProcessor(raw_store)]
+    processors = (
+        processors
+        if processors is not None
+        # The same two the composition root registers, in the same order — so
+        # "the default stack is the genuine one" keeps meaning that.
+        else [TextProcessor(raw_store), WebpageProcessor(raw_store)]
+    )
 
     intake = CaptureIntake(raw_store, record_store)
     orchestrator = ProcessingOrchestrator(ProcessorRouter(processors), record_store, content_store)

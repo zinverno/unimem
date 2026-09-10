@@ -171,13 +171,17 @@ class TestUnknownSchemaVersion:
 
 
 class TestUnsupportedPayload:
-    """A valid envelope naming a capability this build does not have."""
+    """A valid envelope naming a capability this build does not have.
+
+    ``webpage`` is no longer one of them — Phase 2 PR 1 made the HTML-backed
+    form a real capability, and the shapes of it that are still refused are
+    asserted in ``test_webpage_capture_submission.py``.
+    """
 
     @pytest.mark.parametrize(
         "payload",
         [
             {"type": "image", "file_ref": "blob://screenshot"},
-            {"type": "webpage", "html": "<p>hi</p>"},
             {"type": "document", "file_ref": "blob://report.pdf"},
             {"type": "video", "file_ref": "blob://clip.mp4"},
             {"type": "file", "file_ref": "blob://archive.zip"},

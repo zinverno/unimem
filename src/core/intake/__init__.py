@@ -2,11 +2,13 @@
 
 Phase 0F answers one question — how does a valid inline-text
 ``CaptureEnvelope`` become an immutable raw object plus a durably registered
-``CaptureRecord``?
+``CaptureRecord``? Phase 2 PR 1 adds the second answer to the same question, for
+an HTML-backed ``WEBPAGE`` envelope, by naming a second submitted field as the
+material and changing nothing else.
 
 ::
 
-    CaptureEnvelope(TEXT)
+    CaptureEnvelope(TEXT | html-backed WEBPAGE)
         |
     CaptureIntake ------> CaptureRecordStore   CaptureRecord(RECEIVED)
         |
@@ -27,7 +29,17 @@ identical text yield two capture records pointing at one deduplicated raw
 object.
 
 A duplicate capture id is an error, not a quietly successful retry: Phase 0F
-has no idempotency keys, no replay, and no resume.
+has no idempotency keys, no replay, and no resume. (Phase 1 PR 3 answers the
+narrow lost-response case above intake, in the delivery layer, for ``TEXT``
+only — intake itself is unchanged by it.)
+
+**Which payload types are materializable is a capability, not a contract
+rule.** The canonical ``CapturePayload`` allows shapes this build does not
+ingest — a webpage backed by ``text``, a webpage carrying both ``html`` and
+``text`` — and it keeps allowing them. Intake refuses those as *unsupported*,
+not as invalid, and refuses them before any side effect, so a later phase that
+can represent several materializations accepts the identical envelopes
+unchanged. What it never does is pick one representation and drop the rest.
 """
 
 from core.intake.errors import (
@@ -35,9 +47,15 @@ from core.intake.errors import (
     InvalidCaptureEnvelopeError,
     UnsupportedCapturePayloadError,
 )
-from core.intake.service import TEXT_ENCODING, CaptureIntake, utc_now
+from core.intake.service import (
+    MATERIAL_PAYLOAD_FIELDS,
+    TEXT_ENCODING,
+    CaptureIntake,
+    utc_now,
+)
 
 __all__ = [
+    "MATERIAL_PAYLOAD_FIELDS",
     "TEXT_ENCODING",
     "CaptureIntake",
     "CaptureIntakeError",
