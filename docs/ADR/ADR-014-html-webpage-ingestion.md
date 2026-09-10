@@ -348,6 +348,17 @@ Whole-page browser capture is the obvious next product move and is deliberately
 *not* in this PR. This one proves the server-side capability first; a connector
 that captures pages nothing can process would be the wrong order.
 
+> **Since Phase 2 PR 2** ([ADR-015](ADR-015-browser-whole-page-capture.md)): the
+> browser can now supply HTML to this pipeline. Right-clicking the extension's
+> toolbar icon and choosing "Save whole page to UniMem" submits the current
+> top-level document's `outerHTML` as exactly the HTML-backed `webpage` envelope
+> described here, on the existing route, with **no change to anything in this
+> ADR** — not the intake rule, the extraction semantics, the title precedence,
+> the raw-original guarantee, or the `TEXT`-only replay. What that connector
+> submits is a capture-time serialization of the live DOM, not the page's
+> network source; the invariant this ADR states still holds exactly as written,
+> over the bytes the client submitted.
+
 ## Security
 
 **This server does not fetch the webpage URL.** `source.url` is metadata that is

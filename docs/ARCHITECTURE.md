@@ -95,6 +95,27 @@ provenance, so **nothing in `src/core/contracts/` changed and the schema stays
 `0.2`** — see *HTML webpage ingestion (Phase 2)*, below, and
 [ADR-014](ADR/ADR-014-html-webpage-ingestion.md).
 
+**Phase 2, PR 2 — browser whole-page capture.** Answers "how does the existing
+browser extension let a user deliberately save the current page as HTML, while
+preserving one-click selection capture, without gaining persistent access to
+every website?" A `chrome.contextMenus` item on the toolbar action's own
+context, and `contextMenus` is the only permission it cost. **Nothing under
+`src/` changed**: the server already accepts and processes exactly the envelope
+this connector learned to produce.
+
+```
+left click the icon    ->  window.getSelection()
+                       ->  TEXT envelope     (payload.text)
+                              \
+right click the icon            >-> the same local API
+  -> "Save whole page"         /   -> the modality-specific processor
+  -> documentElement.outerHTML/    -> ContentObject
+  -> WEBPAGE envelope (payload.html)
+```
+
+See *Browser whole-page capture (Phase 2)*, below, and
+[ADR-015](ADR/ADR-015-browser-whole-page-capture.md).
+
 ## Future data flow
 
 ```
@@ -1313,10 +1334,80 @@ CaptureEnvelope(payload.type = webpage, payload.html = ...)
 - **Nothing else moved.** No new route or response shape, no lifecycle state,
   no orchestrator change; `TextProcessor` remains `text@0.2`; completed replay
   remains TEXT-only, so a duplicate webpage id is still `409`; the browser
-  connector is unchanged and still selection-only. Whole-page browser capture is
-  the next product work, not part of this PR.
+  connector was unchanged by this PR and still selection-only at the end of it.
+  Whole-page browser capture was the next product work, and is Phase 2 PR 2 —
+  see *Browser whole-page capture (Phase 2)*, below.
 
 See [ADR-014](ADR/ADR-014-html-webpage-ingestion.md).
+
+
+## Browser whole-page capture (Phase 2)
+
+Phase 2 PR 2, and the acquisition half of what PR 1 made processable. PR 1 gave
+the server a webpage capability; this gives the browser a way to feed it.
+
+```
+right-click the toolbar icon  ->  "Save whole page to UniMem"
+  -> the menu activation is the explicit user gesture that grants activeTab
+  -> chrome.scripting.executeScript, once, into the top-level document
+  -> document.documentElement.outerHTML
+  -> schema-0.2 WEBPAGE CaptureEnvelope (payload.html, no text, no file_ref)
+  -> POST http://127.0.0.1:8765/v1/captures    the existing route
+  -> WebpageProcessor                          the existing processor
+  -> ContentObject(type = web)                 durable, COMPLETE
+  -> badge OK
+```
+
+- **The gesture is the permission.** Executing a context-menu item grants
+  `activeTab` for that tab and that gesture, exactly as a toolbar click does.
+  Permissions become `activeTab`, `scripting`, `contextMenus`; `contextMenus`
+  grants access to no website and is the only one added. `host_permissions`
+  stays `http://127.0.0.1/*` — the extension can serialize a whole document and
+  still has standing access to one host. No `<all_urls>`, `tabs`, `storage`,
+  `notifications`, `webRequest`, `cookies`, clipboard, `pageCapture`,
+  `tabCapture`, or `content_scripts`.
+- **Left click still means selection.** The popup ADR-012 rejected is still
+  rejected: a `default_popup` would replace `chrome.action.onClicked` and take
+  the gesture with it. The two flows are separate modules sharing only the URL
+  policy and the HTTP client; neither calls the other's reader.
+- **One menu item, on the `action` context only.** Registered once from
+  `chrome.runtime.onInstalled`, not on every service-worker wake, so a woken
+  worker does not duplicate it. No page-wide, selection, link, or image entry.
+- **The snapshot is a capture-time serialization of the live top-level DOM**,
+  not the page's network source, not "view source", and not an exact server
+  response. It includes mutations page script had already made. It excludes the
+  doctype (`document.documentElement` is an element, and none is synthesized),
+  shadow DOM, iframe documents, canvas pixels, stylesheet contents, image bytes,
+  and network responses. No `allFrames`; nothing is fetched, and no cookie or
+  storage is read.
+- **The submitted string is preserved exactly** — not trimmed, Unicode
+  normalized, line-ending rewritten, or re-serialized. `trim()` is used once, as
+  a blankness question whose result is never submitted. The server's "exact raw
+  HTML" invariant means *the string this connector submitted*, and nothing more.
+- **The capture id is minted last**, after the URL is accepted, injection
+  succeeds, and the returned HTML is a nonblank string. A page that could not be
+  read leaves no capture on the server and sends no request; one new outcome,
+  `page_capture_failed`, says so honestly.
+- **The tab title is submitted metadata when nonblank**, preserved exactly and
+  omitted otherwise, at which point the server's existing precedence rule reads
+  the document's own `<title>`. The extension extracts no title and infers none.
+  `source.url` remains metadata the extension never fetches.
+- **The network story is reused whole.** The same `sendCapture`, the same fixed
+  loopback destination that no page can influence, the same bounded semantics:
+  an explicit HTTP response is never blindly retried, one network failure buys
+  one identical resend, and the hard bound for one gesture is two POSTs and one
+  GET.
+- **Webpage completed replay remains absent.** `replay.py` was not generalized,
+  so a lost webpage response resolves as `409` on the resend plus one
+  observational GET that finds `COMPLETE` — a confirmed success the connector
+  reads from the server rather than assumes from the conflict. Proven end to end
+  against a live Uvicorn server.
+- **Nothing else moved.** No popup, side panel, history UI, `chrome.storage`,
+  persistent queue, or background sync; no server, contract, route, processor, or
+  schema change; `TextProcessor` remains `text@0.2` and `WebpageProcessor`
+  remains `webpage@0.1`.
+
+See [ADR-015](ADR/ADR-015-browser-whole-page-capture.md).
 
 
 ## Architectural invariants

@@ -1,18 +1,25 @@
 /**
- * The real service worker, driven through the listener Chrome would call.
+ * The real service worker, driven through the listeners Chrome would call.
  *
- * `service-worker.js` only touches `chrome` inside the listener and at the one
- * `addListener` call, so stubbing two globals is enough to import the shipped
- * file and invoke the actual registered handler. That makes the guarantee this
+ * `service-worker.js` only touches `chrome` inside its listeners and at the
+ * `addListener` calls, so stubbing two globals is enough to import the shipped
+ * file and invoke the actual registered handlers. That makes the guarantee this
  * file is about a real one rather than a claim about a pattern: Chrome does not
- * await the listener, so **no failure anywhere in the flow may escape it**, and
- * every failure must still land as `!` on the tab that was clicked.
+ * await either listener, so **no failure anywhere in either flow may escape
+ * it**, and every failure must still land as `!` on the tab that was acted on.
+ *
+ * Three listeners are registered, and this file drives all three:
+ *
+ *     chrome.action.onClicked        left click  -> selection capture
+ *     chrome.runtime.onInstalled     install     -> create the menu item
+ *     chrome.contextMenus.onClicked  right click -> whole-page capture
  */
 
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
 
 import { BADGE_BUSY, BADGE_FAIL, BADGE_OK } from "../lib/feedback.js";
+import { WHOLE_PAGE_MENU_ID } from "../lib/menu.js";
 
 const TAB = Object.freeze({ id: 7, url: "https://example.com/a", title: "A page" });
 const OTHER_TAB = Object.freeze({ id: 99, url: "https://example.com/b", title: "Another" });
@@ -21,8 +28,12 @@ const OTHER_TAB = Object.freeze({ id: 99, url: "https://example.com/b", title: "
 let calls;
 /** What the stubs should do, set by each test. */
 let scenario;
-/** The listener `service-worker.js` registered when it was imported. */
+/** The listeners `service-worker.js` registered when it was imported. */
 let listener;
+let installedListener;
+let menuListener;
+/** Every `chrome.contextMenus.create` call, across the whole module's lifetime. */
+let menusCreatedAtImport;
 /** Rejections Node saw while a test ran. Must always be empty. */
 let rejections;
 
@@ -51,15 +62,50 @@ before(async () => {
         return scenario.executeScript();
       },
     },
+    runtime: {
+      onInstalled: {
+        addListener: (fn) => {
+          installedListener = fn;
+        },
+      },
+    },
+    contextMenus: {
+      onClicked: {
+        addListener: (fn) => {
+          menuListener = fn;
+        },
+      },
+      create: (item) => {
+        calls.menus.push(item);
+        return item.id;
+      },
+    },
   };
   globalThis.fetch = async (url, options) => {
     calls.fetch.push({ url, options });
     return scenario.fetch();
   };
 
-  // The shipped file, imported once, registering its real listener.
+  // Menu calls are recorded from before the import, so that "importing the
+  // module — which is what a woken service worker does — creates no menu item"
+  // is observable rather than assumed.
+  calls = { badges: [], titles: [], executeScript: [], fetch: [], menus: [] };
+
+  // The shipped file, imported once, registering its real listeners.
   await import("../service-worker.js");
+  menusCreatedAtImport = [...calls.menus];
+
   assert.equal(typeof listener, "function", "the service worker registered a click listener");
+  assert.equal(
+    typeof installedListener,
+    "function",
+    "the service worker registered an install listener",
+  );
+  assert.equal(
+    typeof menuListener,
+    "function",
+    "the service worker registered a context-menu click listener",
+  );
 });
 
 after(() => {
@@ -68,7 +114,7 @@ after(() => {
 });
 
 beforeEach(() => {
-  calls = { badges: [], titles: [], executeScript: [], fetch: [] };
+  calls = { badges: [], titles: [], executeScript: [], fetch: [], menus: [] };
   scenario = {
     action: () => Promise.resolve(),
     executeScript: () => [{ result: "the selected words" }],
@@ -98,17 +144,27 @@ function created() {
  * under test.
  */
 async function click(tab) {
-  const returned = listener(tab);
+  await drive(() => listener(tab), "the click path");
+}
+
+/**
+ * Activate the whole-page menu item exactly as Chrome does.
+ *
+ * `info` defaults to our own item, so a test that cares about a different menu
+ * id says so explicitly rather than by omission.
+ */
+async function chooseMenuItem(tab, info = { menuItemId: WHOLE_PAGE_MENU_ID }) {
+  await drive(() => menuListener(info, tab), "the context-menu path");
+}
+
+async function drive(invoke, what) {
+  const returned = invoke();
   assert.equal(returned, undefined, "Chrome ignores the listener's return value");
   for (let tick = 0; tick < 10; tick += 1) {
     await new Promise((resolve) => setImmediate(resolve));
   }
   process.off("unhandledRejection", recordRejection);
-  assert.deepEqual(
-    rejections.map(String),
-    [],
-    "the click path must never leave an unhandled rejection",
-  );
+  assert.deepEqual(rejections.map(String), [], `${what} must never leave an unhandled rejection`);
 }
 
 const lastBadge = () => calls.badges.at(-1);
@@ -293,4 +349,224 @@ describe("a click on a page that cannot be captured", () => {
     assert.ok(!("tabId" in lastBadge()));
     assert.deepEqual(calls.fetch, []);
   });
+});
+
+describe("registering the whole-page menu item", () => {
+  it("creates nothing merely by starting the service worker", () => {
+    // A woken worker re-runs this module. If registration happened at import,
+    // every wake would try to create the item again and the user would end up
+    // with duplicates or a silent failure.
+    assert.deepEqual(menusCreatedAtImport, []);
+  });
+
+  it("creates exactly one item when the extension is installed", async () => {
+    installedListener();
+
+    assert.equal(calls.menus.length, 1);
+  });
+
+  it("creates it with the stable id, exact title, and action context", async () => {
+    installedListener();
+
+    assert.deepEqual(calls.menus[0], {
+      id: "unimem-save-whole-page",
+      title: "Save whole page to UniMem",
+      contexts: ["action"],
+    });
+  });
+
+  it("survives Chrome refusing the item, without an unhandled rejection", async () => {
+    globalThis.chrome.contextMenus.create = () => {
+      throw new Error("Cannot create item with duplicate id unimem-save-whole-page");
+    };
+
+    try {
+      assert.doesNotThrow(() => installedListener());
+    } finally {
+      globalThis.chrome.contextMenus.create = (item) => {
+        calls.menus.push(item);
+        return item.id;
+      };
+    }
+  });
+});
+
+describe("choosing 'Save whole page to UniMem'", () => {
+  beforeEach(() => {
+    scenario.executeScript = () => [{ result: "<html><body>the page body</body></html>" }];
+  });
+
+  it("ends on OK, scoped to the tab the menu was opened over", async () => {
+    await chooseMenuItem(TAB);
+
+    assert.deepEqual(lastBadge(), { text: BADGE_OK, tabId: 7 });
+    assert.deepEqual(lastTitle(), { title: "UniMem: saved", tabId: 7 });
+  });
+
+  it("shows busy first, and says it is saving a page", async () => {
+    await chooseMenuItem(TAB);
+
+    assert.deepEqual(calls.badges[0], { text: BADGE_BUSY, tabId: 7 });
+    assert.deepEqual(calls.titles[0], { title: "UniMem: saving page...", tabId: 7 });
+  });
+
+  it("scopes every single action call to that tab", async () => {
+    await chooseMenuItem(OTHER_TAB);
+
+    for (const details of [...calls.badges, ...calls.titles]) {
+      assert.equal(details.tabId, 99);
+    }
+  });
+
+  it("injects the page reader into that tab and posts to the fixed endpoint", async () => {
+    await chooseMenuItem(TAB);
+
+    assert.deepEqual(calls.executeScript[0].target, { tabId: 7 });
+    assert.equal(calls.executeScript[0].func.name, "readPageHtml");
+    assert.equal(calls.executeScript[0].allFrames, undefined);
+    assert.equal(calls.fetch.length, 1);
+    assert.equal(calls.fetch[0].url, "http://127.0.0.1:8765/v1/captures");
+    assert.equal(calls.fetch[0].options.method, "POST");
+  });
+
+  it("posts a schema-0.2 WEBPAGE envelope carrying the exact snapshot", async () => {
+    await chooseMenuItem(TAB);
+
+    const submitted = JSON.parse(calls.fetch[0].options.body);
+    assert.equal(submitted.schema_version, "0.2");
+    assert.equal(submitted.source.type, "browser");
+    assert.equal(submitted.source.url, "https://example.com/a");
+    assert.equal(submitted.payload.type, "webpage");
+    assert.equal(submitted.payload.mime_type, "text/html");
+    assert.equal(submitted.payload.html, "<html><body>the page body</body></html>");
+    assert.equal(submitted.payload.title, "A page");
+    assert.equal(submitted.payload.text, undefined);
+    assert.equal(submitted.payload.file_ref, undefined);
+    assert.equal(submitted.intent.action, "save");
+  });
+
+  it("does not read the selection on the way", async () => {
+    await chooseMenuItem(TAB);
+
+    assert.equal(calls.executeScript.length, 1);
+    assert.notEqual(calls.executeScript[0].func.name, "readSelection");
+  });
+
+  const failures = [
+    [
+      "the page refuses injection",
+      () => {
+        scenario.executeScript = () => {
+          throw new Error("Cannot access contents of url \"chrome://extensions\".");
+        };
+      },
+      "UniMem: could not read this page",
+    ],
+    [
+      "the page returns nothing",
+      () => {
+        scenario.executeScript = () => [{}];
+      },
+      "UniMem: could not read this page",
+    ],
+    [
+      "the page returns only whitespace",
+      () => {
+        scenario.executeScript = () => [{ result: "  \r\n " }];
+      },
+      "UniMem: could not read this page",
+    ],
+    [
+      "the API is not running",
+      () => {
+        scenario.fetch = () => {
+          throw new TypeError("Failed to fetch");
+        };
+      },
+      "UniMem: service unavailable, capture outcome unknown",
+    ],
+    [
+      "the flow throws something no outcome describes",
+      () => {
+        scenario.fetch = () => ({
+          get status() {
+            throw new RangeError("something no outcome describes");
+          },
+        });
+      },
+      "UniMem: capture failed",
+    ],
+  ];
+
+  for (const [label, arrange, expectedTitle] of failures) {
+    it(`shows ! and a readable title when ${label}`, async () => {
+      arrange();
+
+      await chooseMenuItem(TAB);
+
+      assert.equal(lastBadge().text, BADGE_FAIL);
+      assert.equal(lastTitle().title, expectedTitle);
+      assert.equal(lastBadge().tabId, 7);
+    });
+
+    it(`leaks no page HTML or stack when ${label}`, async () => {
+      arrange();
+
+      await chooseMenuItem(TAB);
+
+      const shown = JSON.stringify([...calls.badges, ...calls.titles]);
+      assert.ok(!shown.includes("the page body"));
+      assert.ok(!shown.includes("<html"));
+      assert.ok(!/\bat\s+\S+:\d+/.test(shown), shown);
+      for (const noise of ["Error", "TypeError", "RangeError", "SyntaxError", "chrome://"]) {
+        assert.ok(!shown.includes(noise), `${noise} reached the UI`);
+      }
+    });
+  }
+
+  it("sends nothing at all from a page it cannot capture", async () => {
+    await chooseMenuItem({ id: 3, url: "chrome://extensions", title: "Extensions" });
+
+    assert.deepEqual(calls.executeScript, []);
+    assert.deepEqual(calls.fetch, []);
+    assert.equal(lastTitle().title, "UniMem: cannot capture from this page");
+    assert.equal(lastBadge().tabId, 3);
+  });
+
+  it("never leaves the badge stuck on busy", async () => {
+    scenario.fetch = () => {
+      throw new RangeError("boom");
+    };
+
+    await chooseMenuItem(TAB);
+
+    assert.notEqual(lastBadge().text, BADGE_BUSY);
+  });
+
+  it("survives a tab that closed while the page capture was in flight", async () => {
+    scenario.action = () => Promise.reject(new Error("No tab with id: 7."));
+
+    await chooseMenuItem(TAB);
+
+    assert.ok(calls.badges.length >= 1);
+  });
+});
+
+describe("a context-menu click that is not ours", () => {
+  for (const menuItemId of [
+    "some-other-extension-item",
+    "unimem-save-whole-page-2",
+    "",
+    12,
+    undefined,
+  ]) {
+    it(`does nothing at all for ${JSON.stringify(menuItemId)}`, async () => {
+      await chooseMenuItem(TAB, { menuItemId });
+
+      assert.deepEqual(calls.badges, []);
+      assert.deepEqual(calls.titles, []);
+      assert.deepEqual(calls.executeScript, []);
+      assert.deepEqual(calls.fetch, []);
+    });
+  }
 });

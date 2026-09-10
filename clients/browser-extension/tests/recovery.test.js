@@ -25,7 +25,9 @@ import { describe, it } from "node:test";
 
 import { CAPTURES_ENDPOINT, getCapture, recoverNetworkOutcome, sendCapture } from "../lib/api.js";
 import { OUTCOME } from "../lib/outcomes.js";
+import { feedbackFor } from "../lib/feedback.js";
 import {
+  PAGE_HTML,
   SUBMITTED_ID,
   brokenResponse,
   createdBody,
@@ -34,6 +36,7 @@ import {
   jsonResponse,
   networkError,
   testEnvelope,
+  webpageTestEnvelope,
 } from "./helpers.js";
 
 const PROBE_URL = `${CAPTURES_ENDPOINT}/${SUBMITTED_ID}`;
@@ -534,5 +537,203 @@ describe("reading a capture directly", () => {
 
     assert.equal(direct.probed, undefined);
     assert.equal(probed.probed, true);
+  });
+});
+
+/**
+ * The same client, the same state machine, carrying a page instead of a
+ * selection.
+ *
+ * `api.js` never looks inside `payload`, so in one sense there is nothing new to
+ * test here. That is exactly the claim being made, and it is worth pinning:
+ * whole-page capture reuses the bounded-resend logic rather than growing a
+ * second one, and every bound that holds for a selection holds for a page.
+ *
+ * One thing genuinely *is* different, and it is deliberate. The server's
+ * completed replay is defined for `TEXT` payloads only, so a webpage envelope
+ * resent under an id the server already holds comes back `409` rather than
+ * `200`. The connector does not treat that `409` as success — it makes the one
+ * observational GET it is already allowed, and reports what the server says.
+ */
+describe("the whole-page envelope travels the same bounded path", () => {
+  it("reports complete on a 201", async () => {
+    const fetch = fakeFetch(jsonResponse(201, createdBody()));
+
+    const result = await sendCapture(webpageTestEnvelope(), { fetch });
+
+    assert.equal(result.outcome, OUTCOME.COMPLETE);
+    assert.equal(result.confirmedBy, "post");
+    assert.equal(fetch.calls.length, 1);
+  });
+
+  it("posts the exact HTML, untouched, to the one constant endpoint", async () => {
+    const fetch = fakeFetch(jsonResponse(201, createdBody()));
+
+    await sendCapture(webpageTestEnvelope(), { fetch });
+
+    assert.equal(fetch.calls[0].url, CAPTURES_ENDPOINT);
+    assert.equal(JSON.parse(fetch.posts()[0].options.body).payload.html, PAGE_HTML);
+  });
+
+  for (const [status, code] of [
+    [409, "capture_already_exists"],
+    [422, "unsupported_payload"],
+    [422, "invalid_request"],
+    [500, "data_integrity_error"],
+    [503, "storage_unavailable"],
+  ]) {
+    it(`does not resend or probe after ${status} ${code}`, async () => {
+      const fetch = fakeFetch(jsonResponse(status, errorBody(code, "no")));
+
+      const result = await sendCapture(webpageTestEnvelope(), { fetch });
+
+      assert.equal(result.outcome, OUTCOME.SERVER_ERROR);
+      assert.equal(result.status, status);
+      assert.equal(fetch.calls.length, 1);
+    });
+  }
+
+  it("resends the byte-identical envelope after a network failure", async () => {
+    const fetch = fakeFetch(networkError(), jsonResponse(201, createdBody()));
+    const envelope = webpageTestEnvelope();
+
+    const result = await sendCapture(envelope, { fetch });
+
+    assert.equal(result.outcome, OUTCOME.COMPLETE);
+    const [first, second] = fetch.posts().map((call) => call.options.body);
+    assert.equal(first, second);
+    assert.equal(JSON.parse(second).payload.html, PAGE_HTML);
+  });
+
+  it("resends under the same id, captured_at, and title", async () => {
+    const fetch = fakeFetch(networkError(), jsonResponse(201, createdBody()));
+
+    await sendCapture(webpageTestEnvelope(), { fetch });
+
+    const resent = JSON.parse(fetch.posts()[1].options.body);
+    assert.equal(resent.id, SUBMITTED_ID);
+    assert.equal(resent.context.captured_at, "2026-01-02T03:04:05.678Z");
+    assert.equal(resent.payload.title, "A page");
+    assert.equal(resent.payload.type, "webpage");
+  });
+
+  it("mutates nothing on the caller's envelope along the way", async () => {
+    const fetch = fakeFetch(networkError(), jsonResponse(201, createdBody()));
+    const envelope = webpageTestEnvelope();
+    const before = JSON.stringify(envelope);
+
+    await sendCapture(envelope, { fetch });
+
+    assert.equal(JSON.stringify(envelope), before);
+  });
+
+  it("makes one observational GET when the resend is refused as a duplicate", async () => {
+    /* Webpage replay does not exist on the server, so this is the ordinary
+     * shape of a lost webpage response — not an exceptional one. */
+    const fetch = fakeFetch(networkError(), conflict(), jsonResponse(200, record("complete")));
+
+    const result = await sendCapture(webpageTestEnvelope(), { fetch });
+
+    assert.equal(result.outcome, OUTCOME.COMPLETE);
+    assert.equal(result.confirmedBy, "probe");
+    assert.equal(result.probed, true);
+    assert.equal(fetch.posts().length, 2);
+    assert.equal(fetch.gets().length, 1);
+    assert.equal(fetch.gets()[0].url, PROBE_URL);
+  });
+
+  for (const status of ["received", "stored", "processing", "failed"]) {
+    it(`reports an honest non-success when the probe finds ${status}`, async () => {
+      const fetch = fakeFetch(networkError(), conflict(), jsonResponse(200, record(status)));
+
+      const result = await sendCapture(webpageTestEnvelope(), { fetch });
+
+      assert.equal(result.outcome, OUTCOME.DURABLE_STATE);
+      assert.equal(result.status, status);
+      assert.equal(feedbackFor(result).badge, "!");
+    });
+  }
+
+  it("reports unconfirmed when the probe finds no such capture", async () => {
+    const fetch = fakeFetch(
+      networkError(),
+      conflict(),
+      jsonResponse(404, errorBody("not_found", "no")),
+    );
+
+    const result = await sendCapture(webpageTestEnvelope(), { fetch });
+
+    assert.equal(result.outcome, OUTCOME.UNCONFIRMED);
+    assert.equal(result.probed, true);
+  });
+
+  it("reports unavailable when even the probe never lands", async () => {
+    const fetch = fakeFetch(networkError(), networkError(), networkError());
+
+    const result = await sendCapture(webpageTestEnvelope(), { fetch });
+
+    assert.equal(result.outcome, OUTCOME.UNAVAILABLE);
+    assert.equal(result.probed, true);
+  });
+
+  it("never treats the duplicate conflict itself as success", async () => {
+    const fetch = fakeFetch(networkError(), conflict(), jsonResponse(200, record("processing")));
+
+    const result = await sendCapture(webpageTestEnvelope(), { fetch });
+
+    assert.notEqual(result.outcome, OUTCOME.COMPLETE);
+  });
+
+  const CONVERSATIONS = [
+    ["created", [jsonResponse(201, createdBody())]],
+    ["refused outright", [conflict()]],
+    ["rejected as invalid", [jsonResponse(422, errorBody("unsupported_payload", "no"))]],
+    ["lost, then created", [networkError(), jsonResponse(201, createdBody())]],
+    ["lost, then a conflict, then complete", [networkError(), conflict(), jsonResponse(200, record("complete"))]],
+    ["lost, then a conflict, then nothing", [networkError(), conflict(), jsonResponse(404, errorBody("not_found", "no"))]],
+    ["lost twice, then complete", [networkError(), networkError(), jsonResponse(200, record("complete"))]],
+    ["lost entirely", [networkError(), networkError(), networkError()]],
+  ];
+
+  for (const [name, script] of CONVERSATIONS) {
+    it(`sends at most two POSTs and one GET: ${name}`, async () => {
+      const fetch = fakeFetch(...script);
+
+      await sendCapture(webpageTestEnvelope(), { fetch });
+
+      assert.ok(fetch.posts().length <= 2, `${fetch.posts().length} POSTs`);
+      assert.ok(fetch.gets().length <= 1, `${fetch.gets().length} GETs`);
+      assert.ok(fetch.calls.length <= 3, `${fetch.calls.length} requests`);
+    });
+  }
+
+  it("schedules no timer on the webpage path either", async () => {
+    const realSetTimeout = globalThis.setTimeout;
+    let scheduled = 0;
+    globalThis.setTimeout = (...args) => {
+      scheduled += 1;
+      return realSetTimeout(...args);
+    };
+    try {
+      const fetch = fakeFetch(networkError(), conflict(), jsonResponse(200, record("complete")));
+
+      await sendCapture(webpageTestEnvelope(), { fetch });
+
+      assert.equal(scheduled, 0);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+  });
+
+  it("keeps no state between page captures", async () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const fetch = fakeFetch(networkError(), conflict(), jsonResponse(200, record("complete")));
+
+      const result = await sendCapture(webpageTestEnvelope(), { fetch });
+
+      assert.equal(result.outcome, OUTCOME.COMPLETE);
+      assert.equal(fetch.posts().length, 2);
+      assert.equal(fetch.gets().length, 1);
+    }
   });
 });

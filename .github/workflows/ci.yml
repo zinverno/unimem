@@ -53,15 +53,30 @@ jobs:
         run: npm test --prefix clients/browser-extension
 
   browser-api-integration:
-    # The two jobs above each prove one side. This one proves they meet:
+    # The two jobs above each prove one side. This one proves they meet, for
+    # both things the extension can capture.
     #
-    #   real connector JS
-    #     -> first POST reaches real uvicorn on a real socket
-    #     -> that response is thrown away after the server processed it
-    #     -> the same envelope, same id, is POSTed once more
-    #     -> the server answers 200 replay
-    #     -> the connector reports complete, confirmed by replay
-    #     -> one CaptureRecord, one ContentObject, one raw original
+    #   selection, and a lost response:
+    #     real connector JS
+    #       -> first POST reaches real uvicorn on a real socket
+    #       -> that response is thrown away after the server processed it
+    #       -> the same envelope, same id, is POSTed once more
+    #       -> the server answers 200 replay
+    #       -> the connector reports complete, confirmed by replay
+    #       -> one CaptureRecord, one ContentObject, one raw original
+    #
+    #   whole page:
+    #     real connector whole-page flow, builder, and client
+    #       -> a representative outerHTML snapshot (the only fake: there is no
+    #          browser here, so the page read is stubbed)
+    #       -> POST reaches the same real server
+    #       -> 201, OK, a durable web ContentObject whose original is the exact
+    #          submitted bytes
+    #     ...and the same flow with the first reply lost:
+    #       -> retry is answered 409, because webpage replay is intentionally
+    #          absent
+    #       -> one observational GET sees COMPLETE
+    #       -> confirmed success, two POSTs and one GET, one of everything
     #
     # It needs both runtimes, which is why it is its own job rather than a step
     # in either of the others: the Python job must not grow a Node dependency,
@@ -82,27 +97,41 @@ jobs:
       - name: Install package with dev dependencies
         run: python -m pip install -e ".[dev]"
 
-      - name: Cross-language acceptance test
+      - name: Cross-language acceptance tests
         env:
-          # Without this the test skips when node is missing or the connector's
+          # Without this the tests skip when node is missing or the connector's
           # port is taken, and a green run would prove nothing. With it, every
-          # such reason is a failure instead.
+          # such reason is a failure instead — for the whole-page classes as
+          # much as for the selection one.
           UNIMEM_REQUIRE_CONNECTOR_INTEGRATION: "1"
         run: |
           pytest \
             "tests/integration/api/test_completed_capture_replay.py::TestThroughTheConnectorItself" \
+            "tests/integration/api/test_browser_whole_page_capture.py::TestWholePageThroughTheConnector" \
+            "tests/integration/api/test_browser_whole_page_capture.py::TestTheWholePageLostResponse" \
             -v -rs --junitxml=connector-integration.xml
 
-      - name: Prove it actually ran
+      - name: Prove they actually ran
         # Belt and braces. The required mode turns every in-test skip into a
-        # failure, so this can only fire if the class is renamed, deselected, or
+        # failure, so this can only fire if a class is renamed, deselected, or
         # skipped by something outside that policy — each of which would
         # otherwise leave a passing job that tested nothing at all.
+        #
+        # Each class is counted separately, and the selection guarantee keeps its
+        # own floor: adding whole-page coverage must not be a way to quietly ship
+        # fewer selection assertions.
         if: always()
         run: |
           python - <<'PY'
           import sys
           import xml.etree.ElementTree as ET
+
+          #: class name -> the number of tests it must contribute, at least.
+          REQUIRED = {
+              "TestThroughTheConnectorItself": 8,
+              "TestWholePageThroughTheConnector": 1,
+              "TestTheWholePageLostResponse": 1,
+          }
 
           suite = ET.parse("connector-integration.xml").getroot()
           totals = suite.find("testsuite") if suite.tag == "testsuites" else suite
@@ -114,7 +143,18 @@ jobs:
           print(f"tests={ran} skipped={skipped}")
 
           if ran == 0:
-              sys.exit("the cross-language acceptance test did not run at all")
+              sys.exit("the cross-language acceptance tests did not run at all")
           if skipped:
               sys.exit(f"{skipped} of {ran} cross-language acceptance tests were skipped")
+
+          counted = {}
+          for case in totals.iter("testcase"):
+              name = (case.get("classname") or "").rsplit(".", 1)[-1]
+              counted[name] = counted.get(name, 0) + 1
+
+          for name, floor in REQUIRED.items():
+              found = counted.get(name, 0)
+              print(f"{name}={found} (required >= {floor})")
+              if found < floor:
+                  sys.exit(f"{name} contributed {found} tests; at least {floor} were required")
           PY

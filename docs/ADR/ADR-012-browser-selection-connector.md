@@ -12,6 +12,18 @@ the connector makes **one** bounded resend of the identical envelope after a
 network-layer failure. The sections below are marked where that applies;
 everything else here still holds.
 
+**Extended, not revised, by
+[ADR-015](ADR-015-browser-whole-page-capture.md).** The extension is no longer
+selection-only: right-clicking the toolbar icon offers "Save whole page to
+UniMem", which captures the current document's serialized DOM as a `WEBPAGE`
+envelope. Everything this ADR decided about **selection** capture is unchanged —
+**left-clicking the toolbar icon still means selection capture**, it still reads
+`window.getSelection()`, still emits `TEXT`, and still uses this ADR's bounded
+network handling and tab-scoped feedback. The one manifest change is a
+`contextMenus` permission, which grants access to no website; `host_permissions`
+is still loopback only, and the popup this ADR rejected is still rejected, for
+the reason it gives.
+
 ## Context
 
 ADR-011 built an API and said, in as many words, that the callers were `curl` and

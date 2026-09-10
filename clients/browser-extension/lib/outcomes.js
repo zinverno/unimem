@@ -1,12 +1,12 @@
 /**
  * The connector's vocabulary of results.
  *
- * One closed set, shared by the API client, the capture flow, and the feedback
- * mapper, so that "what happened" is decided once and rendered once. A caller
- * branches on `outcome` and never on a status code, an exception type, or the
- * text of a message.
+ * One closed set, shared by the API client, both capture flows, and the
+ * feedback mapper, so that "what happened" is decided once and rendered once. A
+ * caller branches on `outcome` and never on a status code, an exception type, or
+ * the text of a message.
  *
- * Only `COMPLETE` is success. Everything else is a reason the selection is not
+ * Only `COMPLETE` is success. Everything else is a reason the capture is not
  * known to be saved, and each is distinct because the user can do something
  * different about it.
  */
@@ -23,6 +23,18 @@ export const OUTCOME = Object.freeze({
 
   /** The page refused script injection, so the selection could not be read. */
   INJECTION_FAILED: "injection_failed",
+
+  /**
+   * The page's HTML could not be obtained, so there is no snapshot to send.
+   *
+   * Covers both ways a whole-page read comes back useless: the injection was
+   * refused, and the injection succeeded but produced no usable string. They are
+   * one outcome because the user's options are the same for both, and because
+   * `BLANK_SELECTION` and `INJECTION_FAILED` are worded for the selection flow —
+   * telling someone who asked to save a page to "select some text first" would
+   * be a lie about what they did.
+   */
+  PAGE_CAPTURE_FAILED: "page_capture_failed",
 
   /** The request never reached an HTTP response. The capture's fate is unknown. */
   UNAVAILABLE: "unavailable",
