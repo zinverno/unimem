@@ -1,12 +1,19 @@
 /**
- * The HTTP client: one request, checked answers, and no retry anywhere.
+ * The HTTP client: one request, checked answers, and no retry of its own.
  *
  * Two families of assertion run through this file. The first is that a success
  * is only ever reported when the server actually said so, in the shape the
- * contract promises — a `201` whose body disagrees with the request is a
- * protocol failure, not a save. The second is that the request count is exactly
- * what the design allows, because the server has no idempotency and a second
- * POST is a duplicate capture or a spurious conflict.
+ * contract promises — a `201` or a `200` whose body disagrees with the request
+ * is a protocol failure, not a save. The second is that the request count is
+ * exactly what the design allows: `submitCapture` sends one request and makes
+ * no decision about sending another, which is what keeps the two-POST bound in
+ * `sendCapture` (see `recovery.test.js`) somewhere it can be read.
+ *
+ * The two success codes carry the same body and mean different things. `201`
+ * says this request created and completed the capture; `200` says an equivalent
+ * request had already completed it and this is that capture's existing result.
+ * Both are only believed after the body has been checked against the id that
+ * was actually submitted.
  */
 
 import assert from "node:assert/strict";
@@ -106,17 +113,67 @@ describe("a valid 201", () => {
   });
 });
 
-describe("a response that is not the contract's success", () => {
-  it("rejects 200, which this contract never promises", async () => {
+describe("a valid 200", () => {
+  it("is success — the server replayed an already-complete capture", async () => {
     const fetch = fakeFetch(jsonResponse(200, createdBody()));
+
+    const result = await submitCapture(testEnvelope(), { fetch });
+
+    assert.equal(result.outcome, OUTCOME.COMPLETE);
+    assert.equal(result.captureId, SUBMITTED_ID);
+    assert.equal(result.contentId, "1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9");
+  });
+
+  it("records that it was a replay rather than a creation", async () => {
+    const fetch = fakeFetch(jsonResponse(200, createdBody()));
+
+    const result = await submitCapture(testEnvelope(), { fetch });
+
+    assert.equal(result.confirmedBy, "replay");
+  });
+
+  it("is still only one request", async () => {
+    const fetch = fakeFetch(jsonResponse(200, createdBody()));
+
+    await submitCapture(testEnvelope(), { fetch });
+
+    assert.equal(fetch.calls.length, 1);
+  });
+
+  it("is held to the same contract as a 201, even on a first attempt", async () => {
+    /* A 200 arriving without any retry having happened is still a completed
+     * capture's result, and is believed on exactly the same evidence. */
+    for (const body of [
+      createdBody({ capture_id: "someone-elses-id" }),
+      createdBody({ content_id: "  " }),
+      createdBody({ content_id: undefined }),
+      createdBody({ status: "processing" }),
+      createdBody({ status: undefined }),
+      "complete",
+    ]) {
+      const fetch = fakeFetch(jsonResponse(200, body));
+
+      const result = await submitCapture(testEnvelope(), { fetch });
+
+      assert.equal(result.outcome, OUTCOME.PROTOCOL_ERROR, JSON.stringify(body));
+    }
+  });
+
+  it("rejects a 200 whose body is not JSON", async () => {
+    const fetch = fakeFetch(brokenResponse(200));
 
     const result = await submitCapture(testEnvelope(), { fetch });
 
     assert.equal(result.outcome, OUTCOME.PROTOCOL_ERROR);
   });
+});
 
+describe("a response that is not the contract's success", () => {
   for (const status of [202, 204, 301]) {
-    it(`rejects ${status}`, async () => {
+    it(`rejects ${status}, which the contract does not promise`, async () => {
+      /* 202 in particular: "accepted" is not "complete", and the whole point of
+       * the POST contract is that it does not return until the pipeline has
+       * finished. Only 201 and 200 say a capture is durable. */
       const fetch = fakeFetch(jsonResponse(status, createdBody()));
 
       const result = await submitCapture(testEnvelope(), { fetch });

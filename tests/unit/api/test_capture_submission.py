@@ -204,13 +204,31 @@ class TestUnsupportedPayload:
 
 
 class TestDuplicateCaptureId:
-    """No idempotency in this phase: a repeat is a conflict, deliberately."""
+    """A repeat that is not a provable replay is a conflict, deliberately.
 
-    def test_the_second_post_conflicts(self, client: TestClient) -> None:
+    Completed replay (:mod:`unimem_api.replay`, and
+    ``test_completed_capture_replay.py``) answers exactly one duplicate: the
+    *same request* resent against an already-complete capture. Every other
+    duplicate id is what it always was, and these are the ones that stay that
+    way — including a second capture that merely shares an id with the first.
+    """
+
+    def test_a_second_post_of_a_different_request_conflicts(self, client: TestClient) -> None:
         body = text_envelope()
         assert client.post("/v1/captures", json=body).status_code == 201
 
-        response = client.post("/v1/captures", json=body)
+        response = client.post(
+            "/v1/captures",
+            json=text_envelope(id=body["id"])
+            | {
+                "payload": {
+                    "type": "text",
+                    "mime_type": "text/plain",
+                    "text": "a different selection entirely",
+                    "title": TITLE,
+                }
+            },
+        )
 
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "capture_already_exists"
@@ -220,7 +238,9 @@ class TestDuplicateCaptureId:
         body = text_envelope()
         client.post("/v1/captures", json=body)
 
-        conflict = client.post("/v1/captures", json=body).json()
+        conflict = client.post(
+            "/v1/captures", json=text_envelope(source={"type": "api", "provider": "someone else"})
+        ).json()
 
         assert set(conflict) == {"error"}
 
@@ -228,7 +248,7 @@ class TestDuplicateCaptureId:
         body = text_envelope()
         first = stack.client.post("/v1/captures", json=body).json()
 
-        stack.client.post("/v1/captures", json=body)
+        stack.client.post("/v1/captures", json=text_envelope(intent={"action": "analyze"}))
 
         stored = stack.content_store.get_for_capture(CAPTURE_ID)
         assert stored.id == first["content_id"]

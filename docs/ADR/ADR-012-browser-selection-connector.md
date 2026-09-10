@@ -4,6 +4,14 @@ Status: accepted (Phase 1, PR 2). Phase 0 remains
 [closed](ADR-010-canonical-content-persistence.md#phase-0-is-closed);
 [ADR-011](ADR-011-local-http-capture-surface.md)'s HTTP surface is unchanged.
 
+**Superseded in one respect by
+[ADR-013](ADR-013-completed-capture-replay.md).** This ADR's "a capture is
+POSTed exactly once, ever" rested on the server having no idempotency, which was
+true when it was written. The server now offers a completed-capture replay, so
+the connector makes **one** bounded resend of the identical envelope after a
+network-layer failure. The sections below are marked where that applies;
+everything else here still holds.
+
 ## Context
 
 ADR-011 built an API and said, in as many words, that the callers were `curl` and
@@ -40,7 +48,9 @@ connector into an exfiltration tool.
 **Retry the POST.** Networks drop requests, retrying is what clients do. But the
 server has no idempotency: a response lost *after* the server committed makes a
 same-id retry a `409` and a fresh-id retry a duplicate capture the user never
-asked for. The client cannot tell those apart from the outside.
+asked for. The client cannot tell those apart from the outside. *(This is the
+requirement ADR-013 was written to answer: the server now tells them apart, and
+the connector resends once.)*
 
 **Trim the selection.** It looks like tidying. It is the last place the text can
 be silently altered before it becomes durable, and the canonical contracts
@@ -139,24 +149,37 @@ clock: those would make two deliberate captures of one passage collide, or leak
 page content into an identifier that travels further than the capture does. Each
 deliberate click is a new capture event with a new identity.
 
-**A capture is POSTed exactly once, and nothing is ever retried automatically.**
+**A capture is POSTed once, and there is no retry policy.** *(Amended by
+[ADR-013](ADR-013-completed-capture-replay.md): a POST that fails at the network
+layer — and only that — buys exactly one resend of the identical envelope under
+the identical id, because the server now answers such a resend with the capture
+it already made. There is still no general retry, no loop, no backoff, and no
+queue; the hard bound for one user action is two POSTs and one GET.)*
 
-A `201` is checked against the contract before it is called success: a
+A success is checked against the contract before it is called success: a
 non-JSON body, a `capture_id` that is not the one submitted, a blank
-`content_id`, or a status other than `complete` are protocol failures. A `200` is
-one too — this contract promises `201`, and quietly accepting any 2xx is how a
-client reports "saved" on the strength of a response that never said so.
+`content_id`, or a status other than `complete` are protocol failures. *(ADR-013:
+`200` joined `201` as a success code — it means an equivalent capture was already
+complete — and is validated identically. No other 2xx is success; quietly
+accepting any 2xx is how a client reports "saved" on the strength of a response
+that never said so.)*
 
 A real HTTP failure (`409`, `422`, `500`, `503`) is a definite answer: it is
 surfaced with its typed `code` and `message` retained internally, and it is not
 retried and not probed. **`409 capture_already_exists` is a conflict, not
-idempotent success.**
+idempotent success.** *(ADR-013 adds one exception, and it is not a retry: a
+`409 capture_already_exists` on the **resend** is followed by the same single
+read-only probe described below, because the id being taken by this client's own
+first request is worth one look. It is still never treated as success.)*
 
-**The ambiguous case is resolved by observation, never by re-sending.** When a
-POST fails at the network layer, no HTTP response ever existed and the capture's
-fate is genuinely unknown — the id was minted first, so the server may hold a
-finished capture the client never heard about. The connector then performs **at
-most one** read-only `GET /v1/captures/{id}` on that same id:
+**The ambiguous case is resolved by observation, never by re-sending.**
+*(ADR-013: the observation is now the **last** step rather than the only one —
+the connector resends first, and probes only when the resend was itself lost or
+was answered with a conflict it cannot interpret.)* When a POST fails at the
+network layer, no HTTP response ever existed and the capture's fate is genuinely
+unknown — the id was minted first, so the server may hold a finished capture the
+client never heard about. The connector then performs **at most one** read-only
+`GET /v1/captures/{id}` on that same id:
 
 | Probe finds | Reported as |
 | --- | --- |
@@ -171,8 +194,10 @@ lifecycle**, and nothing here reconciles, repairs, or mutates a capture — whic
 is the same rule ADR-011 applied to the HTTP handlers, one layer further out.
 
 **No persistent client state.** No `chrome.storage`, no history UI, no queue, no
-local database. The generated id lives long enough for the one probe and is then
-gone; the server is the record.
+local database. The generated id lives long enough for the bounded attempts of a
+single click and is then gone; the server is the record. If the service worker
+dies in between, there is no durable retry — and none is wanted, because a
+completed capture stays replayable across restarts of either side.
 
 **A badge and a title are the entire UI** — `...` sending, `OK` confirmed
 complete, `!` anything else. The selected text never appears in either: it is the
@@ -273,7 +298,10 @@ Costs:
   captures.
 - **Automatic retry on failure.** Rejected: without server idempotency, a retry
   is either a spurious `409` or a duplicate capture, and the client cannot tell
-  which case it is in. Observing once is the only honest option.
+  which case it is in. Observing once is the only honest option. *(Revisited by
+  [ADR-013](ADR-013-completed-capture-replay.md), which gave the server the
+  idempotency this reasoning was missing. A general retry policy stays rejected;
+  one bounded resend of the same request does not.)*
 - **Treating `409 capture_already_exists` as success.** Rejected for ADR-010's
   reason, now one layer further out: it assumes the benign explanation for a
   conflict that has several.
@@ -290,4 +318,6 @@ Costs:
 - **Playwright or Puppeteer, to force an end-to-end browser test.** Rejected: a
   browser automation dependency and a bundled browser download, for a connector
   whose every decision is already covered by fast tests. The click stays a
-  documented manual verification until something needs more.
+  documented manual verification until something needs more. *(Still rejected
+  under ADR-013, which instead runs the connector's own HTTP client against a
+  real server on a real socket — no browser required.)*
