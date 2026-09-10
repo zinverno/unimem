@@ -24,6 +24,20 @@ UPDATED_AT = datetime(2026, 8, 9, 10, 11, 13, tzinfo=UTC)
 
 TEXT = "The canonical object is not Markdown."
 
+#: A small but complete HTML document. Deliberately carries the things intake
+#: must *not* touch: a doctype, indentation, entities, a ``<title>``, a script,
+#: and a trailing newline.
+HTML = (
+    "<!doctype html>\n"
+    "<html>\n"
+    "  <head><title>A &amp; B</title></head>\n"
+    "  <body>\n"
+    "    <p>Hello &mdash; world.</p>\n"
+    "    <script>var x = 1 < 2;</script>\n"
+    "  </body>\n"
+    "</html>\n"
+)
+
 #: Text with characters, line endings, and edge whitespace that no well-meaning
 #: normalizer must be allowed to tidy up.
 AWKWARD_TEXT = (
@@ -65,12 +79,36 @@ def make_envelope(**overrides: Any) -> CaptureEnvelope:
     return CaptureEnvelope(**(fields | overrides))
 
 
+def make_webpage_payload(**overrides: Any) -> CapturePayload:
+    """The one webpage shape this build ingests: HTML and nothing else."""
+    fields: dict[str, Any] = {
+        "type": CapturePayloadType.WEBPAGE,
+        "mime_type": "text/html",
+        "html": HTML,
+        "title": "A page",
+    }
+    return CapturePayload(**(fields | overrides))
+
+
+def make_webpage_envelope(**overrides: Any) -> CaptureEnvelope:
+    """A valid HTML-backed webpage envelope, with optional field overrides."""
+    fields: dict[str, Any] = {
+        "id": "cap_intake_web_01",
+        "payload": make_webpage_payload(),
+    }
+    return make_envelope(**(fields | overrides))
+
+
 def make_unsupported_envelope(
     payload_type: CapturePayloadType, **overrides: Any
 ) -> CaptureEnvelope:
-    """A valid envelope of a payload type this phase does not accept."""
+    """A valid envelope of a payload type this build cannot materialize at all.
+
+    ``WEBPAGE`` is deliberately absent: since Phase 2 PR 1 it is a supported
+    type, and *which shapes of it* are supported is a separate question asked
+    in ``test_webpage_materialization.py``.
+    """
     payloads: dict[CapturePayloadType, dict[str, Any]] = {
-        CapturePayloadType.WEBPAGE: {"html": "<p>hi</p>"},
         CapturePayloadType.IMAGE: {"file_ref": "blob://image"},
         CapturePayloadType.DOCUMENT: {"file_ref": "blob://document"},
         CapturePayloadType.VIDEO: {"file_ref": "blob://video"},

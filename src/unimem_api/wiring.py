@@ -25,6 +25,11 @@ was always meant to be met.
 There is no settings framework, environment lookup, config file, profile, or DI
 container. The set of processors this application runs with is a list written
 here, exactly as :class:`~core.processing.ProcessorRouter` intends.
+
+Both processors share the one ``LocalRawObjectStore`` instance, which is not a
+detail: a raw original is content-addressed and identical bytes deduplicate, so
+the same store is what makes "the exact submitted HTML is still there" true no
+matter which processor read it.
 """
 
 from pathlib import Path
@@ -34,7 +39,12 @@ from fastapi import FastAPI
 
 from core.intake import CaptureIntake
 from core.persistence import SqliteCaptureRecordStore, SqliteContentObjectStore
-from core.processing import ProcessingOrchestrator, ProcessorRouter, TextProcessor
+from core.processing import (
+    ProcessingOrchestrator,
+    ProcessorRouter,
+    TextProcessor,
+    WebpageProcessor,
+)
 from core.storage import LocalRawObjectStore
 from unimem_api.app import create_app
 
@@ -54,14 +64,18 @@ def build_local_app(data_dir: Path) -> FastAPI:
         SqliteCaptureRecordStore   capture lifecycle snapshots
         SqliteContentObjectStore   canonical content
         CaptureIntake              envelope -> stored capture
-        TextProcessor              stored capture -> canonical content
+        TextProcessor              stored text capture -> canonical content
+        WebpageProcessor           stored webpage capture -> canonical content
         ProcessorRouter            exactly one processor per capture
         ProcessingOrchestrator     stored -> complete, or a truthful failure
 
-    ``TextProcessor`` is the only processor registered, because it is the only
-    one that exists. The router still requires an exact match rather than a first
-    match, so the day a webpage processor joins the list an overlap is an error
-    instead of an accident of ordering.
+    Both processors that exist are registered, and the day a webpage processor
+    joined the list arrived in Phase 2. The router's exactly-one-match rule is
+    now doing real work: ``TEXT`` reaches ``TextProcessor`` and ``WEBPAGE``
+    reaches ``WebpageProcessor`` because each claims its own payload type and
+    refuses the other's, never because of where either sits in this list. Order
+    here is not precedence, there is no fallback processor, and an overlap
+    would be an error rather than an accident of ordering.
 
     Two apps built against one directory are interchangeable: neither store keeps
     a connection, a cache, or in-process state between calls, which is what makes
@@ -75,7 +89,7 @@ def build_local_app(data_dir: Path) -> FastAPI:
     content_store = SqliteContentObjectStore(database)
 
     intake = CaptureIntake(raw_store, record_store)
-    router = ProcessorRouter([TextProcessor(raw_store)])
+    router = ProcessorRouter([TextProcessor(raw_store), WebpageProcessor(raw_store)])
     orchestrator = ProcessingOrchestrator(router, record_store, content_store)
 
     return create_app(

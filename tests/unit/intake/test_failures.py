@@ -34,8 +34,10 @@ from tests.unit.intake.builders import (
 )
 from tests.unit.intake.doubles import FakeCaptureRecordStore, FakeClock, FakeRawObjectStore
 
+#: Payload types this build cannot materialize at all. ``WEBPAGE`` left this
+#: list in Phase 2 PR 1, when it became a supported type; which *shapes* of it
+#: are supported is asked in ``test_webpage_materialization.py`` instead.
 UNSUPPORTED = [
-    CapturePayloadType.WEBPAGE,
     CapturePayloadType.IMAGE,
     CapturePayloadType.DOCUMENT,
     CapturePayloadType.VIDEO,

@@ -73,6 +73,28 @@ and the first real client of the HTTP surface — see *The browser selection
 connector (Phase 1)*, below, and
 [ADR-012](ADR/ADR-012-browser-selection-connector.md).
 
+**Phase 1, PR 3 — completed-capture replay.** Answers "how does a client that
+lost the response to its POST resend the same capture without creating a second
+one?" A delivery-layer, read-only equivalence check in `src/unimem_api/replay.py`
+— see *Completed-capture replay (Phase 1)*, below, and
+[ADR-013](ADR/ADR-013-completed-capture-replay.md). **This closes Macro Phase 1.**
+
+### Macro Phase 2 — Webpage Ingestion
+
+**Phase 1 is closed and stays closed.** Phase 2 does not revise HTTP transport
+design, browser selection capture, or replay. It asks the first question about
+*modality*: UniMem has ingested one kind of material since Phase 0F — plain
+text. What does it take to ingest a second?
+
+**Phase 2, PR 1 — HTML-backed webpage vertical slice.** Answers "how does an
+HTML-backed `webpage` `CaptureEnvelope` become an immutable HTML original and a
+deterministic canonical web `ContentObject`, using the existing lifecycle?"
+`WebpageProcessor` in `src/core/processing/webpage.py`, plus one widened intake
+capability. The contracts already contained `webpage`, `web`, and `html`
+provenance, so **nothing in `src/core/contracts/` changed and the schema stays
+`0.2`** — see *HTML webpage ingestion (Phase 2)*, below, and
+[ADR-014](ADR/ADR-014-html-webpage-ingestion.md).
+
 ## Future data flow
 
 ```
@@ -1223,6 +1245,80 @@ POST /v1/captures  ──► intake refuses: the id is taken
 See [ADR-013](ADR/ADR-013-completed-capture-replay.md).
 
 
+## HTML webpage ingestion (Phase 2)
+
+Phase 2 PR 1, and the first non-plain-text ingestion capability in the system.
+
+```
+CaptureEnvelope(payload.type = webpage, payload.html = ...)
+  -> CaptureIntake          ambiguous shapes refused before any side effect
+  -> RawObjectStore         the EXACT submitted HTML, UTF-8, immutable
+  -> CaptureRecord(STORED)
+  -> ProcessorRouter        exactly one match
+  -> WebpageProcessor       deterministic text extraction
+  -> ContentObject(web)     one TEXT segment, one ORIGINAL asset
+  -> ContentObjectStore     durable BEFORE complete
+  -> CaptureRecord(COMPLETE)
+  -> HTTP 201               the existing route, the existing response
+```
+
+- **The contracts already said all of this.** `CapturePayloadType.WEBPAGE`,
+  `ContentType.WEB`, `ProvenanceSourceType.HTML`, and `CapturePayload.html` have
+  existed since Phase 0A. No enum member, contract field, or schema version
+  changed; the schema stays `0.2`. Adding the first webpage capability without
+  touching the contracts is the evidence that Phase 0A modelled the domain
+  rather than the phase.
+- **The supported form is HTML-backed only.** `webpage` + `html` alone is
+  ingested. `html` alongside `text` or `file_ref`, and `text` with no `html`,
+  are **refused** — a `CaptureRecord` holds one raw original, so choosing
+  between submitted representations would durably discard one and answer `201`.
+  The refusal is an unsupported-*capability* error, not a validation one: the
+  canonical contract still permits those shapes and a later phase will accept
+  the identical envelopes. Refusals happen before the clock, the record, and any
+  byte, so nothing durable is left behind, and they name field *names* only.
+- **The raw original is the exact submitted HTML.** `payload.html` encoded
+  UTF-8, with no normalization, DOM re-serialization, whitespace or entity
+  rewriting, charset detection, or title/URL injection. Intake does not parse
+  HTML at all. Identical bytes still deduplicate; different capture ids remain
+  different captures.
+- **The canonical text is derived, and the two are never confused.** The segment
+  is a reproducible extraction; the original is immutable and reachable through
+  the content object's `ORIGINAL` asset. `ProvenanceSourceType.HTML` — rather
+  than `ORIGINAL` — is what carries that distinction on the wire.
+- **Extraction is deterministic and small**, using `html.parser.HTMLParser` from
+  the standard library. `script`, `style`, `noscript`, `template`, and `svg` are
+  discarded whole; ordinary `<head>` text, comments, doctypes and processing
+  instructions are excluded; a fixed list of block tags separates paragraphs and
+  `br` breaks a line; ASCII formatting whitespace is collapsed and trimmed while
+  entity meaning (`&nbsp;` included) is preserved.
+- **It is not Readability.** No article extraction, boilerplate removal, text
+  density, CSS evaluation, JavaScript, or DOM fidelity — navigation and footers
+  are text on the page and come out as text. The limitations are recorded as
+  tests rather than left implied.
+- **Strict UTF-8, because UniMem chose the encoding.** The HTML arrived as an
+  already-decoded JSON string and intake wrote its UTF-8 encoding, so the
+  processor is decoding its own encoding, not detecting a website's transport
+  charset. Undecodable bytes reuse the existing `TextDecodingError`.
+- **Title precedence, the first in the system:** submitted capture title → the
+  first nonblank HTML `<title>` → none. Never an `<h1>`, a first line, a
+  hostname, or a model. The extracted title reaches `ContentObject` only;
+  `CaptureRecord.title` still means what the submitter provided.
+- **Empty visible content is a processing failure.** A `COMPLETE` object with an
+  empty segment would report remembering something when nothing was remembered,
+  so `ProcessingInputError` is raised and the existing lifecycle marks the
+  capture `FAILED` — with the submitted bytes still in raw storage.
+- **The server never fetches `source.url`.** No fetcher, redirects, DNS, or
+  remote resource loading, and therefore no SSRF surface. HTML is inert
+  submitted text: nothing is executed, and no page content reaches an error body.
+- **Nothing else moved.** No new route or response shape, no lifecycle state,
+  no orchestrator change; `TextProcessor` remains `text@0.2`; completed replay
+  remains TEXT-only, so a duplicate webpage id is still `409`; the browser
+  connector is unchanged and still selection-only. Whole-page browser capture is
+  the next product work, not part of this PR.
+
+See [ADR-014](ADR/ADR-014-html-webpage-ingestion.md).
+
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
@@ -1391,6 +1487,7 @@ src/core/processing/
   base.py         the Processor port
   router.py       ProcessorRouter, exactly-one-match routing
   text.py         TextProcessor, UTF-8 text normalization
+  webpage.py      WebpageProcessor and the deterministic HTML text extractor
   service.py      ProcessingOrchestrator, the stored-to-complete lifecycle
   errors.py       typed processing, routing and lifecycle errors
 src/core/rendering/

@@ -57,6 +57,54 @@ def text_envelope(**overrides: Any) -> dict[str, Any]:
     return body | overrides
 
 
+#: A representative page: a doctype, a ``<title>`` carrying an entity, CSS and
+#: JavaScript that must not become content, headings, and inline markup.
+HTML_PAGE = """<!doctype html>
+<html>
+<head>
+  <title>Example &amp; Test</title>
+  <style>.x { display: none; }</style>
+</head>
+<body>
+  <main>
+    <h1>Hello</h1>
+    <p>First <strong>paragraph</strong>.</p>
+    <script>window.secret = "not content"</script>
+    <p>Second&nbsp;paragraph.</p>
+  </main>
+</body>
+</html>
+"""
+
+#: What ``HTML_PAGE`` extracts to. The no-break space is an escape on purpose:
+#: ``&nbsp;`` is a character the page asked for, so extraction preserves it.
+HTML_PAGE_TEXT = "Hello\n\nFirst paragraph.\n\nSecond\u00a0paragraph."
+
+#: The ``<title>`` of ``HTML_PAGE``, with its entity decoded.
+HTML_PAGE_TITLE = "Example & Test"
+
+WEBPAGE_CAPTURE_ID = "cap_http_web_01"
+
+
+def webpage_envelope(**overrides: Any) -> dict[str, Any]:
+    """A valid HTML-backed webpage envelope as a JSON-ready dictionary.
+
+    Built as a dictionary for the same reason the text one is: a real client
+    posts JSON it assembled itself, and this must validate as a document that
+    was never a Python object.
+    """
+    body = text_envelope(
+        id=WEBPAGE_CAPTURE_ID,
+        source={
+            "type": "browser",
+            "provider": "chromium",
+            "url": "https://example.com/article",
+        },
+        payload={"type": "webpage", "mime_type": "text/html", "html": HTML_PAGE},
+    )
+    return body | overrides
+
+
 def image_envelope(**overrides: Any) -> dict[str, Any]:
     """A structurally valid envelope naming a capability this build lacks.
 

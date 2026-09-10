@@ -153,9 +153,98 @@ submitted text hashes to the stored raw object. A capture that is still
 resumed, reprocessed, or reconciled. See
 [ADR-013](docs/ADR/ADR-013-completed-capture-replay.md).
 
-Only inline `text` payloads are processed today; a valid image, webpage, or
-document envelope is accepted by the contract and refused with
-`422 unsupported_payload`.
+### Capturing an HTML webpage
+
+The same endpoint also ingests webpages submitted as HTML. Quoting a whole HTML
+document inside a shell argument is miserable, so write the request body to a
+file first — here with a here-doc, which needs no escaping at all:
+
+```bash
+cat > page.html <<'HTML'
+<!doctype html>
+<html>
+<head>
+  <title>Example &amp; Test</title>
+  <style>.x { display: none; }</style>
+</head>
+<body>
+  <main>
+    <h1>Hello</h1>
+    <p>First <strong>paragraph</strong>.</p>
+    <script>window.secret = "not content"</script>
+    <p>Second&nbsp;paragraph.</p>
+  </main>
+</body>
+</html>
+HTML
+
+python - page.html > page-capture.json <<'PY'
+import json
+import sys
+
+html = open(sys.argv[1], encoding="utf-8").read()
+
+print(json.dumps({
+    "schema_version": "0.2",
+    "id": "cap_readme_web_01",
+    "source": {"type": "api", "provider": "curl",
+               "url": "https://example.com/article"},
+    "payload": {"type": "webpage", "mime_type": "text/html", "html": html},
+    "context": {"captured_at": "2026-01-02T03:04:05+00:00"},
+}))
+PY
+
+curl -sS -X POST http://127.0.0.1:8765/v1/captures \
+  -H 'content-type: application/json' \
+  --data-binary @page-capture.json
+```
+
+The response is the same `201` shape. The content object then comes back with
+`"type": "web"`, a title of `Example & Test` taken from the page's `<title>`,
+and one text segment reading:
+
+```
+Hello
+
+First paragraph.
+
+Second paragraph.
+```
+
+The JavaScript and the CSS are not in it, and the `&nbsp;` in the second
+paragraph is preserved as a real no-break space (U+00A0) rather than collapsed
+to an ordinary one:
+
+```bash
+curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_web_01/content
+```
+
+A few things are worth being precise about:
+
+- **The endpoint now processes plain text and HTML-backed webpages.** Images,
+  documents, video, and files are still accepted by the contract and refused
+  with `422 unsupported_payload`.
+- **Webpage support is deterministic text extraction, not reader mode.** Scripts,
+  styles, `noscript`, `template`, and `svg` are dropped, block elements separate
+  paragraphs, and entities are decoded. Navigation, menus, and footers are text
+  on the page and come out as text — there is no article extraction, no
+  boilerplate removal, and no CSS or JavaScript evaluation. The exact submitted
+  HTML is kept immutably and stays retrievable, so a better extractor later can
+  re-read exactly what this one saw.
+- **The server never fetches `source.url`.** It is metadata. The only bytes
+  processed are the ones in your request, and nothing on the page is executed,
+  fetched, or loaded.
+- **The submitted `payload.title` wins** over the page's `<title>` when you send
+  one.
+- **A webpage must be submitted as `html` alone.** Sending `html` together with
+  `text` or `file_ref` is refused with `422 unsupported_payload` rather than
+  silently dropping one of them — a capture stores one raw original, and this
+  build will not choose for you.
+- **There is no whole-page browser-extension action yet.** The extension below
+  remains selection-only; capturing a page today means POSTing its HTML, as
+  above.
+- Completed replay is text-only, so resubmitting the same webpage capture id is
+  `409` even when the request is identical.
 
 `GET /health` reports process liveness only and checks nothing else.
 
