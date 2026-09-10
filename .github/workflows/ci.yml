@@ -35,3 +35,19 @@ jobs:
         # Both packages, so the delivery surface is measured too and the
         # coverage floor applies to it rather than only to the kernel.
         run: pytest --cov=core --cov=unimem_api
+
+  browser-connector:
+    name: Browser connector
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The connector has no dependencies at all — no bundler, no test
+      # framework, nothing to install — so this step exists only to pin the
+      # runtime that `node --test` comes from.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: node --test
+        run: npm test --prefix clients/browser-extension

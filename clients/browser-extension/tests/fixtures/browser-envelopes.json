@@ -1,0 +1,65 @@
+[
+  {
+    "name": "awkward selection with a page title",
+    "inputs": {
+      "id": "3f1b2c7e-9a4d-4e51-8b6f-0c2d7a1e5b93",
+      "selection": "  Å vs Å — 你好 🌍\r\n\tindented\n\ntrailing   \n ﻿end  ",
+      "url": "https://example.com/articles/canonical-content?ref=unimem#section-2",
+      "title": "The canonical object is not Markdown",
+      "capturedAt": "2026-01-02T03:04:05.678Z"
+    },
+    "envelope": {
+      "schema_version": "0.2",
+      "id": "3f1b2c7e-9a4d-4e51-8b6f-0c2d7a1e5b93",
+      "source": {
+        "type": "browser",
+        "provider": "unimem-browser-extension",
+        "url": "https://example.com/articles/canonical-content?ref=unimem#section-2"
+      },
+      "payload": {
+        "type": "text",
+        "mime_type": "text/plain",
+        "text": "  Å vs Å — 你好 🌍\r\n\tindented\n\ntrailing   \n ﻿end  ",
+        "title": "The canonical object is not Markdown"
+      },
+      "context": {
+        "captured_at": "2026-01-02T03:04:05.678Z",
+        "application": "unimem-browser-extension"
+      },
+      "intent": {
+        "action": "save"
+      }
+    }
+  },
+  {
+    "name": "page with a blank title omits the title entirely",
+    "inputs": {
+      "id": "8c0a5d21-77e3-4f0a-9d1e-2b6c4a8f3e70",
+      "selection": "a single line",
+      "url": "http://localhost:3000/notes",
+      "title": "   ",
+      "capturedAt": "2026-09-09T12:00:00.000Z"
+    },
+    "envelope": {
+      "schema_version": "0.2",
+      "id": "8c0a5d21-77e3-4f0a-9d1e-2b6c4a8f3e70",
+      "source": {
+        "type": "browser",
+        "provider": "unimem-browser-extension",
+        "url": "http://localhost:3000/notes"
+      },
+      "payload": {
+        "type": "text",
+        "mime_type": "text/plain",
+        "text": "a single line"
+      },
+      "context": {
+        "captured_at": "2026-09-09T12:00:00.000Z",
+        "application": "unimem-browser-extension"
+      },
+      "intent": {
+        "action": "save"
+      }
+    }
+  }
+]

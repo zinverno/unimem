@@ -1,0 +1,10 @@
+{
+  "name": "unimem-browser-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Chromium MV3 connector that saves a page selection to the local UniMem capture API.",
+  "scripts": {
+    "test": "node --test"
+  }
+}

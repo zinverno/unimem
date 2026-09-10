@@ -64,9 +64,13 @@ Phase 1 builds the first product surface around it:
   `src/unimem_api/`, **outside `core`**: four routes, a synchronous
   intake-plus-processing `POST`, a stable typed error envelope, and
   `python -m unimem_api`. The request body is the canonical `CaptureEnvelope`
-  itself, so the browser extension and Obsidian connector still to come will
-  call this API unchanged. `core` gained no dependency and imports nothing from
-  the adapter.
+  itself, so every connector hands over the same document. `core` gained no
+  dependency and imports nothing from the adapter.
+- **Phase 1, PR 2 — browser selection connector.** A Chromium MV3 extension in
+  `clients/browser-extension/`: select text, click the action, and the selection
+  becomes a canonical `CaptureEnvelope` POSTed to the local API. The first real
+  client of the Phase-1 surface, and the first end-to-end product path — see
+  *Browser selection capture*, below.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 
@@ -136,6 +140,61 @@ refused with `422 unsupported_payload`.
 
 `GET /health` reports process liveness only and checks nothing else.
 
+## Browser selection capture
+
+The first real client of that API: a Chromium extension that saves the text you
+have selected on a page.
+
+1. Start the UniMem API:
+
+   ```bash
+   python -m unimem_api --data-dir ./data
+   ```
+
+2. Open `chrome://extensions`.
+3. Enable **Developer mode**.
+4. Choose **Load unpacked**.
+5. Select `clients/browser-extension`.
+6. Pin the extension if you want it visible in the toolbar.
+7. Open an ordinary `http://` or `https://` page.
+8. Select some text.
+9. Click **Save selected text to UniMem**.
+
+The badge is the whole UI:
+
+| Badge | Meaning |
+| --- | --- |
+| `...` | sending |
+| `OK` | saved — the server confirmed a complete capture |
+| `!` | not saved, or not confirmed |
+
+Hover the toolbar icon for the detail (`UniMem: saved`, `UniMem: select some text
+first`, `UniMem: service unavailable`, and so on).
+
+The capture goes through the same path as any other client: your selection
+becomes a canonical `CaptureEnvelope`, is POSTed to
+`http://127.0.0.1:8765/v1/captures`, and is stored, normalized, and completed
+synchronously. Read it back with the same two `GET`s shown above.
+
+Current limitations, all deliberate for this phase:
+
+- **Chrome/Chromium MV3 only.** No Firefox or Safari port.
+- **Top-level document selection only.** A selection inside a cross-origin
+  iframe is not captured, and widening permissions to reach one is not a trade
+  this connector makes.
+- **The API address is fixed** at `http://127.0.0.1:8765`. There is no options
+  page and no configurable host or port; the server's `--host`/`--port` flags
+  still work, but this connector targets the documented default.
+- **Only `http://` and `https://` pages.** Clicking on `chrome://`, extension,
+  or `file://` pages fails locally and sends nothing.
+- **No server authentication.** Keep the API on localhost.
+- **No automatic retries.** A capture is POSTed exactly once. If the request
+  fails at the network layer, the extension makes one read-only check to see
+  whether the capture landed, and tells you what it found — it never re-sends.
+- **No extension history.** The extension stores nothing; the server is the only
+  record of what was captured.
+- **Selection only.** No whole-page capture, no HTML, no screenshots.
+
 ## Layout
 
 ```
@@ -146,6 +205,7 @@ src/core/rendering/   renderer port and the JSON and Markdown projections
 src/core/persistence/ capture record store port and the SQLite adapter
 src/core/intake/      capture intake, the envelope-to-stored-capture flow
 src/unimem_api/       the HTTP delivery adapter and its CLI — outside core
+clients/              connectors that call the HTTP API — outside core and unimem_api
 tests/                unit and integration tests
 docs/                 architecture notes and ADRs
 ```
@@ -159,7 +219,14 @@ uv pip install --python .venv/bin/python -e ".[dev]"
 .venv/bin/pytest --cov=core --cov=unimem_api --cov-report=term-missing
 .venv/bin/ruff check . && .venv/bin/ruff format --check .
 .venv/bin/mypy                                          # type checking
+
+npm test --prefix clients/browser-extension             # browser connector
 ```
+
+The browser connector is plain ES modules with **no dependencies** — no bundler,
+no test framework, no build step. `npm test` runs Node's own test runner, and
+the directory is loadable as an unpacked extension exactly as it sits in the
+repository.
 
 Runtime dependencies: **pydantic** for `core`, plus **fastapi** and **uvicorn**
 for the `unimem_api` delivery adapter. `core` imports none of the latter and is

@@ -66,11 +66,18 @@ intake-plus-processing `POST`, a stable typed error envelope, and
 there is no HTTP-specific copy of it. See *The HTTP capture surface (Phase 1)*,
 below, and [ADR-011](ADR/ADR-011-local-http-capture-surface.md).
 
+**Phase 1, PR 2 — browser selection connector.** Answers "how does text a person
+selected in a browser become a durable canonical capture?" A Chromium MV3
+extension in `clients/browser-extension/`, outside both `core` and `unimem_api`,
+and the first real client of the HTTP surface — see *The browser selection
+connector (Phase 1)*, below, and
+[ADR-012](ADR/ADR-012-browser-selection-connector.md).
+
 ## Future data flow
 
 ```
-Browser extension / Obsidian connector / script / curl
-  -> HTTP               (unimem_api — Phase 1; only curl and scripts exist today)
+Browser extension / script / curl        (an Obsidian connector is later work)
+  -> HTTP               (unimem_api — Phase 1)
   -> CaptureEnvelope    the canonical ingress contract, unchanged by transport
   -> core
   -> durable raw bytes + capture records + canonical content
@@ -1081,6 +1088,73 @@ fabricate a missing parent directory, and `LocalRawObjectStore` is unchanged.
 later work in this phase; today the callers are `curl` and scripts.
 
 
+## The browser selection connector (Phase 1)
+
+The first real client of the HTTP surface, and the first end-to-end product
+path. It lives in `clients/browser-extension/` — outside both `core` and
+`unimem_api` — and it is an ordinary API consumer: it holds no server code, gets
+no special endpoint, and gained the server no feature.
+
+```
+Browser page
+   |
+explicit action click            chrome.action.onClicked — the user gesture
+   |
+activeTab + scripting            granted by that click; no static content script
+   |
+exact selected text              window.getSelection(), submitted untouched
+   |
+MV3 service worker               the privileged extension origin
+   |
+CaptureEnvelope                  canonical, schema 0.2, built client-side
+   |
+localhost HTTP API               http://127.0.0.1:8765 — a fixed constant
+   |
+existing core
+   |
+durable canonical state          COMPLETE CaptureRecord + ContentObject
+```
+
+The decisions that shape it:
+
+- **The selection is read in the page; the request is made by the service
+  worker.** The injected function reads `window.getSelection()` and knows nothing
+  about UniMem — no fetch, no URL. The extension origin holds the loopback host
+  permission and is what performs the POST. This split is why the API needs no
+  CORS middleware, and `unimem_api` is unchanged by that PR.
+- **Minimum permissions: `activeTab` and `scripting`, plus
+  `http://127.0.0.1/*`.** No `<all_urls>`, no `tabs`, no `storage`, and no static
+  `content_scripts` — nothing touches a page until the user clicks. Chrome match
+  patterns cannot pin a port, so the connector's own fixed constant does.
+- **The page never chooses the destination.** The page URL and title are capture
+  metadata and the selection is payload data; none of them influences where the
+  request goes.
+- **The selection is submitted exactly as the page returned it.** `trim()` is
+  used once, to decide whether a selection is blank, and never to transform. A
+  blank selection is refused locally: no capture id, no request, no fabricated
+  server-side failure.
+- **The capture id is a client-generated opaque UUID**, minted before the POST
+  and derived from nothing — not the URL, the text, a digest, or the clock.
+- **POST exactly once, and no automatic retry.** A real HTTP error is a definite
+  answer and is reported as one; `409` is a conflict, not idempotent success.
+- **Network ambiguity is resolved by observation.** If the POST never reaches an
+  HTTP response, the connector performs at most one read-only
+  `GET /v1/captures/{id}` on the id it already minted and reports what it finds —
+  complete, some other durable state, not found, or unknown. It never re-POSTs
+  and never mutates anything: lifecycle stays core-owned.
+- **No persistent client state**, no telemetry, and a badge plus a title as the
+  entire UI, scoped to the clicked tab so one page's result never becomes every
+  tab's badge. The selected text never appears in that UI or in a log, and
+  neither does an exception message or stack — the click path ends in safe `!`
+  feedback for any failure, because Chrome does not await the action listener
+  and a rejection escaping it would be unhandled.
+
+Scope, stated as scope rather than omission: Chromium MV3 only, top-level
+document selection only, `http(s)` pages only, a fixed API address, and selection
+only — no whole-page or HTML capture, which needs a webpage processor that does
+not exist yet.
+
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
@@ -1143,9 +1217,16 @@ later work in this phase; today the callers are `curl` and scripts.
     without altering a core error, a 5xx body carries no backend path or
     identifier, and no route writes lifecycle state.
 
+18. A connector submits captures and observes them; it never owns lifecycle.
+    Implemented in Phase 1's browser connector: it builds the canonical
+    envelope, POSTs it exactly once, resolves an ambiguous network outcome with
+    one read-only probe rather than a retry, keeps no durable state of its own,
+    and never converts a server failure into a local success. Captured content
+    reaches it exactly as the source produced it.
+
 Invariants 1, 4, 7 and 10 are design commitments; 2, 3, 5, 6, 8, 9, 11, 12, 13,
-14, 15, 16 and 17 are enforced by the models, renderers, stores, intake,
-orchestration and the delivery adapter, and covered by tests.
+14, 15, 16, 17 and 18 are enforced by the models, renderers, stores, intake,
+orchestration, the delivery adapter and the connector, and covered by tests.
 
 ## Contract rules
 
@@ -1217,6 +1298,10 @@ then serialized.
   Pydantic ships a first-party mypy plugin, and one tool configured in
   `pyproject.toml` is enough for a package this size).
 - ruff for lint and formatting, pytest + pytest-cov for tests.
+- The browser connector is plain ES modules with **no dependencies** and is
+  tested with Node's built-in runner (`node --test`, Node 22 in CI). No bundler,
+  transpiler, or JavaScript test framework is used, and the Python package
+  depends on none of it.
 
 ## Structure
 
@@ -1259,6 +1344,15 @@ src/unimem_api/   the HTTP delivery adapter — outside core (Phase 1)
   errors.py       the core-failure-to-status translation table
   wiring.py       build_local_app, the local composition root
   __main__.py     python -m unimem_api
+clients/browser-extension/   Chromium MV3 selection connector (Phase 1, PR 2)
+  manifest.json     MV3 manifest: activeTab, scripting, loopback host only
+  service-worker.js the extension origin: chrome wiring, and where fetch happens
+  lib/envelope.js   builds the canonical CaptureEnvelope from a selection
+  lib/api.js        the HTTP client: one POST, one optional observational GET
+  lib/capture.js    the click-to-capture flow, and the injected selection reader
+  lib/feedback.js   outcome -> badge and title
+  lib/action.js     applies that feedback to the clicked tab, and never throws
+  lib/outcomes.js   the connector's closed set of results
 tests/unit/contracts/
 tests/unit/storage/
 tests/unit/processing/
@@ -1272,6 +1366,7 @@ tests/integration/persistence/
 tests/integration/intake/
 tests/unit/api/
 tests/integration/api/
+clients/browser-extension/tests/
 docs/
 ```
 
