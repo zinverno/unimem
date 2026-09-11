@@ -2,14 +2,16 @@
 
 Everything in this module is *delivery-layer* shape: what the wire looks like
 for a request or a response that has no canonical domain contract behind it.
-There are exactly three of them, and they are all responses.
+There are exactly four of them, and they are all responses.
 
-There is deliberately **no request model here.** The POST body is
-:class:`~core.contracts.CaptureEnvelope` itself, unchanged and unwrapped. A
-second HTTP-flavoured copy of the ingress contract would be a second definition
-of what a capture *is*, kept in step by hand, and the first field that drifted
-would drift silently — which is the whole reason the canonical contract exists.
-The envelope is the ingress contract; HTTP is one way of handing one over.
+There is deliberately **no request model here.** The capture POST body is
+:class:`~core.contracts.CaptureEnvelope` itself, unchanged and unwrapped, and
+the upload POST body is not JSON at all — it is a multipart file part, declared
+on the route where FastAPI can see it. A second HTTP-flavoured copy of the
+ingress contract would be a second definition of what a capture *is*, kept in
+step by hand, and the first field that drifted would drift silently — which is
+the whole reason the canonical contract exists. The envelope is the ingress
+contract; HTTP is one way of handing one over.
 
 Nor is there an HTTP shape for :class:`~core.contracts.CaptureRecord` or
 :class:`~core.contracts.ContentObject`. Those are canonical, they already
@@ -59,6 +61,37 @@ class CaptureAcceptedResponse(BaseModel):
     capture_id: str
     content_id: str
     status: Literal[CaptureStatus.COMPLETE] = CaptureStatus.COMPLETE
+
+
+class UploadedObjectResponse(BaseModel):
+    """What a client learns from staging bytes, and deliberately nothing more.
+
+    ``file_ref`` is the whole point of the response: it is exactly what a later
+    :class:`~core.contracts.CapturePayload` puts in its own ``file_ref`` field,
+    so a client copies one string from here to there and never has to know how
+    raw storage is arranged. ``sha256`` is the same fact in the form a client
+    can *check* — hash the file you just sent and compare — which is what makes
+    "the original is byte-exact" verifiable from outside rather than a promise.
+
+    ``mime_type`` is descriptive. It echoes what the upload declared and takes
+    no part in the object's identity: raw objects are addressed by their bytes
+    and by nothing else, so the same PDF uploaded as ``application/pdf`` and as
+    ``application/octet-stream`` is one stored object with one reference.
+
+    What is **not** here is as deliberate. There is no capture id, because no
+    capture was made. No status, because nothing entered a lifecycle. No
+    filename, because the submitted one is untrusted client text that decides
+    nothing — not the storage path, not the identity, not a title — and echoing
+    it back would suggest otherwise. And no "created" flag, because the store
+    deduplicates by content and genuinely does not know whether this request
+    wrote a new file or found an identical one already there.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    file_ref: str
+    sha256: str
+    mime_type: str | None = None
 
 
 class ErrorBody(BaseModel):

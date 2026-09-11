@@ -26,9 +26,42 @@ encoding of that string and nothing else. The lifecycle, the ordering, the
 metadata, and the text path's bytes are untouched — intake still does not parse,
 extract, or look inside the material it stores, and the HTML never appears
 anywhere on the ``CaptureRecord``.
+
+Phase 3 PR 1 widens something genuinely different, and it is worth naming
+precisely. A ``DOCUMENT`` capture's material never travelled inside the
+envelope: a PDF is binary, JSON is not, and base64 in a ``text`` field would be
+a lie about what was captured. The bytes are staged *before* the capture, as an
+immutable content-addressed raw object, and the envelope carries only the
+``file_ref`` that names them. So for a document the sequence loses a step
+rather than gaining one::
+
+    CaptureEnvelope(DOCUMENT, file_ref -> already-staged pdf)
+        -> resolve and verify the reference   (read-only, before any side effect)
+        -> CaptureRecord(RECEIVED)
+        -> CaptureRecord(STORED)              pointing at those very bytes
+
+**Intake writes no bytes on that path.** The original is already immutable and
+already addressed by its own SHA-256; storing it a second time would be a second
+copy of something that deduplicates to itself, and a pointless one. What intake
+adds is the capture: the record that says somebody asked for those bytes to be
+remembered.
+
+The reference is settled *first*, entirely through reads, because the ordering
+rule that makes ``RECEIVED`` worth writing cuts both ways. A receipt is durable
+evidence that a capture was accepted; a capture whose material cannot be found
+was never acceptable, and leaving a ``RECEIVED`` record behind for one would be
+evidence of something that did not happen.
+
+Only the raw store's own reference format is resolved. A ``file_ref`` is an
+opaque handle by contract, and this build understands exactly one kind:
+``sha256:<digest>``, as returned by the upload surface. Nothing here opens a
+path, resolves a ``file://`` URL, or fetches an HTTP one — treating a
+caller-supplied string as a filesystem path would move authority from the
+upload boundary into core and hand every client a local-file-read primitive.
 """
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final
 
@@ -37,13 +70,21 @@ from core.contracts import (
     CapturePayloadType,
     CaptureRecord,
     CaptureStatus,
+    RawObjectRef,
 )
 from core.intake.errors import (
+    CaptureMaterialUnavailableError,
     InvalidCaptureEnvelopeError,
     UnsupportedCapturePayloadError,
 )
 from core.persistence import CaptureRecordStore
-from core.storage import RawObjectStore
+from core.storage import (
+    RAW_REF_SCHEME,
+    InvalidRawObjectRefError,
+    RawObjectStore,
+    parse_raw_ref,
+    raw_object_ref,
+)
 
 #: The encoding inline capture material is written with — the submitted text of
 #: a ``TEXT`` capture, and since Phase 2 the submitted HTML of a ``WEBPAGE``
@@ -55,9 +96,41 @@ from core.storage import RawObjectStore
 TEXT_ENCODING: Final = "utf-8"
 
 #: The payload fields that carry submitted material a ``CaptureRecord`` could
-#: store as its one raw original. A ``WEBPAGE`` envelope naming more than one of
-#: them is refused rather than resolved: see :meth:`CaptureIntake._webpage_html`.
+#: store as its one raw original. A ``WEBPAGE`` or ``DOCUMENT`` envelope naming
+#: more than one of them is refused rather than resolved: see
+#: :meth:`CaptureIntake._webpage_html` and :meth:`CaptureIntake._staged_document`.
 MATERIAL_PAYLOAD_FIELDS: Final = ("text", "html", "file_ref")
+
+#: The one document format this build has a processor for. A ``DOCUMENT``
+#: capture must declare it explicitly: intake does not sniff bytes, read magic
+#: numbers, or infer a format from a filename it was never given, and a document
+#: whose format is merely *probably* PDF is one this build declines to guess at.
+DOCUMENT_MIME_TYPE: Final = "application/pdf"
+
+
+@dataclass(frozen=True)
+class _InlineMaterial:
+    """Material that arrived inside the envelope, as the bytes to write."""
+
+    data: bytes
+
+
+@dataclass(frozen=True)
+class _StagedMaterial:
+    """Material that was already immutable before the capture existed.
+
+    ``raw_object`` is the reference the ``CaptureRecord`` will carry: minted
+    from the digest the submitted ``file_ref`` names, and carrying the MIME type
+    the submitter declared. It is a *fresh* reference rather than the upload
+    response's — intake mints what this capture records, and does not pass a
+    caller's object through into durable state.
+    """
+
+    raw_object: RawObjectRef
+
+
+#: What the envelope's payload resolves to before anything becomes durable.
+_Material = _InlineMaterial | _StagedMaterial
 
 
 def utc_now() -> datetime:
@@ -94,16 +167,25 @@ class CaptureIntake:
 
         The order is the contract:
 
-        1. refuse anything it cannot materialize, before any side effect;
+        1. refuse anything it cannot materialize, before any side effect —
+           including, for staged material, proving that the referenced raw
+           object is actually there;
         2. create a ``RECEIVED`` record — the receipt, written first, and
            already carrying the envelope's capture-time metadata;
-        3. store the exact UTF-8 bytes of the submitted material;
+        3. obtain the reference to the immutable original: by writing the exact
+           UTF-8 bytes of inline material, or — for a document — by taking the
+           reference to bytes that were staged before this capture existed;
         4. replace the receipt with a ``STORED`` record carrying the reference.
 
         The metadata is durable from step 2, not step 4: a capture stranded by
         a failure in between still knows when, where, and why it was taken.
         Only the content itself is deferred to the raw store, and nothing about
         the envelope is ever written into those bytes.
+
+        Step 3 writes nothing at all on the staged path, and step 1 is what
+        earns that. The bytes are immutable and content-addressed already, so
+        the only honest thing left to establish is that they exist — which is a
+        read, and which happens before the clock is even looked at.
 
         The envelope is read once, before anything becomes durable. From the
         moment ``create`` succeeds, the ``RECEIVED`` snapshot is the authority
@@ -116,7 +198,7 @@ class CaptureIntake:
         record store, so a failure after step 2 leaves a truthful ``RECEIVED``
         record rather than a fabricated ``FAILED`` one.
         """
-        data = self._materialize(envelope)
+        material = self._materialize(envelope)
         mime_type = envelope.payload.mime_type
 
         # Read from the envelope once, here, and never again. Everything below
@@ -142,7 +224,14 @@ class CaptureIntake:
         )
         self._record_store.create(received)
 
-        raw_object = self._raw_store.store_bytes(data, mime_type=mime_type)
+        # Inline material becomes bytes in the store; staged material already
+        # is bytes in the store, and its reference was settled above. Either
+        # way what comes out is the one ``RawObjectRef`` this capture records.
+        raw_object = (
+            material.raw_object
+            if isinstance(material, _StagedMaterial)
+            else self._raw_store.store_bytes(material.data, mime_type=mime_type)
+        )
 
         # ``received`` is now durable, which makes it the authority on every
         # capture fact — not the envelope. The raw store ran in between, and a
@@ -171,41 +260,164 @@ class CaptureIntake:
         self._record_store.replace(stored)
         return stored
 
-    @staticmethod
-    def _materialize(envelope: CaptureEnvelope) -> bytes:
-        """Turn the envelope's payload into the exact bytes to store.
+    def _materialize(self, envelope: CaptureEnvelope) -> _Material:
+        """Settle what this capture's one raw original is, without writing it.
 
-        Encoding is the only transformation, for every supported payload type.
-        Nothing is trimmed, Unicode normalized, BOM-prefixed, or line-ending
-        rewritten, and no encoding is detected or attempted other than UTF-8 —
-        what the caller submitted is what a future processor reads back.
-
-        Two payload types are supported, and each names exactly one submitted
+        Three payload types are supported, and each names exactly one submitted
         field as the material::
 
-            TEXT                     payload.text
-            WEBPAGE (HTML-backed)    payload.html
+            TEXT                     payload.text     -> bytes to write
+            WEBPAGE (HTML-backed)    payload.html     -> bytes to write
+            DOCUMENT (staged PDF)    payload.file_ref -> bytes already stored
 
-        The refusals come in two kinds, and they are different things. An
+        For the two inline types, encoding is the only transformation. Nothing
+        is trimmed, Unicode normalized, BOM-prefixed, or line-ending rewritten,
+        and no encoding is detected or attempted other than UTF-8 — what the
+        caller submitted is what a future processor reads back. For the staged
+        type there is no transformation at all, because there is nothing to
+        transform: the bytes were immutable before this call.
+
+        The refusals come in three kinds, and they are different things. An
         envelope naming a capability this build does not have is *valid* — a
         later phase may accept it unchanged — and raises
         :class:`~core.intake.errors.UnsupportedCapturePayloadError`. An envelope
         contradicting its own contract raises
         :class:`~core.intake.errors.InvalidCaptureEnvelopeError`, which no phase
-        will accept. Both are raised before the clock is read or a store is
-        touched, so a refused envelope leaves nothing behind.
+        will accept. An envelope whose staged material is simply not in the
+        store raises
+        :class:`~core.intake.errors.CaptureMaterialUnavailableError`, which the
+        identical envelope survives once the bytes are staged. All three are
+        raised before the clock is read or a record is written, so a refused
+        envelope leaves nothing behind.
+
+        The only store call this method may make is a read: the existence check
+        on the document path. Reads are what make the ordering guarantee
+        possible; a write here would be the side effect the guarantee exists to
+        prevent.
         """
         match envelope.payload.type:
             case CapturePayloadType.TEXT:
-                return CaptureIntake._text(envelope).encode(TEXT_ENCODING)
+                return _InlineMaterial(CaptureIntake._text(envelope).encode(TEXT_ENCODING))
             case CapturePayloadType.WEBPAGE:
-                return CaptureIntake._webpage_html(envelope).encode(TEXT_ENCODING)
+                return _InlineMaterial(CaptureIntake._webpage_html(envelope).encode(TEXT_ENCODING))
+            case CapturePayloadType.DOCUMENT:
+                return self._staged_document(envelope)
             case _:
                 raise UnsupportedCapturePayloadError(
                     f"capture {envelope.id!r} carries a {envelope.payload.type.value} payload; "
-                    f"this build accepts inline {CapturePayloadType.TEXT.value} and "
-                    f"html-backed {CapturePayloadType.WEBPAGE.value} captures only"
+                    f"this build accepts inline {CapturePayloadType.TEXT.value} captures, "
+                    f"html-backed {CapturePayloadType.WEBPAGE.value} captures, and "
+                    f"staged {DOCUMENT_MIME_TYPE} "
+                    f"{CapturePayloadType.DOCUMENT.value} captures only"
                 )
+
+    def _staged_document(self, envelope: CaptureEnvelope) -> _StagedMaterial:
+        """Resolve a ``DOCUMENT`` payload to the staged raw object it names.
+
+        Phase 3 PR 1 supports exactly one materialization of a document: a
+        ``file_ref`` naming a raw object this store already holds, declared as
+        ``application/pdf``. Everything else about the shape is refused rather
+        than resolved, for the two reasons the webpage path already established
+        and one that is new to documents:
+
+        * **A capture stores one raw original.** ``file_ref`` alongside ``text``
+          or ``html`` offers more material than the record can hold, and picking
+          one would durably discard something the client submitted while
+          reporting success.
+        * **The canonical contract stays wider than this build.** It permits a
+          document backed by ``text``, and it always will; this implementation
+          simply has no processor for that yet, so the refusal is an
+          unsupported-capability error rather than a validation one.
+        * **A format this build cannot parse must not be accepted as if it
+          could.** A DOCX or an EPUB reaching intake would sail through to a
+          router that has no processor for it, and the capture would strand
+          mid-lifecycle for a reason nobody could act on. Refusing at the
+          boundary — where the client is still holding the request — is the
+          honest place to say "not yet".
+
+        The reference itself is checked in two separate steps, because they fail
+        for different reasons and a caller does different things about them:
+
+        1. **Is it a reference this build understands?** Only the raw store's
+           own ``sha256:<digest>`` form is resolved. A filesystem path, a
+           ``file://`` URL, an HTTP URL, or an S3 key is refused as an
+           unsupported capability — and, importantly, is never *opened*,
+           *resolved*, or *fetched*. This is the one line standing between an
+           arbitrary caller-supplied string and a local-file-read primitive, and
+           it is why the upload surface exists at all.
+        2. **Are the bytes there?** A well-formed reference naming nothing is a
+           :class:`~core.intake.errors.CaptureMaterialUnavailableError` — the
+           envelope is right and the material has not been staged.
+
+        No submitted value is echoed. The refusals name the payload type, the
+        field *names*, and the MIME type this build supports; they never repeat
+        the ``file_ref``, the declared MIME type, or any other client string
+        back into a message that will be logged. A ``file_ref`` in particular
+        may be an absolute path from someone's home directory, and a refusal is
+        not a reason to publish it.
+        """
+        payload = envelope.payload
+        if payload.file_ref is None:
+            if payload.text is None:
+                raise InvalidCaptureEnvelopeError(
+                    f"capture {envelope.id!r} declares a document payload "
+                    f"but carries neither file_ref nor text"
+                )
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries a document payload backed by text; "
+                f"this build ingests documents backed by a staged "
+                f"{DOCUMENT_MIME_TYPE} file_ref only"
+            )
+        alongside = [
+            name
+            for name in MATERIAL_PAYLOAD_FIELDS
+            if name != "file_ref" and getattr(payload, name) is not None
+        ]
+        if alongside:
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries a document payload with file_ref and "
+                f"{' and '.join(alongside)}; a capture stores one raw original, and this "
+                f"build will not choose between submitted representations — resubmit with "
+                f"file_ref alone"
+            )
+        if payload.mime_type is None:
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries a document payload declaring no mime_type; "
+                f"this build ingests {DOCUMENT_MIME_TYPE} documents only, and does not "
+                f"infer a document's format"
+            )
+        if payload.mime_type != DOCUMENT_MIME_TYPE:
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries a document payload declaring a mime_type "
+                f"this build has no processor for; it ingests {DOCUMENT_MIME_TYPE} "
+                f"documents only"
+            )
+
+        try:
+            digest = parse_raw_ref(payload.file_ref)
+        except InvalidRawObjectRefError:
+            # Deliberately unchained. The store's own message quotes the
+            # reference it rejected, and a rejected reference is exactly the
+            # kind of client string — a home directory path, a private URL —
+            # that must not be carried into a message or a traceback that ends
+            # up in a log.
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries a document payload whose file_ref is not a "
+                f"UniMem raw object reference; this build resolves references of the form "
+                f"'{RAW_REF_SCHEME}:<64 lowercase hex characters>', as returned when the "
+                f"bytes were staged, and reads no filesystem path or URL"
+            ) from None
+
+        # Minted here rather than taken from a caller: this is the reference the
+        # capture record will carry, and the MIME type on it is the one the
+        # submitter declared for *this capture*, not one the raw store inferred.
+        raw_object = raw_object_ref(digest, mime_type=payload.mime_type)
+        if not self._raw_store.exists(raw_object):
+            raise CaptureMaterialUnavailableError(
+                f"capture {envelope.id!r} refers to staged material that is not in the "
+                f"raw object store; stage the bytes first, then resubmit this capture"
+            )
+        return _StagedMaterial(raw_object)
 
     @staticmethod
     def _text(envelope: CaptureEnvelope) -> str:

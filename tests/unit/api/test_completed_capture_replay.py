@@ -508,6 +508,7 @@ class TestTheSurfaceItself:
 
         assert paths == {
             "/health",
+            "/v1/uploads",
             "/v1/captures",
             "/v1/captures/{capture_id}",
             "/v1/captures/{capture_id}/content",

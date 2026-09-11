@@ -116,6 +116,48 @@ right click the icon            >-> the same local API
 See *Browser whole-page capture (Phase 2)*, below, and
 [ADR-015](ADR/ADR-015-browser-whole-page-capture.md).
 
+### Macro Phase 3 — Document Ingestion
+
+**Phase 2 is closed and stays closed.** Its manual acceptance checklist A–G was
+run by the user, by hand, against a real local Chromium installation and a real
+local UniMem server, and every check passed. That is a *human* result: the
+automated suites cover the flows, the envelopes, the network bounds, and the
+extension's real registration in Chromium, and they deliberately do not dispatch
+a toolbar click or a right-click. Nothing here claims CI drove those gestures.
+
+Phase 3 does not reopen webpage extraction semantics, browser selection or
+whole-page semantics, replay architecture, or Chrome permissions and UI. It asks
+the next question about modality: **both kinds of material UniMem ingests today
+are strings. What does it take to ingest something that is not?**
+
+**Phase 3, PR 1 — PDF upload and ingestion vertical slice.** Answers "how does a
+locally uploaded PDF become an immutable raw original and then a page-aware
+canonical `document` `ContentObject`, through the existing capture lifecycle,
+without smuggling binary data into the JSON `CaptureEnvelope`?" A narrow staging
+route, `POST /v1/uploads`, plus `PdfProcessor` in
+`src/core/processing/pdf.py` and one widened intake capability. The contracts
+already contained `document`, `file_ref`, `SpatialLocation.page`, and `original`
+provenance, so **nothing in `src/core/contracts/` changed and the schema stays
+`0.2`**.
+
+```
+PDF bytes
+  -> POST /v1/uploads      immutable content-addressed raw object
+  -> file_ref              "sha256:<digest>"
+  -> POST /v1/captures     the existing canonical envelope, naming those bytes
+  -> CaptureIntake         resolve + verify, then RECEIVED, then STORED
+  -> PdfProcessor          one TEXT segment per nonblank page
+  -> ContentObject(document)
+  -> COMPLETE
+```
+
+**Upload is not capture.** The staging route mints no capture id, creates no
+`CaptureRecord`, advances no lifecycle, runs no processor, and produces no
+content. It puts immutable bytes somewhere a later envelope can name them, and
+`file_ref` is the whole of the connection between the two operations. See
+*PDF document ingestion (Phase 3)*, below, and
+[ADR-016](ADR/ADR-016-pdf-document-ingestion.md).
+
 ## Future data flow
 
 ```
@@ -1410,6 +1452,110 @@ right-click the toolbar icon  ->  "Save whole page to UniMem"
 See [ADR-015](ADR/ADR-015-browser-whole-page-capture.md).
 
 
+## PDF document ingestion (Phase 3)
+
+The first modality whose material is not a string, and the reason the system
+grew an acquisition step.
+
+**Binary cannot honestly live inside a JSON envelope.** `payload.text` means
+*the text the user submitted*; a base64 blob in it is a recorded fact that is
+false, and every later stage would read it as true. `payload.html` is the same
+mistake one modality over, and `source.url` would turn a local file into a fetch
+this build does not do. `CapturePayload.file_ref` has meant "an opaque handle to
+bytes held outside this contract" since Phase 0A, which is exactly the shape of
+the problem — so nothing in the contracts changed.
+
+**`POST /v1/uploads` stages bytes and is not a capture.** It mints no capture id,
+creates no `CaptureRecord`, advances no lifecycle, runs no processor, produces no
+`ContentObject`, and records no intent, context, or source metadata. It answers
+`200` rather than `201` because the raw store deduplicates by content and does
+not know whether this request created a file or found identical bytes already
+there — claiming "created" would be a guess dressed as a fact. The route is
+generic on purpose: images, audio, and arbitrary files stage through it later
+without a redesign.
+
+**The uploaded filename has no authority anywhere.** It picks no storage path —
+the layout comes from a digest the store computed itself — is not part of raw
+identity, is never persisted onto a `CaptureRecord`, never becomes a title, and
+is not returned. Traversal sequences in it are therefore not dangerous input
+that has been sanitized; they are input that is never read.
+
+**Only UniMem raw references are resolved.** A `file_ref` must be
+`sha256:<64 lowercase hex>`. A filesystem path, `file://` URL, HTTP URL, or S3
+URL is refused and — the part that matters — is never opened, resolved, or
+fetched. Accepting a path would move authority from the upload boundary into
+`core` and hand every client of a localhost API a local-file-read primitive.
+
+**The reference is settled before any lifecycle write.** Intake checks the shape,
+then that the reference is one this build understands, then that the raw store
+actually holds it — three reads — and only then looks at its clock and creates
+`RECEIVED`. A malformed, unresolvable, or missing reference leaves no `RECEIVED`
+record, no `STORED` record, no raw write, and no content. A well-formed reference
+naming bytes nobody staged is a third intake error,
+`CaptureMaterialUnavailableError` → `422 capture_material_unavailable`,
+deliberately not a `503`: the store answered correctly, and "retry later" would
+be advice that cannot terminate.
+
+**Intake writes no bytes on the document path.** The original was immutable and
+content-addressed before the capture existed; the capture records a reference to
+it rather than a second copy.
+
+**One nonblank page, one canonical segment.** Pages are read in physical order.
+A page whose extracted text is absent, empty, or whitespace-only emits nothing —
+`strip` decides that and nothing else, so the *stored* text is the parser's
+string exactly, with no Unicode normalization, whitespace collapsing,
+line-ending rewriting, hyphen repair, de-columnization, or header removal.
+
+**Physical location and canonical order are different facts.**
+`Segment.spatial.page` is the 1-based PDF page; `Segment.position` is contiguous
+reading order. A blank page leaves a gap in the first and none in the second:
+
+```
+PDF page 1 -> text      position=0  spatial.page=1
+PDF page 2 -> blank     (no segment)
+PDF page 3 -> text      position=1  spatial.page=3
+```
+
+**Provenance is `ORIGINAL`, not `OCR`.** The text was embedded in the document
+and read straight out of it, which is precisely what a later OCR-capable build
+must not be able to be confused with.
+
+**Title precedence** is the webpage rule with `/Title` where `<title>` stood:
+the submitted capture title, else a nonblank PDF metadata `/Title`, else none.
+Never the uploaded filename, the `file_ref`, the digest, the first page's text,
+or a heading. Extracted metadata reaches the `ContentObject` only and never
+rewrites `CaptureRecord.title`.
+
+**A textless PDF fails.** A scan parses perfectly and yields nothing a segment
+could be built from, so the processor raises `ProcessingInputError` and the
+existing orchestrator marks the capture `failed`. Returning `COMPLETE` with zero
+segments would be the system reporting that it remembered something when it
+remembered nothing. There is no OCR in this build, and the refusal says so. The
+exact PDF stays in raw storage, so an OCR-capable build can read those very
+bytes later. Encryption is refused too, checked before any page is touched
+because the parser would otherwise open an empty-password document silently.
+
+**`pypdf` is `core`'s first non-pydantic runtime dependency**, confined to
+`core.processing.pdf` and held to an exact allowlist by test. Unlike HTML, the
+standard library has no answer here; the alternatives were a rendering engine
+binding, a much larger layout-inference stack, or a subprocess.
+
+**Documents have no completed replay.** `replay.py` is semantically unchanged
+and still `TEXT`-only, so a resent document capture id is `409`. Document
+idempotency has not been asked for by a connector yet, and a guarantee designed
+without a requirement is one nobody can check.
+
+**An unclaimed upload stays on disk.** No garbage collection, lease, expiry,
+upload table, or cleanup worker — every one of those needs a policy that would
+be invented rather than derived, and an immutable object taking up disk is the
+cheapest wrong answer to defer.
+
+**Nothing under `clients/browser-extension/` changed.** No file picker, popup,
+PDF button, drag-and-drop, download interception, or new permission.
+
+See [ADR-016](ADR/ADR-016-pdf-document-ingestion.md).
+
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
@@ -1579,6 +1725,7 @@ src/core/processing/
   router.py       ProcessorRouter, exactly-one-match routing
   text.py         TextProcessor, UTF-8 text normalization
   webpage.py      WebpageProcessor and the deterministic HTML text extractor
+  pdf.py          PdfProcessor, page-aware embedded text from a PDF original
   service.py      ProcessingOrchestrator, the stored-to-complete lifecycle
   errors.py       typed processing, routing and lifecycle errors
 src/core/rendering/
@@ -1595,7 +1742,7 @@ src/core/intake/
   service.py      CaptureIntake, the envelope-to-stored-capture orchestration
   errors.py       typed intake errors
 src/unimem_api/   the HTTP delivery adapter — outside core (Phase 1)
-  app.py          create_app and the four routes
+  app.py          create_app, the four capture routes, and the upload route
   models.py       the HTTP response DTOs (there is no request DTO)
   errors.py       the core-failure-to-status translation table
   wiring.py       build_local_app, the local composition root

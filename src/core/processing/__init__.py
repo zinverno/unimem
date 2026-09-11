@@ -13,6 +13,13 @@ formality — ``TEXT`` reaches ``TextProcessor`` and ``WEBPAGE`` reaches
 ``WebpageProcessor`` because each claims its own payload type, not because of
 where either sits in a list.
 
+Phase 3 PR 1 adds the third: :class:`PdfProcessor`, which turns a staged
+immutable PDF into a canonical ``document`` content object with one text segment
+per nonblank page, each carrying the physical page it came from. It is the first
+processor to claim a *MIME type* rather than a payload type, which is what lets
+a DOCX or EPUB processor join the list later without either of them having to
+know the other exists.
+
 Phase 0H adds the step that calls them in order.
 :class:`ProcessingOrchestrator` takes a capture id, loads the authoritative
 record, insists it is ``stored``, routes it, marks it ``processing`` durably,
@@ -40,6 +47,7 @@ from core.processing.errors import (
     ProcessorRoutingError,
     TextDecodingError,
 )
+from core.processing.pdf import PDF_MIME_TYPE, PdfProcessor, extract_pages
 from core.processing.router import ProcessorRouter
 from core.processing.service import STARTING_STATUS, ProcessingOrchestrator, utc_now
 from core.processing.text import DEFAULT_TEXT_MIME_TYPE, TEXT_ENCODING, TextProcessor
@@ -59,12 +67,14 @@ __all__ = [
     "DEFAULT_TEXT_MIME_TYPE",
     "HTML_ENCODING",
     "IGNORED_TAGS",
+    "PDF_MIME_TYPE",
     "STARTING_STATUS",
     "TEXT_ENCODING",
     "AmbiguousProcessorError",
     "HtmlTextExtractor",
     "InvalidCaptureProcessingStateError",
     "NoProcessorError",
+    "PdfProcessor",
     "ProcessingError",
     "ProcessingInputError",
     "ProcessingOrchestrator",
@@ -76,5 +86,6 @@ __all__ = [
     "TextProcessor",
     "WebpageProcessor",
     "extract",
+    "extract_pages",
     "utc_now",
 ]
