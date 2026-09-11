@@ -371,11 +371,18 @@ class TestNoNewSurface:
 
         assert body["content"]["application/json"]["schema"]["$ref"].endswith("/CaptureEnvelope")
 
-    def test_only_the_four_routes_are_served(self, client: TestClient) -> None:
+    def test_no_webpage_route_was_ever_added(self, client: TestClient) -> None:
+        """Webpage ingestion needed no surface of its own, and still has none.
+
+        ``/v1/uploads`` arrived in Phase 3 PR 1 for *binary* acquisition, which
+        a webpage — submitted as a JSON string — has no use for. That it exists
+        and this list contains nothing webpage-shaped is the point.
+        """
         paths = set(client.get("/openapi.json").json()["paths"])
 
         assert paths == {
             "/health",
+            "/v1/uploads",
             "/v1/captures",
             "/v1/captures/{capture_id}",
             "/v1/captures/{capture_id}/content",

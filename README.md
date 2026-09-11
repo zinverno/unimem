@@ -1,8 +1,8 @@
 # capture-core
 
 Core domain contracts, immutable raw-object storage, capture-record
-persistence, text capture intake, and a local HTTP capture API for a universal
-multimodal capture and ingestion layer. Canonical contracts are at schema
+persistence, capture intake for text, HTML and PDF, and a local HTTP capture API
+for a universal multimodal capture and ingestion layer. Canonical contracts are at schema
 version **0.2**; `0.1` documents remain readable and are rewritten as `0.1`.
 
 Implemented so far:
@@ -92,6 +92,20 @@ Phase 2 asks the first question about *modality*:
   and the current document's serialized DOM is submitted as exactly that
   envelope. `contextMenus` is the only new permission, and it grants access to
   no website — see *Browser capture*, below. **Nothing under `src/` changed.**
+
+Phase 2's manual acceptance checklist A–G was run by hand against a real
+Chromium installation and a real local server, and all of it passed — see
+*Manual acceptance checklist*, below. Phase 3 asks what it takes to ingest
+material that is not a string:
+
+- **Phase 3, PR 1 — PDF upload and document ingestion.** A new staging route,
+  `POST /v1/uploads`, accepts binary bytes and returns the content-addressed
+  `file_ref` that an ordinary `document` `CaptureEnvelope` then names. The PDF
+  becomes an immutable original and a canonical `document` `ContentObject` with
+  one text segment per nonblank page, each carrying the physical page it came
+  from. **Upload is not capture**: staging mints no capture id, starts no
+  lifecycle, and runs no processor. No contract change; the schema stays `0.2`.
+  See *Capturing a PDF document*, below.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 
@@ -233,9 +247,9 @@ curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_web_01/content
 
 A few things are worth being precise about:
 
-- **The endpoint now processes plain text and HTML-backed webpages.** Images,
-  documents, video, and files are still accepted by the contract and refused
-  with `422 unsupported_payload`.
+- **The endpoint now processes plain text, HTML-backed webpages, and PDF
+  documents** (see *Capturing a PDF document*, below). Images, video, and files
+  are still accepted by the contract and refused with `422 unsupported_payload`.
 - **Webpage support is deterministic text extraction, not reader mode.** Scripts,
   styles, `noscript`, `template`, and `svg` are dropped, block elements separate
   paragraphs, and entities are decoded. Navigation, menus, and footers are text
@@ -259,6 +273,113 @@ A few things are worth being precise about:
 - Completed replay is text-only, so resubmitting the same webpage capture id is
   `409` even when the request is identical. The extension handles that: it makes
   one read-only check and reports what the server actually holds.
+
+### Capturing a PDF document
+
+A PDF is binary, and a `CaptureEnvelope` is JSON — so the bytes are staged
+first, and the envelope names them. **These are two separate operations, and
+the upload is not a capture.**
+
+Step one: stage the bytes.
+
+```bash
+curl -sS -F 'file=@example.pdf;type=application/pdf' \
+  http://127.0.0.1:8765/v1/uploads
+```
+
+```json
+{
+  "file_ref": "sha256:f407468e79a468a73965db940e076d3bd997a46acf7df2d0df3deb15dcc13357",
+  "sha256": "f407468e79a468a73965db940e076d3bd997a46acf7df2d0df3deb15dcc13357",
+  "mime_type": "application/pdf"
+}
+```
+
+Nothing has been captured yet. No capture id was minted, no `CaptureRecord`
+exists, no processor ran, and there is no `ContentObject`. All that happened is
+that the exact bytes are now an immutable, content-addressed raw object, and
+`file_ref` is the handle to them.
+
+Step two: submit the capture, putting that `file_ref` into the existing
+canonical envelope.
+
+```bash
+curl -sS -X POST http://127.0.0.1:8765/v1/captures \
+  -H 'content-type: application/json' \
+  -d '{
+    "schema_version": "0.2",
+    "id": "cap_readme_pdf_01",
+    "source": {"type": "upload", "provider": "curl"},
+    "payload": {
+      "type": "document",
+      "mime_type": "application/pdf",
+      "file_ref": "sha256:f407468e79a468a73965db940e076d3bd997a46acf7df2d0df3deb15dcc13357"
+    },
+    "context": {"captured_at": "2026-01-02T03:04:05+00:00"}
+  }'
+```
+
+The response is the same `201` shape as every other capture. The content object
+comes back with `"type": "document"` and one text segment per nonblank page:
+
+```bash
+curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_pdf_01/content
+```
+
+```json
+{
+  "type": "document",
+  "title": "A PDF that names itself",
+  "segments": [
+    {"type": "text", "text": "…page one…", "spatial": {"page": 1}, "position": 0},
+    {"type": "text", "text": "…page three…", "spatial": {"page": 3}, "position": 1}
+  ]
+}
+```
+
+That example had a blank page two, which shows the one thing worth
+understanding about the shape: **`spatial.page` is where the text is in the PDF,
+and `position` is where it comes in the document's content.** A blank page
+leaves a gap in the first and no gap in the second.
+
+A few things are worth being precise about:
+
+- **Upload and capture are two operations, and only the second is a capture.**
+  Staging bytes starts no lifecycle. That is what lets you upload a large file
+  once and decide separately — even from another process, after a restart —
+  whether and how to capture it.
+- **`file_ref` is the only connection between them**, and it is
+  content-addressed. The same PDF uploaded twice returns the same `file_ref` and
+  is stored once. Two captures of one PDF are two distinct `ContentObject`s
+  pointing at one set of bytes.
+- **`file_ref` is a UniMem raw reference, not a path.** Only
+  `sha256:<64 lowercase hex>` is resolved. A filesystem path, a `file://` URL,
+  an HTTP URL, or an S3 URL is refused with `422 unsupported_payload` and is
+  never opened or fetched — the server reads no local file you name and dials no
+  host. A well-formed reference to bytes that were never staged is
+  `422 capture_material_unavailable`, and leaves no capture record behind.
+- **The current document processor supports text-bearing, unencrypted PDF
+  only.** No OCR, no forms, annotations, attachments, embedded images, layout
+  reconstruction, or table structure. A DOCX or EPUB `mime_type` is refused at
+  intake with `422 unsupported_payload` rather than stranding a capture.
+- **Scanned PDFs currently fail**, with `422 processing_failed` and a capture
+  that reads `failed`. That is deliberate: a scan carries no embedded text, and
+  reporting `complete` with no content would claim your document was remembered
+  when it was not. The exact PDF is kept, so a build with OCR can read those
+  same bytes later.
+- **The original PDF is always preserved**, byte for byte, and stays retrievable
+  through the content object's original asset. Nothing is rewritten,
+  recompressed, or normalized — and the page text you get back is exactly what
+  the parser returned, with no Unicode normalization or whitespace tidying.
+- **The filename is not identity and not a title.** It decides no storage path,
+  is not recorded on the capture, and is never returned. Title precedence is:
+  the `payload.title` you submitted, else the PDF's own metadata `/Title`, else
+  none. Never the filename, the digest, or the first line of the document.
+- **`source.url` is not fetched**, here as everywhere else. It is metadata.
+- **Duplicate document replay is not implemented.** Completed replay is
+  text-only, so resubmitting the same document capture id is `409` even when the
+  request is identical. Use `GET /v1/captures/{id}` to see what the server
+  actually holds.
 
 `GET /health` reports process liveness only and checks nothing else.
 
@@ -393,12 +514,17 @@ does not add. Run these by hand, with the API started as above:
 
 Nothing here is claimed to have passed automatically.
 
+**A–G were run by hand, against a real Chromium installation and a real local
+UniMem server, and all of them passed.** That is a human result and is recorded
+as one — the suites above still do not dispatch a click, and none of this was
+driven by CI. Macro Phase 2 closed on the strength of that run.
+
 ## Layout
 
 ```
 src/core/contracts/   canonical domain contracts (Pydantic v2 models)
 src/core/storage/     raw object store port and local backend
-src/core/processing/  processor port, router, text processor, and the lifecycle orchestrator
+src/core/processing/  processor port, router, the text, webpage and pdf processors, and the lifecycle orchestrator
 src/core/rendering/   renderer port and the JSON and Markdown projections
 src/core/persistence/ capture record store port and the SQLite adapter
 src/core/intake/      capture intake, the envelope-to-stored-capture flow
@@ -426,7 +552,10 @@ no test framework, no build step. `npm test` runs Node's own test runner, and
 the directory is loadable as an unpacked extension exactly as it sits in the
 repository.
 
-Runtime dependencies: **pydantic** for `core`, plus **fastapi** and **uvicorn**
-for the `unimem_api` delivery adapter. `core` imports none of the latter and is
-usable without a web framework. Persistence uses the standard library's
-`sqlite3`.
+Runtime dependencies: **pydantic** and **pypdf** for `core`, plus **fastapi**,
+**uvicorn** and **python-multipart** for the `unimem_api` delivery adapter.
+`core` imports none of the latter and is usable without a web framework;
+`pypdf` is confined to `core.processing.pdf` and is the kernel's only
+non-pydantic dependency, held there by test. `python-multipart` is what FastAPI
+parses the upload's `multipart/form-data` body with. Persistence uses the
+standard library's `sqlite3`.

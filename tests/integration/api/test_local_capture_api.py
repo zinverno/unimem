@@ -368,6 +368,7 @@ def test_create_app_and_build_local_app_serve_the_same_routes(data_dir: Path) ->
         ),
         record_store=record_store,
         content_store=content_store,
+        raw_store=raw_store,
     )
 
     composed = build_local_app(data_dir)

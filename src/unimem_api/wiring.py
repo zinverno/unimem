@@ -1,6 +1,6 @@
 """The composition root: the one place that names concrete backends.
 
-:mod:`unimem_api.app` takes its four services as parameters and never
+:mod:`unimem_api.app` takes its five services as parameters and never
 constructs one. This module is where they actually get built, for the one
 deployment that exists today — a single local directory holding a
 content-addressed raw store and a SQLite file::
@@ -26,10 +26,14 @@ There is no settings framework, environment lookup, config file, profile, or DI
 container. The set of processors this application runs with is a list written
 here, exactly as :class:`~core.processing.ProcessorRouter` intends.
 
-Both processors share the one ``LocalRawObjectStore`` instance, which is not a
-detail: a raw original is content-addressed and identical bytes deduplicate, so
-the same store is what makes "the exact submitted HTML is still there" true no
-matter which processor read it.
+Every processor, intake, *and* the upload route share the one
+``LocalRawObjectStore`` instance, which is not a detail. A raw original is
+content-addressed and identical bytes deduplicate, so one store is what makes
+"the exact submitted bytes are still there" true no matter which processor read
+them — and since Phase 3 PR 1 it is also what makes a two-step capture possible
+at all. A client uploads bytes through the API and then submits an envelope
+naming them by ``file_ref``; if the route wrote into one store and intake
+resolved against another, that reference would dangle every time.
 """
 
 from pathlib import Path
@@ -40,6 +44,7 @@ from fastapi import FastAPI
 from core.intake import CaptureIntake
 from core.persistence import SqliteCaptureRecordStore, SqliteContentObjectStore
 from core.processing import (
+    PdfProcessor,
     ProcessingOrchestrator,
     ProcessorRouter,
     TextProcessor,
@@ -66,16 +71,20 @@ def build_local_app(data_dir: Path) -> FastAPI:
         CaptureIntake              envelope -> stored capture
         TextProcessor              stored text capture -> canonical content
         WebpageProcessor           stored webpage capture -> canonical content
+        PdfProcessor               stored pdf document  -> canonical content
         ProcessorRouter            exactly one processor per capture
         ProcessingOrchestrator     stored -> complete, or a truthful failure
 
-    Both processors that exist are registered, and the day a webpage processor
-    joined the list arrived in Phase 2. The router's exactly-one-match rule is
-    now doing real work: ``TEXT`` reaches ``TextProcessor`` and ``WEBPAGE``
-    reaches ``WebpageProcessor`` because each claims its own payload type and
-    refuses the other's, never because of where either sits in this list. Order
-    here is not precedence, there is no fallback processor, and an overlap
-    would be an error rather than an accident of ordering.
+    All three processors that exist are registered. The router's
+    exactly-one-match rule is doing real work: ``TEXT`` reaches
+    ``TextProcessor``, ``WEBPAGE`` reaches ``WebpageProcessor``, and a
+    ``DOCUMENT`` whose original is declared ``application/pdf`` reaches
+    ``PdfProcessor`` — each because of what it claims, never because of where it
+    sits in this list. Order here is not precedence, there is no fallback
+    processor, and an overlap would be an error rather than an accident of
+    ordering. ``PdfProcessor`` claims a MIME type rather than a payload type
+    precisely so that a future DOCX or EPUB processor can be appended here
+    without anything above it changing.
 
     Two apps built against one directory are interchangeable: neither store keeps
     a connection, a cache, or in-process state between calls, which is what makes
@@ -89,7 +98,9 @@ def build_local_app(data_dir: Path) -> FastAPI:
     content_store = SqliteContentObjectStore(database)
 
     intake = CaptureIntake(raw_store, record_store)
-    router = ProcessorRouter([TextProcessor(raw_store), WebpageProcessor(raw_store)])
+    router = ProcessorRouter(
+        [TextProcessor(raw_store), WebpageProcessor(raw_store), PdfProcessor(raw_store)]
+    )
     orchestrator = ProcessingOrchestrator(router, record_store, content_store)
 
     return create_app(
@@ -97,4 +108,5 @@ def build_local_app(data_dir: Path) -> FastAPI:
         orchestrator=orchestrator,
         record_store=record_store,
         content_store=content_store,
+        raw_store=raw_store,
     )

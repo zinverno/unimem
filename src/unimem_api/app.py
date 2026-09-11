@@ -1,9 +1,13 @@
-"""The HTTP delivery adapter: four routes around the finished core.
+"""The HTTP delivery adapter: five routes around the finished core.
 
 This is the first product surface in the system, and it is an *adapter* — the
 narrowest possible one. It parses a request, calls the core services that
 already exist, and turns what comes back into a response. It owns no lifecycle
 rule, no retry, no reconciliation, and no state::
+
+    POST /v1/uploads         a multipart file part
+                                 -> RawObjectStore.store_stream
+                                 -> 200 + file_ref, sha256
 
     POST /v1/captures        CaptureEnvelope
                                  -> CaptureIntake.accept
@@ -17,6 +21,17 @@ rule, no retry, no reconciliation, and no state::
     GET  /v1/captures/{id}           the authoritative CaptureRecord
     GET  /v1/captures/{id}/content   the canonical ContentObject
     GET  /health                     {"status": "ok"}
+
+**Uploading is not capturing, and the split is the whole design.** A PDF cannot
+travel inside a JSON ``CaptureEnvelope`` — it is binary, and base64 in a text
+field would be a lie about what was captured — so bytes are staged first and the
+envelope names them by ``file_ref``. ``POST /v1/uploads`` therefore mints no
+capture id, creates no ``CaptureRecord``, advances no lifecycle, runs no
+processor, and produces no ``ContentObject``. It puts immutable bytes in the raw
+store and hands back the content-addressed reference to them, and that is all it
+does. An object nobody ever references stays there, unclaimed and harmless;
+there is no lease, expiry, upload table, or collector, because none of those can
+be designed honestly before something actually needs them.
 
 **The POST body is ``CaptureEnvelope`` itself.** Not a wrapper, not an HTTP
 mirror of it, not a subset — the canonical ingress contract, validated by its
@@ -55,7 +70,9 @@ There is no authentication, authorization, API key, TLS, or CORS policy here.
 See :mod:`unimem_api.wiring` for why the CLI binds to localhost.
 """
 
-from fastapi import FastAPI, Response, status
+from typing import Annotated
+
+from fastapi import FastAPI, File, Response, UploadFile, status
 
 from core.contracts import CaptureEnvelope, CaptureRecord, ContentObject
 from core.intake import CaptureIntake
@@ -65,8 +82,14 @@ from core.persistence import (
     ContentObjectStore,
 )
 from core.processing import ProcessingOrchestrator
+from core.storage import RawObjectStore, build_raw_ref, resolve_digest
 from unimem_api.errors import install_error_handlers
-from unimem_api.models import CaptureAcceptedResponse, ErrorResponse, HealthResponse
+from unimem_api.models import (
+    CaptureAcceptedResponse,
+    ErrorResponse,
+    HealthResponse,
+    UploadedObjectResponse,
+)
 from unimem_api.replay import resolve_completed_replay
 
 #: Documented on every route, so a client generating from the OpenAPI schema
@@ -109,18 +132,26 @@ def create_app(
     orchestrator: ProcessingOrchestrator,
     record_store: CaptureRecordStore,
     content_store: ContentObjectStore,
+    raw_store: RawObjectStore,
 ) -> FastAPI:
-    """Build the API over four already-constructed core services.
+    """Build the API over five already-constructed core services.
 
     Every dependency is a parameter, and each is held in the closure of the
     routes that use it. There is no module-level app, no registry, no settings
     object, no container, and no lazy singleton — so a test supplies doubles by
     calling this function, and two apps in one process share nothing.
 
-    The services arrive as their existing types: the two stores as their ports,
-    intake and the orchestrator as the concrete classes that *are* the domain
-    orchestrations. Nothing about FastAPI travels the other way; ``core`` does
-    not import this package and does not know it exists.
+    The services arrive as their existing types: the three stores as their
+    ports, intake and the orchestrator as the concrete classes that *are* the
+    domain orchestrations. Nothing about FastAPI travels the other way; ``core``
+    does not import this package and does not know it exists.
+
+    ``raw_store`` joined the list in Phase 3 PR 1, for the upload route, and it
+    is a parameter for the same reason the other four are. Reaching for a module
+    global, a lazy singleton, or ``app.state`` would have hidden a real
+    dependency to avoid writing it down — and it must be *the same instance*
+    intake and the processors hold, or a client would stage bytes into one store
+    and hand a ``file_ref`` to another that has never heard of them.
     """
     app = FastAPI(
         title="UniMem capture API",
@@ -133,6 +164,69 @@ def create_app(
     def health() -> HealthResponse:
         """Report that this process is running. Nothing else is checked."""
         return HealthResponse()
+
+    @app.post(
+        "/v1/uploads",
+        status_code=status.HTTP_200_OK,
+        response_model=UploadedObjectResponse,
+        responses=_ERROR_RESPONSES,
+        summary="Stage immutable bytes and get the reference a capture can name",
+    )
+    def create_upload(file: Annotated[UploadFile, File()]) -> UploadedObjectResponse:
+        """Put the uploaded bytes in the raw object store, and say where they went.
+
+        **This is not a capture.** No id is minted, no ``CaptureRecord`` is
+        created, no lifecycle is advanced, no processor runs, and no
+        ``ContentObject`` appears. The route calls exactly one core method, and
+        it is the one that writes immutable bytes.
+
+        The part is streamed into the store rather than read into memory.
+        Starlette has already spooled it to a temporary file and left it
+        positioned at the start, and
+        :meth:`~core.storage.raw.RawObjectStore.store_stream` consumes any
+        readable binary source in bounded chunks — so a large document is hashed
+        and written a chunk at a time and never has to fit in RAM. The route is
+        a plain ``def`` for that reason: FastAPI runs it in a worker thread, so
+        the synchronous store call cannot block the event loop.
+
+        **200, not 201.** The raw store deduplicates by content, and
+        deliberately does not report whether a write created a new file or found
+        the identical bytes already there. That is the right design — an
+        immutable content-addressed object *is* the same object either way — but
+        it means the server genuinely cannot tell a client "created". Saying so
+        anyway would be a guess dressed as a fact, so the honest answer is that
+        the object is available, which is 200.
+
+        **The filename decides nothing.** It picks no path — the store's layout
+        is derived from a digest it computed itself, and nothing in
+        :mod:`core.storage` ever writes through a caller-supplied name — it is
+        not part of the object's identity, it is not persisted onto any capture,
+        and it is not echoed back. Traversal sequences, absolute paths, and NUL
+        bytes in it are therefore not dangerous input to be sanitized; they are
+        input that is never read.
+
+        The declared content type is likewise descriptive: it travels onto the
+        returned reference so the client can see what it said, and it takes no
+        part in the digest. The same bytes always produce the same ``file_ref``,
+        whatever they were labelled.
+
+        A raw-store failure raises the store's own typed error and is mapped to
+        the same storage-unavailable response every other raw-store failure
+        gets. No stack trace, no temporary path, and no byte of the file reaches
+        the wire.
+        """
+        raw_object = raw_store.store_stream(file.file, mime_type=file.content_type)
+        # Re-derived from the digest through the store's own vocabulary rather
+        # than read off the reference with a ``None`` check bolted on: the
+        # logical reference *is* a function of the digest, and a reference the
+        # store cannot resolve is the store's failure to report, not this
+        # route's to paper over.
+        digest = resolve_digest(raw_object)
+        return UploadedObjectResponse(
+            file_ref=build_raw_ref(digest),
+            sha256=digest,
+            mime_type=raw_object.mime_type,
+        )
 
     @app.post(
         "/v1/captures",

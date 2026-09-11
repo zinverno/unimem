@@ -4,7 +4,10 @@ Phase 0F answers one question — how does a valid inline-text
 ``CaptureEnvelope`` become an immutable raw object plus a durably registered
 ``CaptureRecord``? Phase 2 PR 1 adds the second answer to the same question, for
 an HTML-backed ``WEBPAGE`` envelope, by naming a second submitted field as the
-material and changing nothing else.
+material and changing nothing else. Phase 3 PR 1 adds a third, and it is the
+first whose material never travelled inside the envelope at all: a ``DOCUMENT``
+envelope names an already-staged PDF by ``file_ref``, and intake resolves the
+reference instead of writing bytes.
 
 ::
 
@@ -13,6 +16,14 @@ material and changing nothing else.
     CaptureIntake ------> CaptureRecordStore   CaptureRecord(RECEIVED)
         |
         +---------------> RawObjectStore       the immutable original
+        |
+        +---------------> CaptureRecordStore   CaptureRecord(STORED)
+
+    CaptureEnvelope(DOCUMENT, staged pdf file_ref)
+        |
+    CaptureIntake ------> RawObjectStore       does this object exist?  (a read)
+        |
+        +---------------> CaptureRecordStore   CaptureRecord(RECEIVED)
         |
         +---------------> CaptureRecordStore   CaptureRecord(STORED)
 
@@ -36,18 +47,28 @@ only — intake itself is unchanged by it.)
 **Which payload types are materializable is a capability, not a contract
 rule.** The canonical ``CapturePayload`` allows shapes this build does not
 ingest — a webpage backed by ``text``, a webpage carrying both ``html`` and
-``text`` — and it keeps allowing them. Intake refuses those as *unsupported*,
-not as invalid, and refuses them before any side effect, so a later phase that
-can represent several materializations accepts the identical envelopes
-unchanged. What it never does is pick one representation and drop the rest.
+``text``, a document backed by ``text`` — and it keeps allowing them. Intake
+refuses those as *unsupported*, not as invalid, and refuses them before any side
+effect, so a later phase that can represent several materializations accepts the
+identical envelopes unchanged. What it never does is pick one representation and
+drop the rest.
+
+**A ``file_ref`` is resolved, never dereferenced as a path.** The contract calls
+it an opaque handle, and this build understands exactly one kind of handle: the
+raw object store's own ``sha256:<digest>``. Nothing here opens a filesystem
+path, follows a ``file://`` URL, or fetches an HTTP one. Acquiring bytes is
+somebody else's job, done before the capture exists; intake's job is to record
+that a capture points at bytes that are already immutable.
 """
 
 from core.intake.errors import (
     CaptureIntakeError,
+    CaptureMaterialUnavailableError,
     InvalidCaptureEnvelopeError,
     UnsupportedCapturePayloadError,
 )
 from core.intake.service import (
+    DOCUMENT_MIME_TYPE,
     MATERIAL_PAYLOAD_FIELDS,
     TEXT_ENCODING,
     CaptureIntake,
@@ -55,10 +76,12 @@ from core.intake.service import (
 )
 
 __all__ = [
+    "DOCUMENT_MIME_TYPE",
     "MATERIAL_PAYLOAD_FIELDS",
     "TEXT_ENCODING",
     "CaptureIntake",
     "CaptureIntakeError",
+    "CaptureMaterialUnavailableError",
     "InvalidCaptureEnvelopeError",
     "UnsupportedCapturePayloadError",
     "utc_now",

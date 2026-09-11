@@ -12,6 +12,17 @@ dependencies = [
     "pydantic>=2.9",
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    # The document processor's PDF reader. Focused on reading and writing PDF
+    # structure, pure Python, no system libraries, and no subprocess — which is
+    # why it is `core`'s first non-pydantic runtime dependency and why that was
+    # an acceptable thing to add. PyMuPDF, pdfplumber, poppler, and anything
+    # with an OCR engine behind it are deliberately absent.
+    "pypdf>=5.0",
+    # Required by FastAPI to parse a `multipart/form-data` body, which is how
+    # `POST /v1/uploads` receives bytes. FastAPI declares `UploadFile` and this
+    # is the parser behind it; it is not a UniMem design choice beyond choosing
+    # multipart over a raw body.
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

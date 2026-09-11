@@ -44,6 +44,7 @@ def test_the_factory_accepts_doubles_for_every_dependency() -> None:
         ),
         record_store=record_store,
         content_store=content_store,
+        raw_store=raw_store,
     )
 
     assert isinstance(app, FastAPI)
@@ -77,6 +78,7 @@ def test_the_documented_routes_are_the_only_routes(stack: Stack) -> None:
 
     assert paths == {
         "/health",
+        "/v1/uploads",
         "/v1/captures",
         "/v1/captures/{capture_id}",
         "/v1/captures/{capture_id}/content",
@@ -91,6 +93,8 @@ def test_the_documented_routes_are_the_only_routes(stack: Stack) -> None:
         ("put", f"/v1/captures/{CAPTURE_ID}"),
         ("post", f"/v1/captures/{CAPTURE_ID}/content"),
         ("get", "/v1/captures/search"),
+        ("get", "/v1/uploads"),
+        ("delete", "/v1/uploads"),
     ],
 )
 def test_undocumented_operations_are_not_served(stack: Stack, method: str, path: str) -> None:
@@ -140,8 +144,21 @@ class TestCoreKnowsNothingAboutHttp:
 
         assert offenders == {}
 
-    def test_core_still_depends_only_on_pydantic_and_the_standard_library(self) -> None:
-        """Adding a delivery surface added no runtime dependency to the kernel."""
+    def test_core_depends_only_on_pydantic_pypdf_and_the_standard_library(self) -> None:
+        """The kernel's third-party surface is an exact allowlist, not a trend.
+
+        ``pydantic`` is what the contracts are written in. ``pypdf`` joined in
+        Phase 3 PR 1 and is the only other entry: reading PDF structure is not
+        something the standard library does, and the alternative to a focused
+        parser was a heavyweight rendering stack or a subprocess. It is confined
+        to ``core.processing.pdf`` — the test below checks that — and it is
+        emphatically not a precedent for the delivery surface, which is what the
+        preceding test guards.
+
+        The assertion stays an exact set on purpose. A new dependency has to be
+        added here deliberately, in a diff someone reviews, rather than
+        arriving as a transitive habit.
+        """
         third_party = {
             name
             for names in imported_modules(core).values()
@@ -149,7 +166,20 @@ class TestCoreKnowsNothingAboutHttp:
             if name not in set(sys.stdlib_module_names) | {"core", "pydantic"}
         }
 
-        assert third_party == set()
+        assert third_party == {"pypdf"}
+
+    def test_the_pdf_parser_reaches_no_further_than_the_pdf_processor(self) -> None:
+        """One module imports ``pypdf``, and it is the one whose job is PDFs.
+
+        Contracts, storage, persistence, intake, rendering, the router, and the
+        orchestrator all stay unaware that the format exists — which is what
+        makes ``pypdf`` a processor's tool rather than the kernel's.
+        """
+        importers = {
+            name for name, names in imported_modules(core).items() if "pypdf" in top_level(names)
+        }
+
+        assert importers == {"core.processing.pdf"}
 
 
 class TestTheApiDoesNotRender:

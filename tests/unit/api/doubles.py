@@ -127,6 +127,15 @@ class FakeCaptureRecordStore:
         payload = self._snapshots.get(capture_id)
         return None if payload is None else CaptureRecord.model_validate_json(payload)
 
+    def stored_capture_ids(self) -> set[str]:
+        """A test-only view: which captures exist at all.
+
+        The counterpart to ``FakeContentObjectStore.stored_content_ids``, and
+        what "this request registered no capture" is checked against — a
+        negative that cannot be stated by looking up an id nobody minted.
+        """
+        return set(self._snapshots)
+
     def replace(self, record: CaptureRecord) -> None:
         if self._fail_replace_with is not None:
             raise self._fail_replace_with

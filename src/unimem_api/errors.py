@@ -9,10 +9,13 @@ a domain failure acquires a number.
 Two rules shape the table, and they are not the same rule:
 
 * **A 4xx describes the request.** The client sent a capture id that is taken, a
-  payload type this build cannot materialize, bytes that are not UTF-8. Core
-  already says which, in a message built from what the client itself supplied,
-  so that message is passed through: it is the difference between a client that
-  can fix its submission and one that has to guess.
+  payload type this build cannot materialize, bytes that are not UTF-8, a
+  ``file_ref`` naming material nobody staged. Core already says which, in a
+  message built from what the client itself supplied, so that message is passed
+  through: it is the difference between a client that can fix its submission and
+  one that has to guess. Core's 4xx messages name *fields and capabilities*, not
+  submitted values — a rejected ``file_ref`` is never repeated back — so passing
+  them through echoes nothing a client sent.
 * **A 5xx describes the server.** It is the server's business how it failed, and
   core's messages for those failures name a SQLite file, a staging directory, or
   the internal shape of a stored snapshot. Every 5xx therefore carries a fixed
@@ -42,7 +45,11 @@ from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from core.intake import InvalidCaptureEnvelopeError, UnsupportedCapturePayloadError
+from core.intake import (
+    CaptureMaterialUnavailableError,
+    InvalidCaptureEnvelopeError,
+    UnsupportedCapturePayloadError,
+)
 from core.persistence import (
     CaptureRecordAlreadyExistsError,
     CaptureRecordCorruptError,
@@ -88,6 +95,12 @@ _NOT_FOUND: Final = HttpError(404, "not_found")
 _UNSUPPORTED_PAYLOAD: Final = HttpError(422, "unsupported_payload")
 _INVALID_ENVELOPE: Final = HttpError(422, "invalid_capture_envelope")
 _PROCESSING_FAILED: Final = HttpError(422, "processing_failed")
+#: A ``file_ref`` this build understands, naming bytes that are not staged. It is
+#: 4xx because it describes the request — the fix is to stage the material and
+#: resubmit — and it is deliberately *not* the 503 a raw-store failure gets. The
+#: store is fine and answered correctly; telling a client to retry later would
+#: send them into a loop that cannot terminate.
+_MATERIAL_UNAVAILABLE: Final = HttpError(422, "capture_material_unavailable")
 
 # --- The 5xx rows. A fixed public message; core's text never leaves. ---------
 # Each says what the client can act on — retry later, or stop and call someone —
@@ -136,6 +149,7 @@ ERROR_MAPPINGS: Final[tuple[tuple[type[Exception], HttpError], ...]] = (
     (ContentObjectNotFoundError, _NOT_FOUND),
     (UnsupportedCapturePayloadError, _UNSUPPORTED_PAYLOAD),
     (InvalidCaptureEnvelopeError, _INVALID_ENVELOPE),
+    (CaptureMaterialUnavailableError, _MATERIAL_UNAVAILABLE),
     (ProcessingInputError, _PROCESSING_FAILED),
     (TextDecodingError, _PROCESSING_FAILED),
     (ProcessingOutputError, _PROCESSING_FAILED),

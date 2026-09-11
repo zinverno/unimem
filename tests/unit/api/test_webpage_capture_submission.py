@@ -311,9 +311,15 @@ class TestAPageWithNothingToExtract:
 
 class TestTheSurfaceDidNotGrow:
     def test_no_route_was_added(self, stack: Stack) -> None:
-        """The four routes Phase 1 shipped, and only those. (FastAPI's own
-        ``/docs``, ``/redoc`` and ``/openapi.json`` are the framework's.)"""
+        """Webpage ingestion added none of these. (FastAPI's own ``/docs``,
+        ``/redoc`` and ``/openapi.json`` are the framework's.)
+
+        ``/v1/uploads`` is here because Phase 3 PR 1 added it for *binary*
+        acquisition — a webpage arrives as a JSON string and needs none of it,
+        which is exactly why this class's other assertions still hold.
+        """
         assert {path for path in served_paths(stack.app) if path.startswith("/v1")} == {
+            "/v1/uploads",
             "/v1/captures",
             "/v1/captures/{capture_id}",
             "/v1/captures/{capture_id}/content",
@@ -321,7 +327,14 @@ class TestTheSurfaceDidNotGrow:
         assert "/health" in served_paths(stack.app)
 
     @pytest.mark.parametrize(
-        "path", ["/v1/webpages", "/v1/pages", "/v1/html", "/v1/uploads", "/v1/captures/html/body"]
+        "path",
+        [
+            "/v1/webpages",
+            "/v1/pages",
+            "/v1/html",
+            "/v1/html-uploads",
+            "/v1/captures/html/body",
+        ],
     )
     def test_no_webpage_specific_route_exists(self, stack: Stack, path: str) -> None:
         assert stack.client.post(path, json=webpage_envelope()).status_code == 404

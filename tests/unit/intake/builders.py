@@ -99,6 +99,37 @@ def make_webpage_envelope(**overrides: Any) -> CaptureEnvelope:
     return make_envelope(**(fields | overrides))
 
 
+#: A staged raw object reference of the form intake resolves. The digest is a
+#: literal rather than a hash of anything, because what matters at the intake
+#: boundary is only that the *shape* is right; whether the bytes exist is the
+#: raw store's answer and the tests stage them there explicitly.
+STAGED_DIGEST = "a" * 64
+STAGED_FILE_REF = f"sha256:{STAGED_DIGEST}"
+
+#: The MIME type the one supported document shape must declare.
+PDF_MIME = "application/pdf"
+
+
+def make_document_payload(**overrides: Any) -> CapturePayload:
+    """The one document shape this build ingests: a staged PDF file_ref."""
+    fields: dict[str, Any] = {
+        "type": CapturePayloadType.DOCUMENT,
+        "mime_type": PDF_MIME,
+        "file_ref": STAGED_FILE_REF,
+        "title": "A paper",
+    }
+    return CapturePayload(**(fields | overrides))
+
+
+def make_document_envelope(**overrides: Any) -> CaptureEnvelope:
+    """A valid staged-PDF document envelope, with optional field overrides."""
+    fields: dict[str, Any] = {
+        "id": "cap_intake_doc_01",
+        "payload": make_document_payload(),
+    }
+    return make_envelope(**(fields | overrides))
+
+
 def make_unsupported_envelope(
     payload_type: CapturePayloadType, **overrides: Any
 ) -> CaptureEnvelope:
@@ -106,11 +137,12 @@ def make_unsupported_envelope(
 
     ``WEBPAGE`` is deliberately absent: since Phase 2 PR 1 it is a supported
     type, and *which shapes of it* are supported is a separate question asked
-    in ``test_webpage_materialization.py``.
+    in ``test_webpage_materialization.py``. ``DOCUMENT`` left for the same
+    reason in Phase 3 PR 1, and its shapes are asked about in
+    ``test_document_materialization.py``.
     """
     payloads: dict[CapturePayloadType, dict[str, Any]] = {
         CapturePayloadType.IMAGE: {"file_ref": "blob://image"},
-        CapturePayloadType.DOCUMENT: {"file_ref": "blob://document"},
         CapturePayloadType.VIDEO: {"file_ref": "blob://video"},
         CapturePayloadType.FILE: {"file_ref": "blob://file"},
         CapturePayloadType.URL: {},

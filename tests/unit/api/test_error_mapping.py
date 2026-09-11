@@ -15,7 +15,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.contracts import CaptureStatus
-from core.intake import InvalidCaptureEnvelopeError, UnsupportedCapturePayloadError
+from core.intake import (
+    CaptureMaterialUnavailableError,
+    InvalidCaptureEnvelopeError,
+    UnsupportedCapturePayloadError,
+)
 from core.persistence import (
     CaptureRecordAlreadyExistsError,
     CaptureRecordCorruptError,
@@ -89,6 +93,7 @@ MAPPED_ERRORS: list[Exception] = [
     ContentObjectNotFoundError(f"no such content in {BACKEND_DETAIL}"),
     UnsupportedCapturePayloadError(f"unsupported, per {BACKEND_DETAIL}"),
     InvalidCaptureEnvelopeError(f"inconsistent, per {BACKEND_DETAIL}"),
+    CaptureMaterialUnavailableError(f"nothing staged, per {BACKEND_DETAIL}"),
     ProcessingInputError(f"unusable input at {BACKEND_DETAIL}"),
     TextDecodingError(f"not utf-8, read from {BACKEND_DETAIL}"),
     ProcessingOutputError(f"wrong capture, written to {BACKEND_DETAIL}"),
