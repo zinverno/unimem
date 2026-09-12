@@ -144,16 +144,20 @@ class TestCoreKnowsNothingAboutHttp:
 
         assert offenders == {}
 
-    def test_core_depends_only_on_pydantic_pypdf_and_the_standard_library(self) -> None:
+    def test_core_depends_only_on_its_allowlisted_parsers_and_the_standard_library(
+        self,
+    ) -> None:
         """The kernel's third-party surface is an exact allowlist, not a trend.
 
-        ``pydantic`` is what the contracts are written in. ``pypdf`` joined in
-        Phase 3 PR 1 and is the only other entry: reading PDF structure is not
-        something the standard library does, and the alternative to a focused
-        parser was a heavyweight rendering stack or a subprocess. It is confined
-        to ``core.processing.pdf`` — the test below checks that — and it is
-        emphatically not a precedent for the delivery surface, which is what the
-        preceding test guards.
+        ``pydantic`` is what the contracts are written in. The rest are document
+        parsers, each confined to the one processor whose format it reads — the
+        tests below check that — and each admitted for the same reason: reading
+        PDF or OOXML structure is not something the standard library does, and
+        the alternative to a focused parser was a heavyweight rendering stack or
+        a subprocess. ``pypdf`` joined in Phase 3 PR 1; ``docx`` (python-docx)
+        and the ``lxml`` it parses XML with joined in Phase 3 PR 2. None of them
+        is a precedent for the delivery surface, which is what the preceding
+        test guards.
 
         The assertion stays an exact set on purpose. A new dependency has to be
         added here deliberately, in a diff someone reviews, rather than
@@ -166,7 +170,7 @@ class TestCoreKnowsNothingAboutHttp:
             if name not in set(sys.stdlib_module_names) | {"core", "pydantic"}
         }
 
-        assert third_party == {"pypdf"}
+        assert third_party == {"pypdf", "docx", "lxml"}
 
     def test_the_pdf_parser_reaches_no_further_than_the_pdf_processor(self) -> None:
         """One module imports ``pypdf``, and it is the one whose job is PDFs.
@@ -180,6 +184,40 @@ class TestCoreKnowsNothingAboutHttp:
         }
 
         assert importers == {"core.processing.pdf"}
+
+    @pytest.mark.parametrize("parser", ["docx", "lxml"], ids=["python-docx", "lxml"])
+    def test_the_docx_parser_reaches_no_further_than_the_docx_processor(self, parser: str) -> None:
+        """Same rule, one format later, and it is the rule that keeps them apart.
+
+        Intake in particular does not import this: it decides which *declared*
+        formats it accepts, which is a fact about the build rather than about
+        any parser, and it never looks inside a document to check.
+        """
+        importers = {
+            name for name, names in imported_modules(core).items() if parser in top_level(names)
+        }
+
+        assert importers == {"core.processing.docx"}
+
+    def test_no_converter_or_renderer_is_imported_anywhere_in_core(self) -> None:
+        """The tools that would invent page numbers, spelled out so they stay out."""
+        forbidden = {
+            "mammoth",
+            "docx2txt",
+            "pypandoc",
+            "pandoc",
+            "subprocess",
+            "PIL",
+            "pytesseract",
+        }
+
+        offenders = {
+            name: sorted(top_level(names) & forbidden)
+            for name, names in imported_modules(core).items()
+            if top_level(names) & forbidden
+        }
+
+        assert offenders == {}
 
 
 class TestTheApiDoesNotRender:

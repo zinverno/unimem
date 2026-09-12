@@ -20,6 +20,16 @@ processor to claim a *MIME type* rather than a payload type, which is what lets
 a DOCX or EPUB processor join the list later without either of them having to
 know the other exists.
 
+Phase 3 PR 2 adds the fourth and collects on that promise: :class:`DocxProcessor`
+turns a staged immutable OOXML ``.docx`` into a canonical ``document`` content
+object whose segments are the main body's paragraphs and table rows, in body
+order and with no page numbers — a DOCX has flow content, and which page a
+paragraph lands on is a property of the renderer rather than of the document. It
+shares no parsing code with :class:`PdfProcessor` and neither knows the other
+exists; they simply claim disjoint MIME types, so the router's
+exactly-one-match rule separates them with no precedence, no ordering, and no
+generic ``DOCUMENT`` fallback.
+
 Phase 0H adds the step that calls them in order.
 :class:`ProcessingOrchestrator` takes a capture id, loads the authoritative
 record, insists it is ``stored``, routes it, marks it ``processing`` durably,
@@ -37,6 +47,16 @@ normalized object is returned to the caller and is not yet durable anywhere.
 """
 
 from core.processing.base import Processor
+from core.processing.docx import (
+    BLOCK_METADATA_KEY,
+    CELL_SEPARATOR,
+    DOCX_MIME_TYPE,
+    PARAGRAPH_BLOCK,
+    TABLE_ROW_BLOCK,
+    DocxBlock,
+    DocxProcessor,
+    extract_blocks,
+)
 from core.processing.errors import (
     AmbiguousProcessorError,
     InvalidCaptureProcessingStateError,
@@ -62,15 +82,22 @@ from core.processing.webpage import (
 )
 
 __all__ = [
+    "BLOCK_METADATA_KEY",
     "BLOCK_TAGS",
+    "CELL_SEPARATOR",
     "DEFAULT_HTML_MIME_TYPE",
     "DEFAULT_TEXT_MIME_TYPE",
+    "DOCX_MIME_TYPE",
     "HTML_ENCODING",
     "IGNORED_TAGS",
+    "PARAGRAPH_BLOCK",
     "PDF_MIME_TYPE",
     "STARTING_STATUS",
+    "TABLE_ROW_BLOCK",
     "TEXT_ENCODING",
     "AmbiguousProcessorError",
+    "DocxBlock",
+    "DocxProcessor",
     "HtmlTextExtractor",
     "InvalidCaptureProcessingStateError",
     "NoProcessorError",
@@ -86,6 +113,7 @@ __all__ = [
     "TextProcessor",
     "WebpageProcessor",
     "extract",
+    "extract_blocks",
     "extract_pages",
     "utc_now",
 ]

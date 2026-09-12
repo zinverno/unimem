@@ -68,7 +68,7 @@ from core.intake.errors import (
     UnsupportedCapturePayloadError,
 )
 from core.intake.service import (
-    DOCUMENT_MIME_TYPE,
+    DOCUMENT_MIME_TYPES,
     MATERIAL_PAYLOAD_FIELDS,
     TEXT_ENCODING,
     CaptureIntake,
@@ -76,7 +76,7 @@ from core.intake.service import (
 )
 
 __all__ = [
-    "DOCUMENT_MIME_TYPE",
+    "DOCUMENT_MIME_TYPES",
     "MATERIAL_PAYLOAD_FIELDS",
     "TEXT_ENCODING",
     "CaptureIntake",

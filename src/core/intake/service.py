@@ -35,7 +35,7 @@ immutable content-addressed raw object, and the envelope carries only the
 ``file_ref`` that names them. So for a document the sequence loses a step
 rather than gaining one::
 
-    CaptureEnvelope(DOCUMENT, file_ref -> already-staged pdf)
+    CaptureEnvelope(DOCUMENT, file_ref -> already-staged document)
         -> resolve and verify the reference   (read-only, before any side effect)
         -> CaptureRecord(RECEIVED)
         -> CaptureRecord(STORED)              pointing at those very bytes
@@ -58,6 +58,15 @@ opaque handle by contract, and this build understands exactly one kind:
 path, resolves a ``file://`` URL, or fetches an HTTP one — treating a
 caller-supplied string as a filesystem path would move authority from the
 upload boundary into core and hand every client a local-file-read primitive.
+
+Phase 3 PR 2 widens one value and nothing else: the set of document MIME types a
+``DOCUMENT`` capture may declare grows from ``application/pdf`` alone to that
+plus the OOXML ``.docx`` type. The sequence above, the ordering guarantee, the
+reference format, the no-second-write rule, and every message's shape are
+untouched, and intake still does not open, sniff, unzip, or parse the material it
+points at. That is the result worth noticing: adding a second binary document
+format cost this module a tuple, because the acquisition boundary was designed
+to be format-independent rather than PDF-shaped.
 """
 
 from collections.abc import Callable
@@ -101,11 +110,33 @@ TEXT_ENCODING: Final = "utf-8"
 #: :meth:`CaptureIntake._webpage_html` and :meth:`CaptureIntake._staged_document`.
 MATERIAL_PAYLOAD_FIELDS: Final = ("text", "html", "file_ref")
 
-#: The one document format this build has a processor for. A ``DOCUMENT``
-#: capture must declare it explicitly: intake does not sniff bytes, read magic
-#: numbers, or infer a format from a filename it was never given, and a document
-#: whose format is merely *probably* PDF is one this build declines to guess at.
-DOCUMENT_MIME_TYPE: Final = "application/pdf"
+#: The document formats this build has a processor for, in the order they were
+#: added. A ``DOCUMENT`` capture must declare one of them explicitly: intake does
+#: not sniff bytes, read magic numbers, look inside a ZIP, or infer a format from
+#: a filename it was never given or a URL it was handed, and a document whose
+#: format is merely *probably* one of these is one this build declines to guess
+#: at.
+#:
+#: Phase 3 PR 2 turned this from a single value into a set, which is as much
+#: generalization as two formats earn. It is a membership test and a message,
+#: not a registry: a plugin system for two entries would be architecture
+#: standing in for a requirement, and the moment a format needs intake to treat
+#: it *differently* — rather than merely to allow it — that difference is what
+#: will say what the abstraction should be.
+#:
+#: These names are restated here rather than imported from
+#: :mod:`core.processing`. Intake deliberately does not depend on the processing
+#: layer: what it is deciding is which declarations *this deployment* accepts at
+#: its boundary, which is a fact about the build rather than about any one
+#: processor, and the wiring that registers the processors is what keeps the two
+#: lists honest.
+DOCUMENT_MIME_TYPES: Final[tuple[str, ...]] = (
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+)
+
+#: The supported document formats as they appear in a refusal message.
+_DOCUMENT_MIME_TYPES_PHRASE: Final = " and ".join(DOCUMENT_MIME_TYPES)
 
 
 @dataclass(frozen=True)
@@ -307,18 +338,18 @@ class CaptureIntake:
                     f"capture {envelope.id!r} carries a {envelope.payload.type.value} payload; "
                     f"this build accepts inline {CapturePayloadType.TEXT.value} captures, "
                     f"html-backed {CapturePayloadType.WEBPAGE.value} captures, and "
-                    f"staged {DOCUMENT_MIME_TYPE} "
+                    f"staged {_DOCUMENT_MIME_TYPES_PHRASE} "
                     f"{CapturePayloadType.DOCUMENT.value} captures only"
                 )
 
     def _staged_document(self, envelope: CaptureEnvelope) -> _StagedMaterial:
         """Resolve a ``DOCUMENT`` payload to the staged raw object it names.
 
-        Phase 3 PR 1 supports exactly one materialization of a document: a
+        This build supports exactly one materialization of a document: a
         ``file_ref`` naming a raw object this store already holds, declared as
-        ``application/pdf``. Everything else about the shape is refused rather
-        than resolved, for the two reasons the webpage path already established
-        and one that is new to documents:
+        one of :data:`DOCUMENT_MIME_TYPES`. Everything else about the shape is
+        refused rather than resolved, for the two reasons the webpage path
+        already established and one that is new to documents:
 
         * **A capture stores one raw original.** ``file_ref`` alongside ``text``
           or ``html`` offers more material than the record can hold, and picking
@@ -329,11 +360,17 @@ class CaptureIntake:
           simply has no processor for that yet, so the refusal is an
           unsupported-capability error rather than a validation one.
         * **A format this build cannot parse must not be accepted as if it
-          could.** A DOCX or an EPUB reaching intake would sail through to a
-          router that has no processor for it, and the capture would strand
-          mid-lifecycle for a reason nobody could act on. Refusing at the
-          boundary — where the client is still holding the request — is the
-          honest place to say "not yet".
+          could.** A legacy ``.doc`` or an EPUB reaching intake would sail
+          through to a router that has no processor for it, and the capture
+          would strand mid-lifecycle for a reason nobody could act on. Refusing
+          at the boundary — where the client is still holding the request — is
+          the honest place to say "not yet". Which formats those are is the one
+          thing Phase 3 PR 2 changed: the check is a membership test against
+          :data:`DOCUMENT_MIME_TYPES` rather than an equality test against a
+          single value, and the declared type still travels onto the capture's
+          ``RawObjectRef`` exactly as submitted, which is what lets the router
+          tell a PDF capture from a DOCX one without either of them being
+          sniffed.
 
         The reference itself is checked in two separate steps, because they fail
         for different reasons and a caller does different things about them:
@@ -365,8 +402,8 @@ class CaptureIntake:
                 )
             raise UnsupportedCapturePayloadError(
                 f"capture {envelope.id!r} carries a document payload backed by text; "
-                f"this build ingests documents backed by a staged "
-                f"{DOCUMENT_MIME_TYPE} file_ref only"
+                f"this build ingests documents backed by a staged file_ref only, declared "
+                f"as one of {_DOCUMENT_MIME_TYPES_PHRASE}"
             )
         alongside = [
             name
@@ -383,13 +420,13 @@ class CaptureIntake:
         if payload.mime_type is None:
             raise UnsupportedCapturePayloadError(
                 f"capture {envelope.id!r} carries a document payload declaring no mime_type; "
-                f"this build ingests {DOCUMENT_MIME_TYPE} documents only, and does not "
-                f"infer a document's format"
+                f"this build ingests {_DOCUMENT_MIME_TYPES_PHRASE} documents only, and does "
+                f"not infer a document's format"
             )
-        if payload.mime_type != DOCUMENT_MIME_TYPE:
+        if payload.mime_type not in DOCUMENT_MIME_TYPES:
             raise UnsupportedCapturePayloadError(
                 f"capture {envelope.id!r} carries a document payload declaring a mime_type "
-                f"this build has no processor for; it ingests {DOCUMENT_MIME_TYPE} "
+                f"this build has no processor for; it ingests {_DOCUMENT_MIME_TYPES_PHRASE} "
                 f"documents only"
             )
 
