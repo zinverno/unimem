@@ -18,6 +18,18 @@ dependencies = [
     # an acceptable thing to add. PyMuPDF, pdfplumber, poppler, and anything
     # with an OCR engine behind it are deliberately absent.
     "pypdf>=5.0",
+    # The document processor's DOCX reader, and the only new runtime dependency
+    # Phase 3 PR 2 adds. Chosen for its *public* body-order API —
+    # `Document.iter_inner_content()` yields paragraphs and tables in document
+    # order — so this build never has to reach into the OOXML tree itself to
+    # learn where a table sat relative to the paragraphs around it; 1.2 is the
+    # floor because that method is what makes the ordering guarantee expressible
+    # without private XML access. It is pure Python plus lxml, needs no system
+    # word processor, and runs no subprocess. mammoth, docx2txt, pandoc,
+    # LibreOffice, and Word automation are deliberately absent: the first two
+    # convert to other formats this build does not want, and the rest are
+    # renderers, which is how fictional page numbers get invented.
+    "python-docx>=1.2",
     # Required by FastAPI to parse a `multipart/form-data` body, which is how
     # `POST /v1/uploads` receives bytes. FastAPI declares `UploadFile` and this
     # is the parser behind it; it is not a UniMem design choice beyond choosing
@@ -91,6 +103,16 @@ python_version = "3.13"
 files = ["src", "tests"]
 strict = true
 plugins = ["pydantic.mypy"]
+
+# `lxml` ships no type information and publishes no stubs of its own. It is not
+# a dependency this project chose — `python-docx` brings it, and it is never
+# imported anywhere but `core.processing.docx`, and there for exactly one name:
+# the parser error raised by a DOCX whose XML does not parse, which this build
+# translates into a `ProcessingInputError`. Narrowed to that package so every
+# other import stays under `strict`.
+[[tool.mypy.overrides]]
+module = ["lxml.*"]
+ignore_missing_imports = true
 
 [tool.pydantic-mypy]
 init_typed = true

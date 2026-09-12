@@ -109,6 +109,13 @@ STAGED_FILE_REF = f"sha256:{STAGED_DIGEST}"
 #: The MIME type the one supported document shape must declare.
 PDF_MIME = "application/pdf"
 
+#: The other document MIME type this build ingests, from Phase 3 PR 2.
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+#: The legacy binary Word format. A different format needing a different reader,
+#: and one this build refuses rather than guesses at.
+DOC_MIME = "application/msword"
+
 
 def make_document_payload(**overrides: Any) -> CapturePayload:
     """The one document shape this build ingests: a staged PDF file_ref."""

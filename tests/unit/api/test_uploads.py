@@ -5,6 +5,12 @@ tests spend most of their effort on is therefore not what it *does* — one stor
 call — but everything it must **not** do: no capture, no lifecycle, no
 processing, no content, and above all no authority granted to the filename a
 client attached.
+
+Phase 3 PR 2 added a second document format and did not touch this route, which
+is the claim :class:`TestTheRouteIsFormatAgnostic` exists to check rather than
+assert in prose: a DOCX stages through the identical request, with the identical
+response shape, and the route still cannot tell — and never asks — which of the
+two it just stored.
 """
 
 import hashlib
@@ -15,11 +21,13 @@ from httpx2 import Response
 
 from core.contracts import CaptureRecord, ContentObject, RawObjectRef
 from core.storage import RawObjectWriteError, build_raw_ref
+from tests.docxs import paragraph_table_paragraph_docx, paragraphs_docx
 from tests.pdfs import one_page_pdf, two_page_pdf
 from tests.unit.api.conftest import Stack, build_stack
 from tests.unit.api.doubles import FakeRawObjectStore
 
 PDF_MIME = "application/pdf"
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 def upload(
@@ -278,3 +286,112 @@ class TestTheUploadIsDocumented:
         responses = schema["paths"]["/v1/uploads"]["post"]["responses"]
 
         assert {"4XX", "5XX"} <= set(responses)
+
+
+class TestTheRouteIsFormatAgnostic:
+    """A second document format arrived, and this route did not notice.
+
+    Acquisition stores bytes; a capture declares what those bytes mean; a
+    processor validates that declaration. These tests hold the first of those
+    three in place by showing that a DOCX gets exactly the PDF treatment, that
+    the response is identical in shape, and that nothing here inspects,
+    validates, unzips, or rejects a document on the strength of its format.
+    """
+
+    def test_uploading_a_docx_is_answered_200(self, client: TestClient) -> None:
+        data = paragraph_table_paragraph_docx()
+
+        response = upload(client, data, filename="notes.docx", mime=DOCX_MIME)
+
+        assert response.status_code == 200
+
+    def test_the_docx_response_has_the_same_three_fields(self, client: TestClient) -> None:
+        body = upload(
+            client, paragraph_table_paragraph_docx(), filename="notes.docx", mime=DOCX_MIME
+        ).json()
+
+        assert set(body) == {"file_ref", "sha256", "mime_type"}
+
+    def test_the_docx_reference_is_the_digest_of_the_exact_bytes(self, client: TestClient) -> None:
+        data = paragraph_table_paragraph_docx()
+
+        body = upload(client, data, filename="notes.docx", mime=DOCX_MIME).json()
+
+        assert body["sha256"] == hashlib.sha256(data).hexdigest()
+        assert body["file_ref"] == build_raw_ref(body["sha256"])
+
+    def test_the_exact_uploaded_docx_bytes_are_retrievable(self, stack: Stack) -> None:
+        data = paragraph_table_paragraph_docx()
+
+        body = upload(stack.client, data, filename="notes.docx", mime=DOCX_MIME).json()
+
+        stored = stack.raw_store.read_bytes(
+            RawObjectRef(id=body["sha256"], sha256=body["sha256"], ref=body["file_ref"])
+        )
+        assert stored == data
+
+    def test_the_same_docx_bytes_twice_yield_the_same_reference(self, client: TestClient) -> None:
+        data = paragraph_table_paragraph_docx()
+
+        first = upload(client, data, filename="a.docx", mime=DOCX_MIME).json()
+        second = upload(client, data, filename="b.docx", mime=DOCX_MIME).json()
+
+        assert first == second
+
+    def test_the_docx_filename_and_extension_decide_nothing(self, client: TestClient) -> None:
+        """Not the identity, and — as the intake tests insist — not the format either."""
+        data = paragraph_table_paragraph_docx()
+
+        named = upload(client, data, filename="notes.docx", mime=DOCX_MIME).json()
+        unnamed = upload(client, data, filename="blob.bin", mime="application/octet-stream").json()
+
+        assert named["file_ref"] == unnamed["file_ref"]
+
+    def test_the_route_does_not_validate_the_package(self, client: TestClient) -> None:
+        """Bytes that are not a DOCX, declared as one, still stage successfully.
+
+        This is the boundary working as designed, not a gap. Acquisition stores
+        what it was given; whether those bytes really are a readable document is
+        the processor's question, asked where the original is already immutable
+        and a truthful failure can be recorded against a real capture.
+        """
+        response = upload(client, b"not a docx at all", filename="notes.docx", mime=DOCX_MIME)
+
+        assert response.status_code == 200
+
+    def test_uploading_a_docx_creates_no_capture_and_no_content(self, stack: Stack) -> None:
+        upload(stack.client, paragraphs_docx("hello"), filename="notes.docx", mime=DOCX_MIME)
+
+        assert stack.record_store.stored_capture_ids() == set()
+        assert stack.content_store.stored_content_ids() == set()
+
+    def test_uploading_a_docx_runs_no_processor(self) -> None:
+        class ExplodingProcessor:
+            name = "exploding"
+            version = "0.1"
+
+            def supports(self, capture: CaptureRecord) -> bool:
+                raise AssertionError("the upload route routed something")
+
+            def process(self, capture: CaptureRecord) -> ContentObject:
+                raise AssertionError("the upload route processed something")
+
+        stack = build_stack(processors=[ExplodingProcessor()])
+        with stack.client as client:
+            response = upload(
+                client, paragraphs_docx("hello"), filename="notes.docx", mime=DOCX_MIME
+            )
+
+        assert response.status_code == 200
+
+    def test_a_pdf_and_a_docx_take_the_identical_code_path(self, client: TestClient) -> None:
+        """Same request shape, same response shape, different bytes. That is all."""
+        pdf = upload(client, one_page_pdf(), filename="paper.pdf", mime=PDF_MIME).json()
+        docx = upload(
+            client, paragraphs_docx("hello"), filename="notes.docx", mime=DOCX_MIME
+        ).json()
+
+        assert set(pdf) == set(docx)
+        assert pdf["mime_type"] == PDF_MIME
+        assert docx["mime_type"] == DOCX_MIME
+        assert pdf["file_ref"] != docx["file_ref"]

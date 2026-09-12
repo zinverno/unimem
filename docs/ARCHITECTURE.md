@@ -158,6 +158,34 @@ content. It puts immutable bytes somewhere a later envelope can name them, and
 *PDF document ingestion (Phase 3)*, below, and
 [ADR-016](ADR/ADR-016-pdf-document-ingestion.md).
 
+**Phase 3, PR 2 — DOCX document ingestion.** Answers "how does a previously
+staged DOCX become a canonical `document` `ContentObject` through the same
+immutable-original and capture lifecycle introduced for PDF, while preserving
+document body order without pretending DOCX has stable physical page numbers?"
+`DocxProcessor` in `src/core/processing/docx.py`, one tuple entry in intake's
+supported document MIME types, and one name in the composition root's processor
+list. **No new route, no contract change, and the schema stays `0.2`.**
+
+```
+DOCX bytes
+  -> POST /v1/uploads      the same route, unchanged, still format-blind
+  -> file_ref              "sha256:<digest>"
+  -> POST /v1/captures     the same canonical envelope, a different mime_type
+  -> CaptureIntake         resolve + verify, then RECEIVED, then STORED
+  -> DocxProcessor         ordered TEXT segments: body paragraphs and table rows
+  -> ContentObject(document)
+  -> COMPLETE
+```
+
+This is the PR that turns PR 1's two prospective decisions — a format-blind
+upload route, and a processor claiming a MIME type rather than a payload type —
+into demonstrated ones. **No DOCX segment carries a page number**, because a
+`.docx` holds flow content and which page a paragraph lands on is a property of
+the renderer rather than of the document. See *DOCX document ingestion
+(Phase 3)*, below, and
+[ADR-017](ADR/ADR-017-docx-document-ingestion.md). **Macro Phase 3 remains
+open.**
+
 ## Future data flow
 
 ```
@@ -1556,6 +1584,119 @@ PDF button, drag-and-drop, download interception, or new permission.
 See [ADR-016](ADR/ADR-016-pdf-document-ingestion.md).
 
 
+## DOCX document ingestion (Phase 3)
+
+The second document format, and the proof that the first one's generalizations
+were real.
+
+**Acquisition was reused, not redesigned.** DOCX bytes stage through the
+unchanged `POST /v1/uploads`, get the same `sha256:<64 lowercase hex>`
+reference, and are named by the same canonical `document` envelope with a
+different `mime_type`. There is no `/v1/docx`, no second staging mechanism, no
+second raw store, and no second lifecycle. The upload route is not told that
+DOCX exists and gains no validation: **acquisition stores bytes, the capture
+declares what those bytes mean, and the processor validates that declaration.**
+
+**Intake generalized by one value.** The supported document MIME set went from a
+single string to a two-entry tuple and the equality check became a membership
+check. The ordering guarantee, the reference rules, the refusal of paths and
+URLs, the no-second-write rule, and every message shape are untouched. No
+registry: two entries do not justify one, and intake does not import the
+processors — what it decides is which declarations this deployment accepts,
+which is a fact about the build.
+
+**The supported type is exactly
+`application/vnd.openxmlformats-officedocument.wordprocessingml.document`.**
+Matched exactly, never inferred — not from a filename, an extension,
+`source.url`, or the ZIP's contents. A DOCX *is* a ZIP and sniffing it would be
+easy; sniffing would move the decision about what a capture is from the
+submitter to a guess made by the server. Legacy `application/msword`, `.docm`,
+ODT, RTF, EPUB, and a bare `application/zip` are refused at intake rather than
+stranded.
+
+**The router stays explicit.** `TEXT` reaches `TextProcessor`, `WEBPAGE` reaches
+`WebpageProcessor`, a `DOCUMENT` declared `application/pdf` reaches
+`PdfProcessor`, and one declared the DOCX type reaches `DocxProcessor` — each
+because of what it claims, never because of where it sits in a list. No
+first-match routing, no generic `DOCUMENT` fallback, no precedence, no
+ambiguity. `DocxProcessor` shares no parsing code with `PdfProcessor`: the
+formats have nothing in common below the surface, their canonical outputs differ
+in exactly the way that matters, and a common ancestor is how a change to one
+silently becomes a change to the other.
+
+**Scope is the main document body, in order.** Body paragraphs and body tables,
+walked through the reader's public body-order iteration, so a table between two
+paragraphs produces segments between those two paragraphs' segments. Headers,
+footers, footnotes, endnotes, comments, tracked-change history, text boxes,
+embedded files, images, charts, equations, macros, and custom XML are all
+outside this build. Nothing is executed, and an external relationship never
+causes a network fetch.
+
+**Paragraph text reaches the segment exactly as the reader returned it.** `strip`
+decides blankness and nothing else; the stored value is never the stripped one.
+No Unicode normalization, no whitespace collapsing, no heading inference. A Word
+`Heading 1` is a paragraph of `TEXT` — style-to-structure mapping is a real
+design question and every answer to it is a guess until something downstream
+needs the structure.
+
+**A table becomes one `TEXT` segment per nonblank row**, tab-joined from
+`cell.text` with the cell strings unstripped, and no wrapper segment for the
+table itself. The tab is an explicit canonical flattening boundary, not a
+character claimed to have been in the document. `Segment.metadata` carries
+`docx_block` (`"paragraph"` or `"table_row"`) plus `table_index` and `row_index`
+for a row — coordinates into the document, counting blank rows that emitted
+nothing. `position` is one contiguous sequence across paragraphs and table rows
+alike. Merged cells repeat across the grid columns they span, which is a
+documented limitation pinned down by test rather than a target.
+
+**There are no DOCX page numbers, and their absence is the central decision.** A
+PDF page is a fact recorded in the file. A DOCX page is a *result* — of fonts,
+page size, printer driver, and renderer — so two machines opening the same file
+can legitimately disagree about what is on page four. A page number computed
+here would be this server's rendering opinion presented as a property of the
+client's document. `spatial` is `None` on every DOCX segment; nothing estimates,
+counts, or renders to paginate, and `SpatialLocation.heading` is not a
+substitute. One canonical `document` type therefore gives two honest answers:
+a PDF segment says which page it was on, and a DOCX segment says it does not
+know.
+
+**Provenance is `ORIGINAL`** on every segment, paragraph and table row alike.
+The processor rearranged structure into canonical segments; it did not author,
+translate, or infer the words. Not `PROCESSOR`, not `OCR`, not `VISION`, not
+`HTML`.
+
+**Title precedence is submitted title, else a nonblank core-properties `title`,
+else none.** Never the uploaded filename, the `file_ref`, the digest, the first
+paragraph, or a heading — and never `subject`, `author`, or `keywords`, which
+are a metadata design of their own. Extracted metadata reaches the
+`ContentObject` only and never rewrites `CaptureRecord.title`.
+
+**A textless or image-only DOCX fails.** The package parses and its body says
+nothing, so the processor raises `ProcessingInputError` and the existing
+orchestrator marks the capture `failed`. Returning `COMPLETE` with zero segments
+would be the system reporting that it remembered something when it remembered
+nothing. No OCR, no image extraction, and no vision model runs to avoid saying
+so. A corrupt package and an encrypted one fail the same safe way — an encrypted
+Word document is a compound file rather than a ZIP, and no password is
+attempted. Only known container, package, and parser failures are translated;
+there is no bare `except`, and no reader message, archive member, XML line
+number, or path reaches the HTTP response.
+
+**`python-docx` is `core`'s second document parser**, confined to
+`core.processing.docx` and held there by test exactly as `pypdf` is held to
+`core.processing.pdf`. A further test asserts that nothing in `core` imports a
+converter, a renderer, `subprocess`, an image library, or an OCR engine — those
+are how fictional page numbers get invented.
+
+**Nothing else moved.** No route, no contract field, no enum member, no lifecycle
+state, no persistence migration; the schema stays `0.2`. PDF semantics are
+frozen. `replay.py` is semantically unchanged and still `TEXT`-only, so a resent
+document capture id is `409` for DOCX as for PDF. Nothing under
+`clients/browser-extension/` changed.
+
+See [ADR-017](ADR/ADR-017-docx-document-ingestion.md).
+
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
@@ -1692,9 +1833,12 @@ then serialized.
 
 ## Tooling
 
-- Python 3.13+, Pydantic v2. Pydantic is `core`'s only runtime dependency, and
-  stays so: FastAPI and uvicorn are dependencies of the Phase-1 delivery
-  adapter alone, and no `core` module imports either.
+- Python 3.13+, Pydantic v2. `core`'s runtime dependencies are Pydantic plus one
+  document parser per format it reads — `pypdf`, confined by test to
+  `core.processing.pdf`, and `python-docx` (with the `lxml` it brings), confined
+  the same way to `core.processing.docx`. That list is an exact allowlist a test
+  enforces, not a trend. FastAPI and uvicorn are dependencies of the Phase-1
+  delivery adapter alone, and no `core` module imports either.
 - **mypy** in `strict` mode is the type checker (chosen over pyright because
   Pydantic ships a first-party mypy plugin, and one tool configured in
   `pyproject.toml` is enough for a package this size).
@@ -1726,6 +1870,7 @@ src/core/processing/
   text.py         TextProcessor, UTF-8 text normalization
   webpage.py      WebpageProcessor and the deterministic HTML text extractor
   pdf.py          PdfProcessor, page-aware embedded text from a PDF original
+  docx.py         DocxProcessor, body-ordered text from a DOCX original
   service.py      ProcessingOrchestrator, the stored-to-complete lifecycle
   errors.py       typed processing, routing and lifecycle errors
 src/core/rendering/

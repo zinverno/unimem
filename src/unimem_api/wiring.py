@@ -44,6 +44,7 @@ from fastapi import FastAPI
 from core.intake import CaptureIntake
 from core.persistence import SqliteCaptureRecordStore, SqliteContentObjectStore
 from core.processing import (
+    DocxProcessor,
     PdfProcessor,
     ProcessingOrchestrator,
     ProcessorRouter,
@@ -99,7 +100,12 @@ def build_local_app(data_dir: Path) -> FastAPI:
 
     intake = CaptureIntake(raw_store, record_store)
     router = ProcessorRouter(
-        [TextProcessor(raw_store), WebpageProcessor(raw_store), PdfProcessor(raw_store)]
+        [
+            TextProcessor(raw_store),
+            WebpageProcessor(raw_store),
+            PdfProcessor(raw_store),
+            DocxProcessor(raw_store),
+        ]
     )
     orchestrator = ProcessingOrchestrator(router, record_store, content_store)
 

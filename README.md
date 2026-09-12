@@ -1,7 +1,7 @@
 # capture-core
 
 Core domain contracts, immutable raw-object storage, capture-record
-persistence, capture intake for text, HTML and PDF, and a local HTTP capture API
+persistence, capture intake for text, HTML, PDF and DOCX, and a local HTTP capture API
 for a universal multimodal capture and ingestion layer. Canonical contracts are at schema
 version **0.2**; `0.1` documents remain readable and are rewritten as `0.1`.
 
@@ -106,6 +106,15 @@ material that is not a string:
   from. **Upload is not capture**: staging mints no capture id, starts no
   lifecycle, and runs no processor. No contract change; the schema stays `0.2`.
   See *Capturing a PDF document*, below.
+- **Phase 3, PR 2 — DOCX document ingestion.** A second document format, on the
+  staging route that was already there. `POST /v1/uploads` is unchanged and
+  still knows nothing about document formats; a `document` envelope declaring
+  the OOXML `.docx` MIME type reaches a new `DocxProcessor`, which turns the
+  main document body into ordered `text` segments — paragraphs and table rows,
+  in the order they occur. **No page numbers**: a DOCX has flow content, and
+  which page a paragraph lands on depends on who renders it. No new route, no
+  contract change, and the schema stays `0.2`. See *Capturing a DOCX document*,
+  below.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 
@@ -247,9 +256,10 @@ curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_web_01/content
 
 A few things are worth being precise about:
 
-- **The endpoint now processes plain text, HTML-backed webpages, and PDF
-  documents** (see *Capturing a PDF document*, below). Images, video, and files
-  are still accepted by the contract and refused with `422 unsupported_payload`.
+- **The endpoint now processes plain text, HTML-backed webpages, and PDF and
+  DOCX documents** (see *Capturing a PDF document* and *Capturing a DOCX
+  document*, below). Images, video, and files are still accepted by the contract
+  and refused with `422 unsupported_payload`.
 - **Webpage support is deterministic text extraction, not reader mode.** Scripts,
   styles, `noscript`, `template`, and `svg` are dropped, block elements separate
   paragraphs, and entities are decoded. Navigation, menus, and footers are text
@@ -358,10 +368,12 @@ A few things are worth being precise about:
   never opened or fetched — the server reads no local file you name and dials no
   host. A well-formed reference to bytes that were never staged is
   `422 capture_material_unavailable`, and leaves no capture record behind.
-- **The current document processor supports text-bearing, unencrypted PDF
-  only.** No OCR, no forms, annotations, attachments, embedded images, layout
-  reconstruction, or table structure. A DOCX or EPUB `mime_type` is refused at
-  intake with `422 unsupported_payload` rather than stranding a capture.
+- **The PDF processor supports text-bearing, unencrypted PDF only.** No OCR, no
+  forms, annotations, attachments, embedded images, layout reconstruction, or
+  table structure. A `mime_type` this build has no processor for — an EPUB, a
+  legacy `.doc` — is refused at intake with `422 unsupported_payload` rather
+  than stranding a capture. DOCX is the one other document format that is
+  supported, and it has a processor of its own: see below.
 - **Scanned PDFs currently fail**, with `422 processing_failed` and a capture
   that reads `failed`. That is deliberate: a scan carries no embedded text, and
   reporting `complete` with no content would claim your document was remembered
@@ -380,6 +392,139 @@ A few things are worth being precise about:
   text-only, so resubmitting the same document capture id is `409` even when the
   request is identical. Use `GET /v1/captures/{id}` to see what the server
   actually holds.
+
+### Capturing a DOCX document
+
+A `.docx` is binary too, so it takes **exactly the same two steps as a PDF**.
+There is no `/v1/docx` route, no second staging mechanism, and nothing about the
+upload changed: `POST /v1/uploads` still stores whatever bytes it is given and
+knows nothing about document formats. The only difference is the `mime_type` the
+capture declares.
+
+Step one: stage the bytes.
+
+```bash
+curl -sS \
+  -F 'file=@example.docx;type=application/vnd.openxmlformats-officedocument.wordprocessingml.document' \
+  http://127.0.0.1:8765/v1/uploads
+```
+
+```json
+{
+  "file_ref": "sha256:3b1c0d4f9a2e5b8c7d6e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c",
+  "sha256": "3b1c0d4f9a2e5b8c7d6e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c",
+  "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+}
+```
+
+As with a PDF, nothing has been captured yet: no capture id, no `CaptureRecord`,
+no processor, no `ContentObject`.
+
+Step two: submit the capture, naming that `file_ref` in the same canonical
+`document` envelope.
+
+```bash
+curl -sS -X POST http://127.0.0.1:8765/v1/captures \
+  -H 'content-type: application/json' \
+  -d '{
+    "schema_version": "0.2",
+    "id": "cap_readme_docx_01",
+    "source": {"type": "upload", "provider": "curl"},
+    "payload": {
+      "type": "document",
+      "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "file_ref": "sha256:3b1c0d4f9a2e5b8c7d6e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c"
+    },
+    "context": {"captured_at": "2026-01-02T03:04:05+00:00"}
+  }'
+```
+
+The response is the same `201` shape as every other capture, and the content
+object comes back with `"type": "document"`:
+
+```bash
+curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_docx_01/content
+```
+
+For a document that reads *paragraph, 2x2 table, paragraph*:
+
+```json
+{
+  "type": "document",
+  "title": "A DOCX that names itself",
+  "segments": [
+    {"type": "text", "text": "The canonical object is not Markdown.",
+     "position": 0, "metadata": {"docx_block": "paragraph"}},
+    {"type": "text", "text": "Format\tPagination",
+     "position": 1,
+     "metadata": {"docx_block": "table_row", "table_index": 0, "row_index": 0}},
+    {"type": "text", "text": "docx\trenderer-dependent",
+     "position": 2,
+     "metadata": {"docx_block": "table_row", "table_index": 0, "row_index": 1}},
+    {"type": "text", "text": "It is a ContentObject.",
+     "position": 3, "metadata": {"docx_block": "paragraph"}}
+  ]
+}
+```
+
+A few things are worth being precise about:
+
+- **The upload route is generic and did not change.** It streams exact bytes
+  into the raw store, returns `file_ref`/`sha256`/the declared MIME type, and
+  does not validate, sniff, or unzip anything. Acquisition stores bytes; the
+  capture declares what those bytes mean; the processor validates that
+  declaration.
+- **DOCX uses the same staging mechanism as PDF** — the same route, the same
+  content-addressed store, the same `sha256:<64 lowercase hex>` reference rules,
+  the same refusals for paths and URLs, and the same
+  `422 capture_material_unavailable` for a reference nobody staged.
+- **Only modern OOXML `.docx` is supported**, declared as exactly
+  `application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
+  The format is never inferred from a filename, an extension, a `source.url`, or
+  the ZIP's contents — a client has to say.
+- **Legacy `.doc` is not supported.** `application/msword` is a different binary
+  format needing a different reader, and it is refused at intake with
+  `422 unsupported_payload`. So are `.docm`, ODT, RTF, EPUB, and a bare
+  `application/zip`.
+- **The main document body is extracted: paragraphs and tables.** Body order is
+  preserved, so a table that sits between two paragraphs produces segments
+  between those two paragraphs' segments, and `position` is one contiguous
+  sequence across both kinds.
+- **Table rows become tab-separated `text` segments**, one per nonblank row. The
+  tab is an explicit canonical flattening boundary between cells, not a
+  character claimed to have been in the document — `metadata.docx_block`,
+  `table_index`, and `row_index` are what let you tell a flattened row from a
+  paragraph that happens to contain tabs. Merged cells are taken as the reader
+  presents them: a horizontally merged cell repeats across the grid columns it
+  spans.
+- **There are no DOCX page numbers, deliberately.** A `.docx` holds flow
+  content; the page a paragraph lands on depends on fonts, page size, and the
+  renderer, so two machines can legitimately disagree. No DOCX segment carries
+  `spatial.page`, and nothing here renders or paginates a document to invent
+  one. (A PDF page, by contrast, *is* recorded in the file, which is why PDF
+  segments do carry `spatial.page`.)
+- **Word heading styles are not interpreted.** A `Heading 1` is a paragraph of
+  text in this build. Turning styles into a section hierarchy is a design
+  question waiting for a downstream requirement.
+- **Headers, footers, footnotes, endnotes, comments, tracked-change history,
+  text boxes, embedded images, charts, and equations are not extracted** in this
+  build. Nothing is executed, and no external relationship is ever fetched.
+- **An image-only DOCX fails** with `422 processing_failed` and a capture that
+  reads `failed`, exactly as a scanned PDF does — rather than becoming an empty
+  `complete` document that claims your file was remembered when it was not. No
+  OCR and no vision model runs. The exact `.docx` is kept, so a richer build can
+  read those same bytes later. A corrupt package, and a password-protected one,
+  fail the same safe way; no password is attempted.
+- **The original `.docx` is always preserved**, byte for byte, and stays
+  retrievable through the content object's original asset. Paragraph and cell
+  text reaches the segment exactly as the reader returned it — no stripping, no
+  Unicode normalization, no whitespace tidying.
+- **The filename is not identity and not a title.** Title precedence is: the
+  `payload.title` you submitted, else the document's own core-properties
+  `title`, else none. Never the filename, the digest, the first paragraph, or a
+  heading.
+- **Duplicate document replay is still not implemented**, for DOCX as for PDF:
+  resubmitting the same capture id is `409` even when the request is identical.
 
 `GET /health` reports process liveness only and checks nothing else.
 
@@ -524,7 +669,7 @@ driven by CI. Macro Phase 2 closed on the strength of that run.
 ```
 src/core/contracts/   canonical domain contracts (Pydantic v2 models)
 src/core/storage/     raw object store port and local backend
-src/core/processing/  processor port, router, the text, webpage and pdf processors, and the lifecycle orchestrator
+src/core/processing/  processor port, router, the text, webpage, pdf and docx processors, and the lifecycle orchestrator
 src/core/rendering/   renderer port and the JSON and Markdown projections
 src/core/persistence/ capture record store port and the SQLite adapter
 src/core/intake/      capture intake, the envelope-to-stored-capture flow
@@ -552,10 +697,13 @@ no test framework, no build step. `npm test` runs Node's own test runner, and
 the directory is loadable as an unpacked extension exactly as it sits in the
 repository.
 
-Runtime dependencies: **pydantic** and **pypdf** for `core`, plus **fastapi**,
-**uvicorn** and **python-multipart** for the `unimem_api` delivery adapter.
-`core` imports none of the latter and is usable without a web framework;
-`pypdf` is confined to `core.processing.pdf` and is the kernel's only
-non-pydantic dependency, held there by test. `python-multipart` is what FastAPI
-parses the upload's `multipart/form-data` body with. Persistence uses the
-standard library's `sqlite3`.
+Runtime dependencies: **pydantic**, **pypdf** and **python-docx** for `core`,
+plus **fastapi**, **uvicorn** and **python-multipart** for the `unimem_api`
+delivery adapter. `core` imports none of the latter and is usable without a web
+framework. The two parsers are the kernel's only non-pydantic dependencies, and
+each is confined by test to the one processor whose format it reads: `pypdf` to
+`core.processing.pdf`, and `python-docx` — with the `lxml` it brings — to
+`core.processing.docx`. Nothing in `core` imports a converter, a renderer, or
+`subprocess`. `python-multipart` is what FastAPI parses the upload's
+`multipart/form-data` body with. Persistence uses the standard library's
+`sqlite3`.
