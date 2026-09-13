@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 
 import core
 import unimem_api
+import unimem_ocr
 from core.intake import CaptureIntake
 from core.processing import ProcessingOrchestrator, ProcessorRouter, TextProcessor
 from core.rendering import JsonRenderer, MarkdownRenderer
@@ -105,25 +106,44 @@ def test_undocumented_operations_are_not_served(stack: Stack, method: str, path:
     assert response.status_code in {404, 405}
 
 
-def imported_modules(package: ModuleType) -> dict[str, set[str]]:
-    """Every module name each module of ``package`` imports, read from its AST.
+def imports_of(path: Path) -> set[str]:
+    """Every module name one source file imports, read from its AST.
 
     The AST rather than the source text, because a docstring that *names* a
-    module is not a dependency on it — and this package's docstrings name the
-    renderers precisely to say that it does not use them.
+    module is not a dependency on it — and several docstrings in this project name
+    the tools they deliberately do not use.
     """
-    imports: dict[str, set[str]] = {}
-    for module in pkgutil.walk_packages(package.__path__, prefix=f"{package.__name__}."):
-        path = Path(importlib.import_module(module.name).__file__ or "")
-        names: set[str] = set()
-        for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.Import):
-                names.update(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module is not None:
-                names.add(node.module)
-                names.update(f"{node.module}.{alias.name}" for alias in node.names)
-        imports[module.name] = names
-    return imports
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            names.add(node.module)
+            names.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return names
+
+
+def imported_modules(package: ModuleType) -> dict[str, set[str]]:
+    """What every module of an importable ``package`` imports."""
+    return {
+        module.name: imports_of(Path(importlib.import_module(module.name).__file__ or ""))
+        for module in pkgutil.walk_packages(package.__path__, prefix=f"{package.__name__}.")
+    }
+
+
+def source_imports(package: ModuleType) -> dict[str, set[str]]:
+    """The same, for a package whose modules must **not** be imported to be read.
+
+    :mod:`unimem_ocr` has one module that imports native wheels from an optional
+    extra, so importing it to find out what it imports would make this scan
+    impossible in precisely the environment the scan exists to describe — an
+    ordinary installation without the extra. The files are read from disk instead.
+    """
+    root = Path(package.__path__[0])
+    return {
+        f"{package.__name__}{'' if path.stem == '__init__' else '.' + path.stem}": imports_of(path)
+        for path in sorted(root.glob("*.py"))
+    }
 
 
 def top_level(names: set[str]) -> set[str]:
@@ -200,7 +220,16 @@ class TestCoreKnowsNothingAboutHttp:
         assert importers == {"core.processing.docx"}
 
     def test_no_converter_or_renderer_is_imported_anywhere_in_core(self) -> None:
-        """The tools that would invent page numbers, spelled out so they stay out."""
+        """The tools that would invent page numbers, spelled out so they stay out.
+
+        Since Phase 3 PR 3 the list also names the OCR machinery. ``core`` owns
+        the page *policy* — embedded text first, recognition only for what is
+        left — and reaches the engine through the
+        :class:`~core.processing.ocr.PdfPageOcr` port. A rasterizer, an imaging
+        library, a subprocess, or the concrete adapter package appearing anywhere
+        in here would mean the kernel had acquired system prerequisites and that
+        the policy could no longer be tested on a machine without them.
+        """
         forbidden = {
             "mammoth",
             "docx2txt",
@@ -209,11 +238,111 @@ class TestCoreKnowsNothingAboutHttp:
             "subprocess",
             "PIL",
             "pytesseract",
+            "pypdfium2",
+            "pypdfium2_raw",
+            "tesserocr",
+            "unimem_ocr",
         }
 
         offenders = {
             name: sorted(top_level(names) & forbidden)
             for name, names in imported_modules(core).items()
+            if top_level(names) & forbidden
+        }
+
+        assert offenders == {}
+
+
+class TestTheOptionalOcrAdapterStaysOptional:
+    """The one optional package, and the single module allowed to know its name."""
+
+    def test_only_the_command_line_module_imports_the_adapter_package(self) -> None:
+        """Not the composition root, and not the app factory.
+
+        :mod:`unimem_api.wiring` takes the recognizer as a *port* and never
+        constructs one, which is what lets a default deployment import the whole
+        application with neither ``pypdfium2`` nor ``Pillow`` installed.
+        :mod:`unimem_api.__main__` is the delivery layer that already knows about
+        argv and exit codes, so it is where the one conditional import lives.
+        """
+        importers = {
+            name
+            for name, names in imported_modules(unimem_api).items()
+            if "unimem_ocr" in top_level(names)
+        }
+
+        assert importers == {"unimem_api.__main__"}
+
+    @pytest.mark.parametrize("package", ["pypdfium2", "PIL"], ids=["pypdfium2", "pillow"])
+    def test_no_api_module_imports_a_native_ocr_dependency(self, package: str) -> None:
+        offenders = {
+            name
+            for name, names in imported_modules(unimem_api).items()
+            if package in top_level(names)
+        }
+
+        assert offenders == set()
+
+    def test_the_native_dependencies_appear_in_two_modules_and_no_others(self) -> None:
+        """Where ``pypdfium2`` and ``Pillow`` are allowed to be named at all.
+
+        :mod:`unimem_ocr.tesseract` is the renderer and imports both at module
+        level; :mod:`unimem_ocr.prerequisites` names ``pypdfium2.version`` inside
+        one function, for the line an operator reads, and the AST cannot tell a
+        function-local import from a module-level one. That *importing*
+        ``unimem_ocr`` loads neither package is the guarantee that actually
+        matters, and it is checked against a real interpreter in
+        ``tests/unit/api/test_pdf_ocr_composition.py`` rather than by reading
+        source here.
+
+        The point of this assertion is the other direction: the policy module, the
+        error, and the package root must never grow a native import, because each
+        of them is loaded on paths a default deployment takes.
+        """
+        native = {
+            name
+            for name, names in source_imports(unimem_ocr).items()
+            if top_level(names) & {"pypdfium2", "PIL"}
+        }
+
+        assert native == {"unimem_ocr.tesseract", "unimem_ocr.prerequisites"}
+
+    def test_the_adapter_reaches_no_network(self) -> None:
+        """Local only: no cloud OCR service, no model download, no telemetry.
+
+        Named rather than inferred, because "it does not call out" is the kind of
+        claim that quietly stops being true when someone adds a fallback.
+        """
+        forbidden = {
+            "http",
+            "httpx",
+            "httpx2",
+            "urllib",
+            "socket",
+            "ssl",
+            "requests",
+            "aiohttp",
+            "boto3",
+            "google",
+            "openai",
+            "anthropic",
+        }
+
+        offenders = {
+            name: sorted(top_level(names) & forbidden)
+            for name, names in source_imports(unimem_ocr).items()
+            if top_level(names) & forbidden
+        }
+
+        assert offenders == {}
+
+    def test_the_adapter_never_imports_the_delivery_surface(self) -> None:
+        """It depends on ``core`` and on nothing above it."""
+        forbidden = {"unimem_api", "fastapi", "starlette", "uvicorn"}
+
+        offenders = {
+            name: sorted(top_level(names) & forbidden)
+            for name, names in source_imports(unimem_ocr).items()
             if top_level(names) & forbidden
         }
 

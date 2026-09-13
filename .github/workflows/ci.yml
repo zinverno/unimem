@@ -158,3 +158,151 @@ jobs:
               if found < floor:
                   sys.exit(f"{name} contributed {found} tests; at least {floor} were required")
           PY
+
+  pdf-ocr:
+    # The three jobs above run on an ordinary installation and must keep doing
+    # so: nothing they exercise needs a rasterizer, an imaging library, or an OCR
+    # engine, and that is the property that makes local OCR *optional*. This job
+    # is the other half — the only one that installs the `ocr` extra and a system
+    # Tesseract, and the only one where the native recognition tests are allowed
+    # to run at all.
+    #
+    # It proves the thing a fake engine cannot:
+    #
+    #   an image-only PDF with no text layer
+    #     -> real PDFium rasterizes the page at 300 DPI
+    #     -> real Tesseract reads it, in English and in Russian
+    #     -> POST /v1/uploads + POST /v1/captures against a real server process
+    #        on a real socket
+    #     -> a DOCUMENT ContentObject whose segments are `ocr` with `ocr`
+    #        provenance and the right physical page numbers
+    #     -> the process is stopped and restarted over the same data directory
+    #        and everything reads back identically
+    #
+    # ...and the refusals: a blank scan does not become an empty COMPLETE
+    # document, and an engine that fails mid-run leaves the capture non-terminal
+    # behind a safe 503.
+    name: Local PDF OCR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Tesseract with English and Russian language data
+        # System prerequisites, installed by the machine's package manager. This
+        # project never installs, downloads, or vendors any of them — which is
+        # exactly why they have to be named here. `fonts-dejavu-core` is for the
+        # *tests*: the image-only fixtures are rendered locally from a system
+        # font, because no font file and no binary fixture is committed to this
+        # repository and nothing is fetched at test time.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus fonts-dejavu-core
+
+      - name: Install package with dev and ocr extras
+        run: python -m pip install -e ".[dev,ocr]"
+
+      - name: Print what is actually going to run
+        # Through the project's own probes rather than a separate shell command,
+        # so this log line is evidence about the code path the adapter takes.
+        run: |
+          tesseract --version
+          tesseract --list-langs
+          python -c "from unimem_ocr import describe_prerequisites; print(describe_prerequisites())"
+
+      - name: Whole suite, with the native OCR tests required
+        env:
+          # Without this the native tests skip when the engine, a language pack,
+          # a font, or the extra is missing, and a green run would prove nothing.
+          # With it, every one of those reasons is a failure instead.
+          UNIMEM_REQUIRE_PDF_OCR_INTEGRATION: "1"
+        # `unimem_ocr` is measured alongside the two packages the quality-gates
+        # job measures: the adapter is where the subprocess, the native handles,
+        # and the resource limits live, and an unmeasured adapter is where an
+        # untested error path hides.
+        run: |
+          pytest \
+            --cov=core --cov=unimem_api --cov=unimem_ocr \
+            -rs --junitxml=pdf-ocr.xml
+
+      - name: Prove the native tests actually ran
+        # Belt and braces, exactly as for the browser/API job. The required mode
+        # turns every in-test skip into a failure, so this can only fire if a
+        # class is renamed, deselected, or skipped by something outside that
+        # policy — each of which would otherwise leave a passing job that never
+        # touched the engine.
+        #
+        # Each acceptance group is counted separately and by its *full* name.
+        # Counting by bare class name would let two different modules' identically
+        # named classes cover for each other.
+        if: always()
+        run: |
+          python - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          #: Fully-qualified class -> the number of tests it must contribute, at least.
+          REQUIRED = {
+              "tests.integration.ocr.test_real_pdf_ocr.TestTheFixturesCarryNoTextLayer": 6,
+              "tests.integration.ocr.test_real_pdf_ocr.TestTheEngineReallyReads": 5,
+              "tests.integration.ocr.test_real_pdf_ocr.TestTheProcessorOverTheRealEngine": 10,
+              "tests.integration.ocr.test_real_pdf_ocr.TestDocumentsTheRealStackRefuses": 6,
+              "tests.integration.ocr.test_real_pdf_ocr_http.TestAScanOverRealHttp": 14,
+              "tests.integration.ocr.test_real_pdf_ocr_http.TestARestartOfTheServerProcess": 5,
+              "tests.integration.ocr.test_real_pdf_ocr_http.TestARuntimeEngineFailureOverHttp": 6,
+              "tests.integration.ocr.test_real_pdf_ocr_http.TestStartupRefusalIsNotASkip": 1,
+              "tests.unit.ocr.test_tesseract_adapter.TestTheCommandLine": 6,
+              "tests.unit.ocr.test_tesseract_adapter.TestResourceLimits": 7,
+              "tests.unit.ocr.test_tesseract_adapter.TestTheRecognitionBudget": 6,
+              "tests.unit.ocr.test_tesseract_adapter.TestATimingOutEngine": 3,
+              "tests.unit.ocr.test_tesseract_adapter.TestTheNativeLibraryLock": 6,
+              "tests.unit.ocr.test_tesseract_adapter.TestRasterLifetime": 10,
+              "tests.unit.ocr.test_tesseract_adapter.TestLoadErrorClassification": 46,
+              "tests.unit.ocr.test_prerequisites.TestBothLanguagesAreRequired": 9,
+              "tests.integration.ocr.test_pdf_ocr_load_failures.TestAnUnprovenLoadFailureIsNonTerminal": 18,
+              "tests.integration.ocr.test_pdf_ocr_load_failures.TestARecognizedFormatFailureStaysAnInputVerdict": 7,
+          }
+
+          #: Everything under these prefixes is the required suite.
+          OCR_PREFIXES = ("tests.unit.ocr.", "tests.integration.ocr.")
+
+          suite = ET.parse("pdf-ocr.xml").getroot()
+          totals = suite.find("testsuite") if suite.tag == "testsuites" else suite
+          if totals is None:
+              sys.exit("no test suite was recorded")
+
+          ran = int(totals.get("tests", "0"))
+          errors = int(totals.get("errors", "0"))
+          print(f"tests={ran} errors={errors}")
+          if ran == 0:
+              sys.exit("the suite did not run at all")
+          if errors:
+              sys.exit(f"{errors} collection or setup errors were recorded")
+
+          counted = {}
+          skipped = []
+          for case in totals.iter("testcase"):
+              name = case.get("classname") or ""
+              if not name.startswith(OCR_PREFIXES):
+                  continue
+              counted[name] = counted.get(name, 0) + 1
+              if case.find("skipped") is not None:
+                  skipped.append(f"{name}::{case.get('name')}")
+
+          native = sum(counted.values())
+          print(f"native OCR tests={native} skipped={len(skipped)}")
+          if native == 0:
+              sys.exit("no native PDF OCR test ran; the engine was never exercised")
+          if skipped:
+              sys.exit("required PDF OCR tests were skipped: " + ", ".join(skipped))
+
+          for name, floor in REQUIRED.items():
+              found = counted.get(name, 0)
+              print(f"{name}={found} (required >= {floor})")
+              if found < floor:
+                  sys.exit(f"{name} contributed {found} tests; at least {floor} were required")
+          PY

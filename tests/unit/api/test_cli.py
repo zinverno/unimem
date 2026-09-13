@@ -33,7 +33,9 @@ class TestArgumentParsing:
     def test_host_and_port_default(self, tmp_path: Path) -> None:
         options = parse_args(["--data-dir", str(tmp_path)])
 
-        assert options == Options(data_dir=tmp_path, host=DEFAULT_HOST, port=DEFAULT_PORT)
+        assert options == Options(
+            data_dir=tmp_path, host=DEFAULT_HOST, port=DEFAULT_PORT, pdf_ocr=False
+        )
 
     def test_the_default_bind_is_loopback(self) -> None:
         """Not a placeholder: this phase has no authentication of any kind."""
@@ -42,7 +44,7 @@ class TestArgumentParsing:
     def test_all_three_options_are_honoured(self, tmp_path: Path) -> None:
         options = parse_args(["--data-dir", str(tmp_path), "--host", "0.0.0.0", "--port", "9001"])
 
-        assert options == Options(data_dir=tmp_path, host="0.0.0.0", port=9001)
+        assert options == Options(data_dir=tmp_path, host="0.0.0.0", port=9001, pdf_ocr=False)
 
     def test_the_data_dir_becomes_a_path(self, tmp_path: Path) -> None:
         options = parse_args(["--data-dir", str(tmp_path / "nested")])

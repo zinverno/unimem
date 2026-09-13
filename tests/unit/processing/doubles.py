@@ -10,6 +10,10 @@ shared ``journal``, because in Phase 0H the thing under test is an *order* that
 spans a record store, a router, and a processor: routing before any state is
 written, the ``processing`` record durable before the processor runs, and
 ``complete`` durable before the caller is handed anything.
+
+``FakePdfPageOcr`` is the last of them and the same idea one layer down: the OCR
+port exists so that the canonical page policy can be tested with no rasterizer,
+no imaging library, no engine, and no subprocess anywhere in the process.
 """
 
 import hashlib
@@ -19,6 +23,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import BinaryIO
 
+from pydantic import JsonValue
+
 from core.contracts import CaptureRecord, ContentObject, RawObjectRef
 from core.persistence import (
     CaptureRecordAlreadyExistsError,
@@ -26,6 +32,7 @@ from core.persistence import (
     ContentObjectAlreadyExistsError,
     ContentObjectNotFoundError,
 )
+from core.processing.ocr import PdfOcrResult, RecognizedPage
 from core.storage import RawObjectNotFoundError, build_raw_ref
 from core.storage.raw import ReadableBinaryStream
 
@@ -282,3 +289,80 @@ class RecordingContentObjectStore:
     def stored_ids(self) -> list[str]:
         """Every stored content id, without journalling the read."""
         return sorted(self._by_id)
+
+
+class FakePdfPageOcr:
+    """A ``PdfPageOcr`` that answers from a script and records what it was asked.
+
+    It shares no code with the real PDFium/Tesseract adapter, imports no native
+    library, and never looks at the PDF it is handed beyond *reading the stream*
+    — which it does on purpose, and keeps, so a test can prove the processor
+    handed over the original bytes from position zero rather than a handle some
+    parser had already consumed.
+
+    Three answering modes, and only one is used per instance: ``texts`` scripts a
+    page-by-page reply for whichever pages were not excluded, ``result`` returns
+    one prepared :class:`~core.processing.ocr.PdfOcrResult` verbatim — including
+    a deliberately malformed one — and ``raises`` fails instead of answering.
+    """
+
+    def __init__(
+        self,
+        *,
+        page_count: int = 0,
+        texts: Mapping[int, str] | None = None,
+        result: PdfOcrResult | None = None,
+        raises: Exception | None = None,
+        engine: str = "fake-ocr",
+        engine_version: str = "9.9.9",
+        rasterizer: str = "fake-raster",
+        rasterizer_version: str = "1.2.3",
+        settings: Mapping[str, JsonValue] | None = None,
+    ) -> None:
+        self.page_count = page_count
+        self.texts = dict(texts or {})
+        self.engine = engine
+        self.engine_version = engine_version
+        self.rasterizer = rasterizer
+        self.rasterizer_version = rasterizer_version
+        self.settings: Mapping[str, JsonValue] = (
+            settings if settings is not None else {"languages": "fake+fake"}
+        )
+        self._result = result
+        self._raises = raises
+        #: One entry per call: the excluded pages, and the bytes it was handed.
+        self.calls: list[tuple[frozenset[int], bytes]] = []
+
+    def recognize_missing_pages(
+        self, stream: BinaryIO, *, embedded_pages: frozenset[int]
+    ) -> PdfOcrResult:
+        self.calls.append((embedded_pages, stream.read()))
+        if self._raises is not None:
+            raise self._raises
+        if self._result is not None:
+            return self._result
+        return PdfOcrResult(
+            page_count=self.page_count,
+            pages=tuple(
+                RecognizedPage(page=number, text=self.texts.get(number, ""))
+                for number in range(1, self.page_count + 1)
+                if number not in embedded_pages
+            ),
+            engine=self.engine,
+            engine_version=self.engine_version,
+            rasterizer=self.rasterizer,
+            rasterizer_version=self.rasterizer_version,
+            settings=self.settings,
+        )
+
+    @property
+    def excluded(self) -> frozenset[int]:
+        """The pages the one call was told to skip."""
+        assert len(self.calls) == 1, f"expected exactly one recognition call, got {len(self.calls)}"
+        return self.calls[0][0]
+
+    @property
+    def received_bytes(self) -> bytes:
+        """The bytes the one call read out of the stream it was given."""
+        assert len(self.calls) == 1, f"expected exactly one recognition call, got {len(self.calls)}"
+        return self.calls[0][1]

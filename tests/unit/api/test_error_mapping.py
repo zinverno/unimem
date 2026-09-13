@@ -34,6 +34,7 @@ from core.processing import (
     AmbiguousProcessorError,
     InvalidCaptureProcessingStateError,
     NoProcessorError,
+    PdfOcrExecutionError,
     ProcessingError,
     ProcessingInputError,
     ProcessingOutputError,
@@ -105,6 +106,10 @@ MAPPED_ERRORS: list[Exception] = [
     CaptureRecordPersistenceError(f"the database at {BACKEND_DETAIL} could not read"),
     ContentObjectPersistenceError(f"the database at {BACKEND_DETAIL} could not read"),
     RawObjectStoreError(f"the raw store at {BACKEND_DETAIL} could not read"),
+    # Not a ``ProcessingError``, and the probe proves the table treats it as its
+    # own row rather than letting a base class adopt it: its message names a local
+    # path and an engine, and neither may reach the wire.
+    PdfOcrExecutionError(f"the OCR engine at {BACKEND_DETAIL} exited with status 1"),
     # The one row this package raises itself. It goes through the same probe as
     # every core failure, because the rule it has to obey is the same one.
     CaptureReplayIntegrityError(f"complete but no content, per {BACKEND_DETAIL}"),
