@@ -10,3 +10,7 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# Graphify knowledge-graph output. Generated locally by `graphify update .`
+# (AST-only, no API cost) and rebuilt on demand; ~17MB, so it is never committed.
+graphify-out/
