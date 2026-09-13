@@ -28,6 +28,17 @@ invents — none of them appear below, so none is quietly given a friendly statu
 code. They fall through to the ASGI server's ordinary 500, which is what an
 unhandled bug should look like. ``BaseException`` is never caught.
 
+One row is not a ``ProcessingError`` and must never be mistaken for one.
+:class:`~core.processing.ocr.PdfOcrExecutionError` says a recognition *run*
+failed — the engine was missing, crashed, timed out, or answered inconsistently —
+so nothing is known about the document and the capture is deliberately left
+non-terminal by the orchestrator. It maps to a 503 with a fixed public message,
+like every other "the server could not do this right now", and specifically not
+to the 422 a ``ProcessingInputError`` gets: a 422 would tell a client their
+document is the problem, which is exactly the claim this failure cannot support.
+It sits outside the ``ProcessingError`` hierarchy in ``core`` so that no base
+class can adopt it into the 422 row by accident.
+
 One row is not core's. :class:`~unimem_api.replay.CaptureReplayIntegrityError`
 is raised by this package, when a capture that says ``COMPLETE`` turns out to
 have no canonical content — a broken server invariant rather than a failed
@@ -64,6 +75,7 @@ from core.processing import (
     AmbiguousProcessorError,
     InvalidCaptureProcessingStateError,
     NoProcessorError,
+    PdfOcrExecutionError,
     ProcessingInputError,
     ProcessingOutputError,
     ProcessorRoutingError,
@@ -122,6 +134,20 @@ _STORAGE_UNAVAILABLE: Final = HttpError(
     "storage_unavailable",
     "the capture store is currently unavailable",
 )
+#: A recognition run that could not be carried out. 503 rather than 422 because
+#: it says nothing about the submitted document: the engine is missing, it failed,
+#: it timed out, or it answered with something inconsistent, and retrying later
+#: against a repaired deployment is a sensible thing for a client to do. The
+#: public text says the capability is unavailable and names nothing about this
+#: machine — no engine version, no exit status, no language path, no subprocess
+#: stderr, and no local file name, all of which the underlying error's own message
+#: may carry for a server log.
+_OCR_UNAVAILABLE: Final = HttpError(
+    503,
+    "ocr_unavailable",
+    "text recognition for this document could not be completed; "
+    "the capture is stored and no content was produced",
+)
 
 #: Which core error becomes which HTTP response.
 #:
@@ -162,6 +188,7 @@ ERROR_MAPPINGS: Final[tuple[tuple[type[Exception], HttpError], ...]] = (
     (CaptureRecordPersistenceError, _STORAGE_UNAVAILABLE),
     (ContentObjectPersistenceError, _STORAGE_UNAVAILABLE),
     (RawObjectStoreError, _STORAGE_UNAVAILABLE),
+    (PdfOcrExecutionError, _OCR_UNAVAILABLE),
 )
 
 #: The code for a body FastAPI/Pydantic rejected before any core code ran.

@@ -1,7 +1,8 @@
 # capture-core
 
 Core domain contracts, immutable raw-object storage, capture-record
-persistence, capture intake for text, HTML, PDF and DOCX, and a local HTTP capture API
+persistence, capture intake for text, HTML, PDF and DOCX — with optional local OCR
+for scanned PDF pages — and a local HTTP capture API
 for a universal multimodal capture and ingestion layer. Canonical contracts are at schema
 version **0.2**; `0.1` documents remain readable and are rewritten as `0.1`.
 
@@ -115,6 +116,17 @@ material that is not a string:
   which page a paragraph lands on depends on who renders it. No new route, no
   contract change, and the schema stays `0.2`. See *Capturing a DOCX document*,
   below.
+- **Phase 3, PR 3 — opt-in local OCR for scanned PDF pages.** The first
+  *optional* capability in the build. Started with `--pdf-ocr`, a deployment
+  registers `PdfOcrProcessor` **instead of** `PdfProcessor`: a PDF page that
+  carries embedded text is read exactly as before, and a page that carries none
+  is rasterized once and recognized once by a local Tesseract, becoming an `ocr`
+  segment with `ocr` provenance. Without the flag the build is byte-for-byte the
+  one above — the same refusal of textless PDFs, and no rasterizer, imaging
+  library, or OCR engine imported, probed, or executed. No new route, no new
+  request field, no new MIME type, no contract change, and the schema stays
+  `0.2`. Recognition is a deployment decision, never something a request can
+  switch. See *Scanned PDFs: opt-in local OCR*, below.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 
@@ -132,6 +144,13 @@ It binds `127.0.0.1:8765` by default and creates `./data` if it is missing:
 ./data/raw/              immutable originals, addressed by SHA-256
 ./data/unimem.sqlite3    capture records and canonical content
 ```
+
+That is the **default deployment**, and it needs nothing beyond the Python
+package: no rasterizer, no imaging library, and no OCR engine. There is one
+optional capability, off unless you ask for it — local recognition of scanned PDF
+pages, added with `--pdf-ocr`, which has extra install steps and its own
+[section below](#scanned-pdfs-opt-in-local-ocr). Every other behaviour described
+in this README is identical in both modes.
 
 > **This server has no authentication, authorization, or TLS.** Anyone who can
 > reach the port can submit captures and read everything stored. Keep the default
@@ -368,17 +387,19 @@ A few things are worth being precise about:
   never opened or fetched — the server reads no local file you name and dials no
   host. A well-formed reference to bytes that were never staged is
   `422 capture_material_unavailable`, and leaves no capture record behind.
-- **The PDF processor supports text-bearing, unencrypted PDF only.** No OCR, no
-  forms, annotations, attachments, embedded images, layout reconstruction, or
-  table structure. A `mime_type` this build has no processor for — an EPUB, a
-  legacy `.doc` — is refused at intake with `422 unsupported_payload` rather
-  than stranding a capture. DOCX is the one other document format that is
-  supported, and it has a processor of its own: see below.
-- **Scanned PDFs currently fail**, with `422 processing_failed` and a capture
+- **The default PDF processor supports text-bearing, unencrypted PDF only.** No
+  OCR, no forms, annotations, attachments, embedded images, layout
+  reconstruction, or table structure. A `mime_type` this build has no processor
+  for — an EPUB, a legacy `.doc` — is refused at intake with
+  `422 unsupported_payload` rather than stranding a capture. DOCX is the one
+  other document format that is supported, and it has a processor of its own:
+  see below.
+- **Scanned PDFs fail by default**, with `422 processing_failed` and a capture
   that reads `failed`. That is deliberate: a scan carries no embedded text, and
   reporting `complete` with no content would claim your document was remembered
-  when it was not. The exact PDF is kept, so a build with OCR can read those
-  same bytes later.
+  when it was not. The exact PDF is kept either way, so the same bytes can be
+  read later — and a deployment started with `--pdf-ocr` can read them now. See
+  [Scanned PDFs: opt-in local OCR](#scanned-pdfs-opt-in-local-ocr).
 - **The original PDF is always preserved**, byte for byte, and stays retrievable
   through the content object's original asset. Nothing is rewritten,
   recompressed, or normalized — and the page text you get back is exactly what
@@ -526,6 +547,208 @@ A few things are worth being precise about:
 - **Duplicate document replay is still not implemented**, for DOCX as for PDF:
   resubmitting the same capture id is `409` even when the request is identical.
 
+### Scanned PDFs: opt-in local OCR
+
+A scan carries no embedded text, so the default build refuses it. A deployment
+that says so explicitly can instead **recognize** the pages that carry no text,
+using a local Tesseract. It is off unless you ask for it, and asking for it takes
+two installs and one flag.
+
+**Install the optional Python extra:**
+
+```bash
+pip install 'capture-core[ocr]'          # adds pypdfium2 and Pillow
+```
+
+**Install the system prerequisites separately.** They are not Python packages and
+nothing in this project installs, downloads, or vendors them:
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus
+
+# macOS
+brew install tesseract tesseract-lang
+
+# Fedora
+sudo dnf install tesseract tesseract-langpack-eng tesseract-langpack-rus
+```
+
+**Both** the English and Russian language files are required — not one, not
+whichever happens to be installed. Recognition runs `eng+rus` in a single pass,
+and a deployment that asked for that and silently got English alone would change
+what Russian documents are remembered as saying with nothing in the result saying
+so.
+
+**Start the server with the flag:**
+
+```bash
+python -m unimem_api --data-dir ./data --pdf-ocr
+```
+
+Startup checks the packages, the executable, and both language files before the
+port is bound. If anything is missing it exits with a sentence naming it:
+
+```
+--pdf-ocr was requested but local OCR is unavailable: the OCR engine 'tesseract'
+(version 5.3.4) is missing language data for rus. …
+```
+
+It does **not** start with recognition quietly disabled, and it does **not** fall
+back to English.
+
+#### Capturing a scan
+
+Exactly the same two steps as any other PDF — the same `POST /v1/uploads`, the
+same `CaptureEnvelope`, the same `201`. There is no new route, no new field, and
+no new MIME type, and nothing in a request can enable, disable, or configure
+recognition:
+
+```bash
+curl -sS -F 'file=@scan.pdf;type=application/pdf' \
+  http://127.0.0.1:8765/v1/uploads
+```
+
+```bash
+curl -sS -X POST http://127.0.0.1:8765/v1/captures \
+  -H 'content-type: application/json' \
+  -d '{
+    "schema_version": "0.2",
+    "id": "cap_readme_scan_01",
+    "source": {"type": "upload", "provider": "curl"},
+    "payload": {
+      "type": "document",
+      "mime_type": "application/pdf",
+      "file_ref": "sha256:…the ref the upload returned…"
+    },
+    "context": {"captured_at": "2026-01-02T03:04:05+00:00"}
+  }'
+```
+
+#### Telling recognized text from extracted text
+
+Read the content object and look at three fields — `type`, `provenance`, and
+`spatial.page`. Here is a mixed document: page one carried its own text, page two
+was a scan, page three was blank.
+
+```bash
+curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_scan_01/content
+```
+
+```json
+{
+  "type": "document",
+  "segments": [
+    {
+      "type": "text",
+      "text": "This page carries its own embedded text.\n",
+      "spatial": {"page": 1},
+      "position": 0,
+      "provenance": {"source_type": "original", "processor": "pdf-ocr",
+                     "processor_version": "0.1"}
+    },
+    {
+      "type": "ocr",
+      "text": "The middle page is a scan.\n",
+      "spatial": {"page": 2},
+      "position": 1,
+      "provenance": {"source_type": "ocr", "processor": "pdf-ocr",
+                     "processor_version": "0.1"}
+    }
+  ],
+  "metadata": {
+    "pdf_ocr": {
+      "page_count": 3,
+      "embedded_text_pages": [1],
+      "ocr_attempted_pages": [2, 3],
+      "ocr_pages_without_text": [3],
+      "engine": "tesseract",
+      "engine_version": "5.3.4",
+      "rasterizer": "pypdfium2",
+      "rasterizer_version": "5.13.0",
+      "settings": {"languages": "eng+rus", "render_dpi": 300, "psm": 3, "oem": 1,
+                   "max_pages": 50, "document_budget_seconds": 120.0}
+    }
+  }
+}
+```
+
+- `"type": "text"` with `"source_type": "original"` is text the **document
+  carried**, read by the ordinary parser. That page was never rasterized.
+- `"type": "ocr"` with `"source_type": "ocr"` is text a recognizer **inferred from
+  pixels**. Weight it accordingly.
+- `spatial.page` is the physical PDF page in both cases; `position` is canonical
+  reading order. Page three produced no segment, which is the gap you can see.
+- `metadata.pdf_ocr` records what actually ran — the installed engine and
+  rasterizer versions, the effective settings, and which pages went which way.
+
+#### A document that was already refused
+
+Enabling OCR does not revisit anything. A capture that already `failed` as a scan
+stays `failed` with no content, and there is no reprocessing or migration step.
+**Submit the same bytes under a new capture id:**
+
+```bash
+# the same file_ref, a different capture id
+curl -sS -X POST http://127.0.0.1:8765/v1/captures \
+  -H 'content-type: application/json' \
+  -d '{"schema_version": "0.2", "id": "cap_readme_scan_retry", … }'
+```
+
+The raw bytes are shared — identical content deduplicates — and the canonical
+identities are not: a fresh content id, a fresh asset id, and fresh segment ids.
+Resubmitting the *original* id is still `409`.
+
+#### What this does not do
+
+Being precise here matters more than usual, because a `complete` document looks
+the same whether or not everything on the page was read:
+
+- **A page with any embedded text is treated as covered, whole.** If such a page
+  also contains a photograph of a sign or a scanned figure with a caption, those
+  words are **not** read and no segment reports them. There is no region-level
+  OCR, no assessment of whether an existing text layer is good, and no blending
+  of extracted and recognized text on one page.
+- **`complete` is not an accuracy claim.** It means this policy finished and its
+  content was persisted. It does not mean the recognition was correct or that
+  every visible word was captured. Expect ordinary OCR errors; nothing is
+  spell-corrected, de-hyphenated, or tidied, because a correction nobody can
+  audit is worse than a visible error.
+- **No confidence scores.** The engine is not asked for one and none is invented.
+- **An empty result is not proof a page was blank.** Pages that recognized to
+  nothing are listed under `ocr_pages_without_text`, which is named after what
+  was observed rather than after a conclusion.
+- **Only PDF pages.** Not uploaded images, not DOCX, not handwriting, not layout
+  or table structure, and no searchable-PDF rewriting — the original PDF is never
+  modified.
+- **Local only.** No cloud OCR service, no model download, no network call, and
+  no external resource fetched from the document. PDF JavaScript, XFA, and form
+  environments are never initialized, and annotations and form fields are not
+  rendered.
+- **Bounded, not sandboxed.** A PDF over **50 pages** is refused whole rather than
+  partly read; a page whose raster would exceed **20,000,000 pixels** is refused
+  rather than quietly downscaled; each page gets at most **30 s** of engine time
+  and each document at most **120 s** of recognition in total. Those are limits,
+  not a memory or CPU sandbox: they do not bound this process's memory, and the
+  HTTP request itself has no deadline at all.
+- **Recognition runs inside the request.** A 300 DPI page through a real engine
+  takes seconds, and a long scan can take the whole budget. There is no queue and
+  no worker.
+- **An engine failure is not a document verdict.** If the engine is missing,
+  crashes, times out, or exhausts the budget mid-run — or the renderer fails to
+  open the document for a reason that is not a statement *about* the document,
+  such as an I/O error or a failure it declines to explain — the response is
+  `503 ocr_unavailable`, no content is stored, and the capture is left
+  `processing` rather than `failed` — because nothing was learned about the
+  document. A capture left `processing` is **not automatically resumable**;
+  `GET /v1/captures/{id}` shows the state, and recovery is not implemented here.
+- **A document nothing could be read from still fails.** `422 processing_failed`
+  and a durable `failed`, never an empty `complete`.
+- **Encrypted and malformed PDFs are refused before anything is rasterized.** OCR
+  is not a repair pass, and no password is attempted.
+
+See [ADR-018](docs/ADR/ADR-018-opt-in-local-pdf-ocr.md).
+
 `GET /health` reports process liveness only and checks nothing else.
 
 ## Browser capture
@@ -669,11 +892,12 @@ driven by CI. Macro Phase 2 closed on the strength of that run.
 ```
 src/core/contracts/   canonical domain contracts (Pydantic v2 models)
 src/core/storage/     raw object store port and local backend
-src/core/processing/  processor port, router, the text, webpage, pdf and docx processors, and the lifecycle orchestrator
+src/core/processing/  processor port, router, the text, webpage, pdf, pdf-ocr and docx processors, the OCR port, and the lifecycle orchestrator
 src/core/rendering/   renderer port and the JSON and Markdown projections
 src/core/persistence/ capture record store port and the SQLite adapter
 src/core/intake/      capture intake, the envelope-to-stored-capture flow
 src/unimem_api/       the HTTP delivery adapter and its CLI — outside core
+src/unimem_ocr/       the optional local PDFium/Tesseract recognizer — outside core
 clients/              connectors that call the HTTP API — outside core and unimem_api
 tests/                unit and integration tests
 docs/                 architecture notes and ADRs
@@ -692,6 +916,28 @@ uv pip install --python .venv/bin/python -e ".[dev]"
 npm test --prefix clients/browser-extension             # browser connector
 ```
 
+That is the full baseline, and it runs on an installation with **no OCR extra and
+no Tesseract**: the native recognition tests skip, and say so under `-rs`. To run
+them, install the extra and the system prerequisites from
+[the OCR section](#scanned-pdfs-opt-in-local-ocr) and then:
+
+```bash
+uv pip install --python .venv/bin/python -e ".[dev,ocr]"
+
+# skips if the engine or a language pack is missing
+.venv/bin/pytest tests/unit/ocr tests/integration/ocr -rs
+
+# same tests, but a missing prerequisite is a failure instead of a skip
+UNIMEM_REQUIRE_PDF_OCR_INTEGRATION=1 \
+  .venv/bin/pytest tests/unit/ocr tests/integration/ocr -v -rs \
+  --cov=core --cov=unimem_api --cov=unimem_ocr
+```
+
+`UNIMEM_REQUIRE_PDF_OCR_INTEGRATION=1` is what CI sets. A skipped acceptance test
+and a passing one look the same in a green summary, so in CI every reason to skip
+— a missing extra, a missing engine, a missing language pack, a missing font — is
+a failure instead.
+
 The browser connector is plain ES modules with **no dependencies** — no bundler,
 no test framework, no build step. `npm test` runs Node's own test runner, and
 the directory is loadable as an unpacked extension exactly as it sits in the
@@ -703,7 +949,17 @@ delivery adapter. `core` imports none of the latter and is usable without a web
 framework. The two parsers are the kernel's only non-pydantic dependencies, and
 each is confined by test to the one processor whose format it reads: `pypdf` to
 `core.processing.pdf`, and `python-docx` — with the `lxml` it brings — to
-`core.processing.docx`. Nothing in `core` imports a converter, a renderer, or
-`subprocess`. `python-multipart` is what FastAPI parses the upload's
-`multipart/form-data` body with. Persistence uses the standard library's
-`sqlite3`.
+`core.processing.docx`. Nothing in `core` imports a converter, a renderer, a
+rasterizer, an imaging library, or `subprocess`. `python-multipart` is what
+FastAPI parses the upload's `multipart/form-data` body with. Persistence uses the
+standard library's `sqlite3`.
+
+Optional dependencies: the `[ocr]` extra adds **pypdfium2** (page rasterization)
+and **Pillow** (PNG encoding), used only by `src/unimem_ocr/` and imported only
+when a deployment actually asks for recognition. `unimem_ocr` depends on `core`
+and never the other way round; `core` does not know its name, and `unimem_api`
+imports it in exactly one place — `unimem_api.__main__`, inside the function that
+handles `--pdf-ocr`. **Tesseract and its `eng`/`rus` language data are system
+prerequisites**, installed by the machine's package manager and never by this
+project. A test asserts that importing the application loads no rasterizer even
+where the extra *is* installed.

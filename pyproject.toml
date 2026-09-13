@@ -38,6 +38,36 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The optional local-OCR capability, and deliberately *optional*. A default
+# deployment installs neither of these, imports neither of them, and refuses
+# textless PDFs exactly as it always did; `pip install "capture-core[ocr]"` is
+# what makes `python -m unimem_api --pdf-ocr` possible. Both are native wheels,
+# which is most of the reason they are not unconditional: a build that cannot
+# start without a PDF renderer and an imaging library is a build whose kernel
+# has acquired two system dependencies it does not need.
+#
+# Tesseract itself is NOT here and cannot be. It is a system executable with its
+# own language data files, installed by the machine's package manager; see the
+# README. Nothing in this project installs, downloads, or vendors it.
+ocr = [
+    # The page rasterizer. Chosen for being a thin, well-documented ctypes
+    # binding over PDFium — the renderer Chromium uses — with no imaging stack
+    # of its own and no subprocess. The 5.x floor is the API this adapter is
+    # written against: `PdfDocument(stream, autoclose=False)`,
+    # `PdfPage.render(scale=..., draw_annots=..., may_draw_forms=...,
+    # fill_color=...)`, `PdfBitmap.to_pil()`, and the `version.PYPDFIUM_INFO` /
+    # `version.PDFIUM_INFO` pair whose names 4.x did not have. Tested against
+    # 5.13.0 (pdfium 153.0.7999.0). PyMuPDF is absent because its licence is
+    # AGPL; poppler and Ghostscript because they are system installations with
+    # their own CLIs; pdf2image because it is a wrapper around one of those.
+    "pypdfium2>=5.0",
+    # Encodes a rendered page as the PNG the engine reads, and nothing else. The
+    # 11.0 floor is a supported-release choice rather than an API one — the two
+    # calls used, `PdfBitmap.to_pil()`'s `Image.frombuffer` result and
+    # `Image.save(..., format="PNG")`, have been stable for far longer. Tested
+    # against 12.3.0.
+    "Pillow>=11.0",
+]
 dev = [
     "pytest>=8.3",
     # Starlette's TestClient runs the ASGI app in-process over an HTTP client
@@ -50,7 +80,12 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/core", "src/unimem_api"]
+# `unimem_ocr` ships in the wheel unconditionally, which is not a contradiction
+# of the optional extra above: the package is a few hundred lines of pure Python
+# that imports its native dependencies lazily, so installing it costs nothing and
+# leaving it out would mean `--pdf-ocr` failed with "no such module" on a machine
+# that had installed the extra.
+packages = ["src/core", "src/unimem_api", "src/unimem_ocr"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -112,6 +147,29 @@ plugins = ["pydantic.mypy"]
 # other import stays under `strict`.
 [[tool.mypy.overrides]]
 module = ["lxml.*"]
+ignore_missing_imports = true
+
+# `pypdfium2` ships no `py.typed` marker and publishes no stubs, and none exist
+# on typeshed. It is imported in exactly two places, both inside the optional
+# adapter package: `unimem_ocr.tesseract` (the renderer itself) and
+# `unimem_ocr.prerequisites` (the two version constants, for the line an operator
+# reads). Narrowed to that one distribution so every other import — including
+# Pillow, which does ship types — stays under `strict`, and so that nothing in
+# `core` or `unimem_api` can acquire an untyped import by accident.
+[[tool.mypy.overrides]]
+module = ["pypdfium2.*"]
+ignore_missing_imports = true
+
+# `Pillow` *does* ship type information, and where it is installed mypy uses it
+# normally — this row only stops mypy failing where the optional `ocr` extra is
+# absent, which is the state the quality-gates job deliberately runs in: the
+# baseline gates must pass on an ordinary installation, and an ordinary
+# installation has no imaging library. Narrowed to the one distribution, so
+# nothing else can lose its types this way. The alternative was installing the
+# extra everywhere, which would have made "the default build needs no rasterizer"
+# untestable in the job that checks it.
+[[tool.mypy.overrides]]
+module = ["PIL.*"]
 ignore_missing_imports = true
 
 [tool.pydantic-mypy]

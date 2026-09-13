@@ -183,7 +183,41 @@ into demonstrated ones. **No DOCX segment carries a page number**, because a
 `.docx` holds flow content and which page a paragraph lands on is a property of
 the renderer rather than of the document. See *DOCX document ingestion
 (Phase 3)*, below, and
-[ADR-017](ADR/ADR-017-docx-document-ingestion.md). **Macro Phase 3 remains
+[ADR-017](ADR/ADR-017-docx-document-ingestion.md).
+
+**Phase 3, PR 3 — opt-in local OCR for scanned PDF pages.** Answers "how can an
+explicitly OCR-enabled deployment ingest scanned PDF pages into page-aware
+canonical content, while preserving embedded text, exact originals, and the
+distinction between extraction and recognition?" One CLI flag, `--pdf-ocr`;
+`PdfOcrProcessor` in `src/core/processing/pdf_ocr.py`; a narrow recognition port
+in `src/core/processing/ocr.py`; and the concrete PDFium/Tesseract adapter in
+`src/unimem_ocr/`, outside `core` and behind an optional `[ocr]` extra. **No new
+route, no new request field, no new MIME type, no contract change, and the schema
+stays `0.2`.**
+
+```
+scanned PDF bytes
+  -> POST /v1/uploads      the same route, unchanged, still format-blind
+  -> POST /v1/captures     the same canonical envelope, the same mime_type
+  -> CaptureIntake         RECEIVED, then STORED
+  -> PdfOcrProcessor       extract_pages() first; pages with no text are
+                           rasterized once and recognized once
+  -> ContentObject(document)  TEXT/ORIGINAL for extracted pages,
+                              OCR/OCR for recognized ones
+  -> COMPLETE
+```
+
+This is the first **optional** capability in the build, and the first place two
+processors claim the same thing. `PdfProcessor` and `PdfOcrProcessor` both claim
+`DOCUMENT` + `application/pdf`, so they are alternatives: composition registers
+one or the other, registering both is the router's ambiguity error, and nothing in
+a request can choose between them. Without the flag the deployment is
+byte-for-byte the one PR 1 shipped — the same refusal of textless PDFs, and no
+rasterizer, imaging library, or engine imported, probed, or executed.
+`src/core/processing/pdf.py` is unchanged, and its public `extract_pages()` is
+reused as-is so that an embedded-text page reaches a segment through exactly the
+path it always did. See *Opt-in local PDF OCR (Phase 3)*, below, and
+[ADR-018](ADR/ADR-018-opt-in-local-pdf-ocr.md). **Macro Phase 3 remains
 open.**
 
 ## Future data flow
@@ -1697,6 +1731,97 @@ document capture id is `409` for DOCX as for PDF. Nothing under
 See [ADR-017](ADR/ADR-017-docx-document-ingestion.md).
 
 
+## Opt-in local PDF OCR (Phase 3)
+
+The first optional capability, and the first alternative implementation of an
+existing claim.
+
+**Recognition is a deployment decision.** `--pdf-ocr` is the whole of the
+configuration surface. There is no request field, no metadata convention, no
+intent value, no MIME type, and no header that can turn recognition on, off, or
+sideways; the same capture request body works in either deployment. The two PDF
+processors are **mutually exclusive** — both claim `DOCUMENT` +
+`application/pdf`, `build_local_app` registers exactly one, and registering both
+is an `AmbiguousProcessorError` rather than a precedence rule. Registration order
+is still not precedence.
+
+**The page policy is embedded-text-first.** A page with nonblank embedded text
+becomes a `TEXT` segment with `ORIGINAL` provenance and is never rasterized. A
+page with none is rasterized once, recognized once, and becomes an `OCR` segment
+with `OCR` provenance — or no segment at all, if recognition returned nothing
+usable. `strip()` decides blankness and never rewrites a stored string; there is
+no normalization, hyphen repair, spell correction, or model anywhere near the
+text.
+
+**A page with any embedded text is covered whole**, so words inside images on such
+a page are not read. There is no region-level OCR and no text-layer quality
+assessment. `COMPLETE` therefore means this policy finished and its content was
+persisted — not that recognition was accurate, and not that every visible word was
+captured.
+
+**`core` gains no machinery.** The recognizer arrives as a
+`core.processing.ocr.PdfPageOcr` port taking a binary stream and the set of
+already-covered pages, and returning small frozen value types. No rasterizer,
+imaging library, `subprocess`, native object, bitmap, or temporary path crosses
+into `core`, and a result that is not a consistent description of the document —
+a duplicate page, an out-of-range page, an excluded page, a **missing** page — is
+rejected as an execution failure rather than believed.
+
+**`PdfOcrExecutionError` is deliberately not a `ProcessingError`.** That one fact
+carries the lifecycle: `ProcessingOrchestrator` is unchanged, so an engine that is
+missing, crashes, times out, or answers inconsistently leaves the capture
+`PROCESSING` behind a fixed `503 ocr_unavailable`, with nothing persisted, while
+an input verdict — encrypted, malformed, over a limit, or nothing readable — is
+the existing `422 processing_failed` and a durable `FAILED`.
+
+**A rasterizer failure is classified by its reason, not by where it happened.**
+`PdfiumError.err_code` is populated for document loading and nowhere else, and an
+allowlist of exactly three codes — `FPDF_ERR_FORMAT`, `FPDF_ERR_PASSWORD`,
+`FPDF_ERR_SECURITY` — is what makes a load failure a verdict about the document.
+`FPDF_ERR_UNKNOWN`, `FPDF_ERR_FILE`, `FPDF_ERR_PAGE`, an absent code, and any
+unrecognized code are execution failures, because "the renderer failed while
+opening this" is not evidence that the document is bad. The exception's message is
+never parsed and the original is kept as the cause. All of it sits behind the
+pypdf-first refusal, which already stops encrypted and unreadable PDFs before the
+rasterizer sees a stream.
+
+**A page raster never outlives the bitmap it was read from.** `to_pil()` returns an
+image sharing PDFium's memory, so the PNG is encoded and copied out while the
+bitmap is still valid and only then are the image, bitmap and page closed — in that
+order, asserted as a sequence of events rather than assumed. The bytes handed to
+the subprocess own nothing native.
+
+**The adapter is local, bounded, and serialized.** `src/unimem_ocr/` renders with
+PDFium and recognizes with a system Tesseract at a fixed policy: `eng+rus`, 300
+DPI onto opaque white, OEM 1, PSM 3, one page at a time, no retry, no orientation
+guessing, no forms or annotations, no network. The engine is a fixed argument list
+with `shell=False`, the image travels on stdin and the text comes back on stdout,
+and no request-derived string becomes an argument or a path. Every call into
+PDFium — creation and destruction included — is inside one process-wide lock, and
+that lock is never held while the subprocess runs. Named limits bound the work: 50
+pages, 20,000,000 raster pixels per page, 30 s per page, 120 s of recognition per
+document, on a monotonic clock — re-read before each page and again the instant the
+native lock is held, before any page is opened, so a long wait for another
+capture's render cannot spend a budget that is then never checked. Startup proves
+**both** optional packages import, Pillow explicitly, because `pypdfium2` loads it
+lazily and importing the adapter alone does not prove it is installed. **They are
+limits, not a sandbox**: they do not
+bound this process's memory or CPU, they cannot preempt an in-process native
+render, and the HTTP request itself has no deadline.
+
+**Nothing existing moved.** No route, no contract field, no enum member, no
+lifecycle state, no persistence migration; the schema stays `0.2`.
+`core/processing/pdf.py` is byte-for-byte unchanged, and `docx.py`, `text.py`,
+`webpage.py`, `replay.py`, the stores, and everything under
+`clients/browser-extension/` are untouched. `src/unimem_api/app.py` is unchanged
+too: the only delivery-side edit is one row in the error translation table
+`create_app` already installed. Enabling OCR revisits no existing record: a capture that already `FAILED` as
+a scan stays `FAILED`, and the same bytes are ingested under a **new** capture id,
+sharing the raw object and sharing no canonical identity.
+
+See [ADR-018](ADR/ADR-018-opt-in-local-pdf-ocr.md).
+
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
@@ -1839,6 +1964,12 @@ then serialized.
   the same way to `core.processing.docx`. That list is an exact allowlist a test
   enforces, not a trend. FastAPI and uvicorn are dependencies of the Phase-1
   delivery adapter alone, and no `core` module imports either.
+- One **optional** extra, `[ocr]`: `pypdfium2` and `Pillow`, used only by
+  `src/unimem_ocr/` and imported only when a deployment asks for recognition. A
+  test asserts that no `core` module imports a rasterizer, an imaging library,
+  `subprocess`, or the adapter package, and that importing the application loads
+  no rasterizer even where the extra is installed. Tesseract and its `eng`/`rus`
+  language data are **system** prerequisites this project never installs.
 - **mypy** in `strict` mode is the type checker (chosen over pyright because
   Pydantic ships a first-party mypy plugin, and one tool configured in
   `pyproject.toml` is enough for a package this size).
@@ -1870,6 +2001,8 @@ src/core/processing/
   text.py         TextProcessor, UTF-8 text normalization
   webpage.py      WebpageProcessor and the deterministic HTML text extractor
   pdf.py          PdfProcessor, page-aware embedded text from a PDF original
+  pdf_ocr.py      PdfOcrProcessor, the opt-in embedded-text-first OCR policy
+  ocr.py          the PdfPageOcr port, its value types, and its execution error
   docx.py         DocxProcessor, body-ordered text from a DOCX original
   service.py      ProcessingOrchestrator, the stored-to-complete lifecycle
   errors.py       typed processing, routing and lifecycle errors
@@ -1891,7 +2024,13 @@ src/unimem_api/   the HTTP delivery adapter — outside core (Phase 1)
   models.py       the HTTP response DTOs (there is no request DTO)
   errors.py       the core-failure-to-status translation table
   wiring.py       build_local_app, the local composition root
-  __main__.py     python -m unimem_api
+  __main__.py     python -m unimem_api, and the --pdf-ocr composition
+src/unimem_ocr/   the optional local recognizer — outside core (Phase 3, PR 3)
+  __init__.py     build_tesseract_ocr, the startup gate and the only entry point
+  policy.py       the fixed recognition policy and OcrLimits
+  prerequisites.py the engine and language probes, and what must be installed
+  tesseract.py    TesseractPdfPageOcr: PDFium for pixels, Tesseract for words
+  errors.py       OcrPrerequisiteError, raised only while composing an app
 clients/browser-extension/   Chromium MV3 selection connector (Phase 1, PR 2)
   manifest.json     MV3 manifest: activeTab, scripting, loopback host only
   service-worker.js the extension origin: chrome wiring, and where fetch happens
@@ -1913,7 +2052,9 @@ tests/integration/rendering/
 tests/integration/persistence/
 tests/integration/intake/
 tests/unit/api/
+tests/unit/ocr/
 tests/integration/api/
+tests/integration/ocr/
 clients/browser-extension/tests/
 docs/
 ```
