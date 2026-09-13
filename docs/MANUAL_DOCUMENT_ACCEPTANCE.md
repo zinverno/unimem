@@ -53,7 +53,7 @@ git status --short                    # есть ли незакоммиченн
 Приёмку можно проводить как есть: она читает код, а не меняет его.
 
 Посмотрите, какая это система — от этого зависят имена системных пакетов на
-шаге 5:
+шаге 6:
 
 ```bash
 cat /etc/os-release
@@ -75,53 +75,127 @@ uv venv --python 3.13 .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
 ```
 
-Дополнительный набор `[ocr]` и системный Tesseract — это **три отдельные вещи**,
-и они нужны только с шага 5. Обычная установка выше их не требует.
+Необязательный набор `[ocr]` (шаг 3) и системный Tesseract с языками (шаг 6) —
+это **отдельные вещи**, и каждая появляется ровно там, где впервые нужна.
+Обычная установка выше не требует ни одной из них.
 
 ---
 
-## Шаг 1. Изолированный каталог приёмки
+## Шаг 1. Свежий изолированный каталог для этого прогона
 
-Приёмка работает в **отдельном** каталоге данных. Ваша обычная база UniMem и
-ваш обычный raw-store не затрагиваются и никогда не удаляются.
+Каждый **полный** прогон чек-листа получает свой каталог. Он изолирован от
+обычной установки UniMem: её база и raw-store не читаются, не меняются и никогда
+не удаляются. Сервер приёмки слушает отдельный порт (`8791`), чтобы не
+конфликтовать с обычным UniMem на `8765`.
+
+Каталог создаётся **без** `-p` на последнем сегменте — поэтому, если такой
+каталог уже есть, команда откажет, а не затрёт чужие доказательства:
 
 ```bash
-export ACC="$HOME/unimem-acceptance"         # можно любой другой пустой каталог
-mkdir -p "$ACC"/{bin,in,out,data}
+RUNS="$HOME/unimem-acceptance"            # можно любое другое место
+mkdir -p "$RUNS"
+export ACC="$RUNS/run-$(date -u +%Y%m%d-%H%M%S)"
+mkdir "$ACC" || { echo "каталог уже существует -- СТОП, возьмите другое имя"; }
+[ -z "$(ls -A "$ACC")" ] && echo "новый пустой каталог приёмки: $ACC" \
+  || echo "КАТАЛОГ НЕ ПУСТ -- СТОП, не продолжайте в нём"
+mkdir "$ACC"/{bin,in,out,data}
 ```
 
-Сервер приёмки слушает **отдельный порт** (`8791`), чтобы не конфликтовать с
-обычным UniMem на `8765`.
+Продолжайте только если вы увидели `новый пустой каталог приёмки`. Если каталог
+не пуст — в нём уже лежат доказательства прошлого прогона; возьмите новое имя, а
+не очищайте старое.
 
-Переменные понадобятся в двух терминалах, поэтому положим их в файл. Запустите
-это **из корня checkout** — путь к репозиторию берётся у git, а не угадывается:
+Путь нужен в двух терминалах, поэтому он записывается в файл **внутри самого
+каталога**. Запустите это из корня checkout — путь к репозиторию берётся у git, а
+не угадывается:
 
 ```bash
 cat > "$ACC/env.sh" <<EOF
 export REPO="$(git rev-parse --show-toplevel)"
 export ACC="$ACC"
 export PY="\$REPO/.venv/bin/python"
+export PYTHONPATH="\$REPO:\$ACC/bin"
 export API="http://127.0.0.1:8791"
 export DOCX="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 EOF
 cat "$ACC/env.sh"
+echo
+echo "Строка для второго терминала (скопируйте её целиком):"
+echo "source \"$ACC/env.sh\"; cd \"\$REPO\""
 ```
 
-Дальше **в каждом новом терминале** первым делом:
+Последняя команда печатает точную строку с **конкретным путём этого прогона**.
+Скопируйте её — ею начинается каждый новый терминал, включая тот, в котором
+будет жить сервер. Никакой подстановки `$HOME` на глаз: путь содержит метку
+времени и должен совпадать посимвольно, иначе второй терминал будет работать с
+другим каталогом данных.
 
-```bash
-source "$HOME/unimem-acceptance/env.sh"   # или ваш путь к env.sh
-cd "$REPO"
-```
+`PYTHONPATH` здесь задан один раз, поэтому дальше вспомогательные скрипты
+запускаются без префиксов.
+
+### Три разные вещи, которые легко спутать
+
+| Что вы делаете | Что берёте | Что происходит с данными |
+| --- | --- | --- |
+| **Продолжаете прогон** (новый терминал, перерыв, следующий сценарий) | тот же `env.sh` того же `$ACC` | ничего не меняется; сохранённые ответы и `in/` на месте |
+| **Перезапускаете сервер этого прогона** (в том числе DOC-D и DOC-F) | тот же `$ACC`, тот же `--data-dir "$ACC/data"` | база и raw-store те же; это и есть проверка долговечности |
+| **Начинаете новый полный прогон** | **новый** `$ACC` из команд выше | новый пустой каталог данных; прошлый прогон остаётся нетронутым |
+
+Ничего удалять и ничего сбрасывать не нужно ни в одном из трёх случаев. В
+частности: внутри одного прогона все перезапуски сервера обязаны использовать
+**тот же** `--data-dir`, иначе проверяется не долговечность, а пустая база.
 
 ---
 
-## Шаг 2. Четыре маленьких вспомогательных скрипта
+## Шаг 2. Вспомогательные скрипты
 
 Они нужны, чтобы не требовать `jq`, Node или офисный пакет, и чтобы JSON строился
 безопасно — заголовок с кавычкой или переводом строки не должен ломать тело
 запроса. Скрипты живут **вне** checkout, в `$ACC/bin`, и ничего в репозитории не
 меняют.
+
+### `rawref.py` — как получить ссылку на сохранённые байты
+
+Идентичность сохранённых байтов — это логический `ref`, а **не** `id` записи об
+ассете: у `Asset.id` своя роль, и подставлять его как id raw-объекта нельзя.
+
+```bash
+cat > "$ACC/bin/rawref.py" <<'PY'
+"""Построить ссылку на raw-объект из asset'а контента или raw_object записи.
+
+Логический `ref` -- это идентичность сохранённых байтов; `id` ассета -- это id
+*записи об ассете*, и как id raw-объекта он не годится. Дайджест разбирается из
+ref продуктовым валидатором, присланный sha256 обязан с ним согласиться (а не
+быть тихо "исправлен"), и ссылка собирается продуктовым конструктором, который
+делает дайджест id раw-объекта. Id записи возвращается отдельным слоем.
+"""
+
+from typing import Any
+
+from core.contracts import RawObjectRef
+from core.storage.raw import parse_raw_ref, raw_object_ref
+
+
+def raw_handle(source: dict[str, Any]) -> tuple[RawObjectRef, str, str | None]:
+    """Вернуть (ссылка, дайджест, id записи) для asset'а или raw_object."""
+    ref = source.get("ref")
+    if not ref:
+        raise SystemExit("the reference carries no 'ref'; nothing can be resolved from it")
+
+    digest = parse_raw_ref(ref)          # только sha256:<64 hex>, любая иная форма -- отказ
+    supplied = source.get("sha256")
+    if supplied is not None and supplied != digest:
+        raise SystemExit(
+            "MISMATCH: ref digest and recorded sha256 disagree -- "
+            f"ref says {digest!r}, sha256 says {supplied!r}. "
+            "This is a failure, not something to repair silently."
+        )
+
+    handle = raw_object_ref(digest, mime_type=source.get("mime_type"))
+    return handle, digest, source.get("id")
+PY
+```
+
 
 ### `envelope.py` — собрать конверт capture
 
@@ -168,10 +242,16 @@ PY
 cat > "$ACC/bin/show.py" <<'PY'
 """Печатает небольшой набор полей, который проверяет шаг приёмки.
 
-Usage: show.py ref     <upload.json>    -- только file_ref, для следующего шага
-       show.py record  <record.json>
-       show.py content <content.json>
+Usage: show.py ref            <upload.json>   -- только file_ref, для следующего шага
+       show.py record         <record.json>
+       show.py content        <content.json>  -- включая ТЕКСТ сегментов
+       show.py content-fields <content.json>  -- только технические поля, БЕЗ текста
+
 Читает сохранённое тело HTTP-ответа; сам никаких запросов не делает.
+
+`content` печатает извлечённый текст целиком. Для своих документов это их
+содержимое: смотрите такой вывод локально, а для отправки используйте
+`content-fields`, который текст не печатает вовсе.
 """
 
 import json
@@ -195,10 +275,15 @@ elif mode == "record":
     print("error       :", body.get("error"))
     raw = body.get("raw_object") or {}
     print("raw_object  : sha256=%s ref=%s" % (raw.get("sha256"), raw.get("ref")))
-elif mode == "content":
+elif mode in ("content", "content-fields"):
+    with_text = mode == "content"
     print("content id  :", body.get("id"))
     print("type        :", body.get("type"))
-    print("title       :", repr(body.get("title")))
+    if with_text:
+        print("title       :", repr(body.get("title")))
+    else:
+        title = body.get("title")
+        print("title       :", "<присутствует, скрыт>" if title else repr(title))
     original = body.get("original") or {}
     print("original    : sha256=%s mime=%s asset_id=%s"
           % (original.get("sha256"), original.get("mime_type"), original.get("asset_id")))
@@ -214,7 +299,11 @@ elif mode == "content":
                  provenance.get("source_type"), provenance.get("processor"),
                  provenance.get("processor_version")))
         print("    metadata:", json.dumps(segment.get("metadata") or {}, ensure_ascii=False))
-        print("    text    :", json.dumps(segment.get("text"), ensure_ascii=False))
+        if with_text:
+            print("    text    :", json.dumps(segment.get("text"), ensure_ascii=False))
+        else:
+            text = segment.get("text") or ""
+            print("    text    : <скрыт> длина=%d символов" % len(text))
     metadata = body.get("metadata") or {}
     if "pdf_ocr" in metadata:
         print("metadata.pdf_ocr:", json.dumps(metadata["pdf_ocr"], ensure_ascii=False, indent=2))
@@ -228,6 +317,13 @@ PY
 > Не пропускайте вывод `show.py` через `head` — обрыв потока даёт
 > `BrokenPipeError`, который легко принять за отказ продукта. Смотрите вывод
 > целиком.
+
+> `content` печатает **весь** извлечённый текст. Для контрольных файлов это
+> ровно то, что нужно проверить. Для **своих** документов это их содержимое:
+> такой вывод остаётся у вас локально, а для отправки есть `content-fields`,
+> который текста не печатает вовсе. Подробнее — в разделе
+> [Свои документы](#свои-документы).
+
 
 ### `embedded_text.py` — что читает продуктовый извлекатель текста
 
@@ -265,15 +361,15 @@ PY
 
 ```bash
 cat > "$ACC/bin/original.py" <<'PY'
-"""Читает сохранённый оригинал обратно через raw-store и сверяет байты.
+"""Read stored original bytes back through the raw store and compare them.
 
 Usage: original.py <data_dir> <content-или-record.json> <исходный_файл>
 
-Принимает и ContentObject (использует его asset с role=original), и
-CaptureRecord (использует его raw_object) — поэтому staged-оригинал *упавшего*
-capture тоже можно проверить. Работает через `core.storage.LocalRawObjectStore`,
-то есть через тот же store, куда пишет сервер: раскладка файлов на диске не
-угадывается по имени файла и путь не собирается руками.
+Принимает и ContentObject (его asset с role=original), и CaptureRecord (его
+raw_object), поэтому staged-оригинал *упавшего* capture тоже проверяется.
+Работает через `core.storage.LocalRawObjectStore` -- тот же store, куда пишет
+сервер: раскладка на диске не угадывается по имени файла и путь не собирается
+руками. Идентичность байтов -- это `ref`, а не id записи об ассете (см. rawref).
 """
 
 import hashlib
@@ -281,8 +377,8 @@ import json
 import sys
 from pathlib import Path
 
-from core.contracts import RawObjectRef
 from core.storage.local import LocalRawObjectStore
+from rawref import raw_handle
 from unimem_api.wiring import RAW_DIRNAME
 
 data_dir, body_path, expected_path = (Path(p) for p in sys.argv[1:4])
@@ -300,15 +396,18 @@ elif body.get("raw_object"):
 else:
     raise SystemExit("neither an original asset nor a raw_object is present")
 
+reference, digest, record_id = raw_handle(source)
 store = LocalRawObjectStore(data_dir / RAW_DIRNAME)
-reference = RawObjectRef(id=source["id"], ref=source["ref"], sha256=source.get("sha256"))
+
 print("read through   :", label)
+print("record id      :", record_id, "(id записи; НЕ идентичность байтов)")
+print("ref            :", source["ref"])
+print("digest from ref:", digest)
+print("raw handle id  :", reference.id)
 print("exists in store:", store.exists(reference))
 
 stored = store.read_bytes(reference)
 expected = expected_path.read_bytes()
-print("ref            :", source["ref"])
-print("recorded sha256:", source.get("sha256"))
 print("sha256 of file :", hashlib.sha256(expected).hexdigest())
 print("sha256 stored  :", hashlib.sha256(stored).hexdigest())
 print("bytes stored   :", len(stored), "| bytes submitted:", len(expected))
@@ -316,20 +415,219 @@ print("BYTES IDENTICAL:", stored == expected)
 PY
 ```
 
+### `restart_check.py` — проверить, что перезапуск ничего не изменил
+
+Эта проверка читает снимки **обоих** ответов — и `CaptureRecord`, и
+`ContentObject` — вместе с их HTTP-кодами, и только потом сравнивает. Она
+существует потому, что сравнения одних тел `ContentObject` недостаточно:
+запись могла перейти из `complete` в `failed`, а содержимое при этом
+осталось бы побайтово тем же.
+
+```bash
+cat > "$ACC/bin/restart_check.py" <<'PY'
+"""Проверить, что перезапуск процесса ничего не изменил.
+
+Usage: restart_check.py <data_dir> <snapshots_dir> <спецификация>...
+  спецификация: complete:<capture_id>:<исходный_файл>
+                failed:<capture_id>:<исходный_файл>
+
+Читает сохранённые до/после снимки ОБОИХ ответов -- и CaptureRecord, и
+ContentObject -- вместе с их HTTP-кодами, и только потом сравнивает. Два
+одинаковых ответа 404 никогда не считаются доказательством долговечности:
+отсутствующий снимок -- это BLOCKED, пропавший capture -- это FAIL.
+Таблицу результатов владельца этот скрипт не заполняет.
+"""
+
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+from core.storage.local import LocalRawObjectStore
+from rawref import raw_handle
+from unimem_api.wiring import RAW_DIRNAME
+
+data_dir, snapshots = Path(sys.argv[1]), Path(sys.argv[2])
+store = LocalRawObjectStore(data_dir / RAW_DIRNAME)
+
+
+def read(phase: str, capture_id: str, kind: str) -> tuple[int | None, object]:
+    """(HTTP-код, разобранный JSON) одного снимка; (None, None) если его нет."""
+    status_path = snapshots / f"{phase}_{capture_id}_{kind}.status"
+    body_path = snapshots / f"{phase}_{capture_id}_{kind}.json"
+    if not status_path.is_file() or not body_path.is_file():
+        return None, None
+    try:
+        code = int(status_path.read_text(encoding="utf-8").strip())
+        return code, json.loads(body_path.read_text(encoding="utf-8"))
+    except (ValueError, json.JSONDecodeError):
+        return None, None
+
+
+def check(expected_state: str, capture_id: str, source_file: Path) -> tuple[str, list[str]]:
+    notes: list[str] = []
+    want_status = "complete" if expected_state == "complete" else "failed"
+
+    before_code, before_record = read("before", capture_id, "record")
+    if before_code != 200 or not isinstance(before_record, dict) or "status" not in before_record:
+        return "BLOCKED", ["нет годного снимка CaptureRecord до перезапуска"]
+    if before_record.get("status") != want_status:
+        return "BLOCKED", [
+            f"до перезапуска статус был {before_record.get('status')!r}, "
+            f"а сценарий заявлен как {want_status!r} -- сценарий не выполнялся так, как описано"
+        ]
+
+    after_code, after_record = read("after", capture_id, "record")
+    if after_code != 200 or not isinstance(after_record, dict):
+        return "FAIL", [f"после перезапуска GET record вернул {after_code} -- capture пропал"]
+    if after_record.get("id") != capture_id:
+        return "FAIL", [f"после перезапуска id = {after_record.get('id')!r}, ожидался {capture_id!r}"]
+    if after_record.get("status") != want_status:
+        return "FAIL", [
+            f"статус изменился: {before_record.get('status')!r} -> {after_record.get('status')!r}"
+        ]
+    if before_record != after_record:
+        differing = sorted(
+            k for k in set(before_record) | set(after_record)
+            if before_record.get(k) != after_record.get(k)
+        )
+        return "FAIL", [f"снимок CaptureRecord изменился в полях: {', '.join(differing)}"]
+    notes.append(f"CaptureRecord: id и {want_status} на месте, снимок не изменился")
+
+    before_content_code, before_content = read("before", capture_id, "content")
+    after_content_code, after_content = read("after", capture_id, "content")
+
+    if expected_state == "complete":
+        if before_content_code != 200 or not isinstance(before_content, dict) \
+                or "segments" not in before_content:
+            return "BLOCKED", notes + ["нет годного снимка ContentObject до перезапуска"]
+        if after_content_code != 200 or not isinstance(after_content, dict) \
+                or "segments" not in after_content:
+            return "FAIL", notes + [
+                f"после перезапуска GET content вернул {after_content_code} -- содержимое пропало"
+            ]
+        if (after_content.get("source") or {}).get("capture_id") != capture_id:
+            return "FAIL", notes + ["ContentObject связан с другим capture"]
+        if before_content.get("id") != after_content.get("id"):
+            return "FAIL", notes + [
+                f"content id изменился: {before_content.get('id')} -> {after_content.get('id')}"
+            ]
+        if before_content != after_content:
+            differing = sorted(
+                k for k in set(before_content) | set(after_content)
+                if before_content.get(k) != after_content.get(k)
+            )
+            return "FAIL", notes + [f"снимок ContentObject изменился в полях: {', '.join(differing)}"]
+        notes.append(
+            f"ContentObject: id {after_content.get('id')}, связь с capture верна, снимок не изменился"
+        )
+        holder, layer = after_content, "asset role=original"
+    else:
+        # Ожидаемое отсутствие содержимого проверяется как код и код ошибки,
+        # а НЕ сравнением двух тел ошибок между собой.
+        if after_content_code != 404:
+            return "FAIL", notes + [
+                f"у упавшего capture GET content вернул {after_content_code}, ожидался 404"
+            ]
+        code = (after_content.get("error") or {}).get("code") if isinstance(after_content, dict) else None
+        if code != "not_found":
+            return "FAIL", notes + [f"404 без ожидаемого error.code=not_found (получено {code!r})"]
+        notes.append("содержимого по-прежнему нет: 404 not_found, как и требуется")
+        holder, layer = after_record, "record raw_object"
+
+    originals = [a for a in holder.get("assets") or [] if a["role"] == "original"] \
+        if "assets" in holder else []
+    source = originals[0] if originals else holder.get("raw_object")
+    if not source:
+        return "FAIL", notes + ["не найден ни original asset, ни raw_object"]
+
+    reference, digest, record_id = raw_handle(source)
+    if not store.exists(reference):
+        return "FAIL", notes + [f"оригинал {digest} отсутствует в raw-store после перезапуска"]
+    stored = store.read_bytes(reference)
+    expected = source_file.read_bytes()
+    if stored != expected:
+        return "FAIL", notes + ["байты оригинала после перезапуска отличаются от отправленных"]
+    if hashlib.sha256(stored).hexdigest() != digest:
+        return "FAIL", notes + ["сохранённые байты не соответствуют своему же дайджесту"]
+    notes.append(f"оригинал ({layer}) побайтово тот же, digest {digest[:12]}…")
+    return "PASS", notes
+
+
+worst = "PASS"
+for spec in sys.argv[3:]:
+    state, capture_id, source_file = spec.split(":", 2)
+    verdict, notes = check(state, capture_id, Path(source_file))
+    print(f"{capture_id:22s} {verdict}")
+    for note in notes:
+        print(f"    - {note}")
+    if verdict == "FAIL" or (verdict == "BLOCKED" and worst == "PASS"):
+        worst = verdict
+
+print()
+print(f"ИТОГ ПРОВЕРКИ: {worst}")
+print("Это проверка долговечности, а не запись в таблицу результатов владельца.")
+raise SystemExit(0 if worst == "PASS" else 1)
+PY
+```
+
 ---
 
-## Шаг 3. Контрольные документы
+
+## Шаг 3. Python-зависимости для контрольных файлов
+
+Контрольные файлы строятся **на вашей машине** из построителей фикстур самого
+репозитория. Что для этого нужно, зависит от того, какие контроли вы делаете:
+
+| Контроли | Что нужно | Откуда |
+| --- | --- | --- |
+| `text.pdf`, `doc.docx`, `untitled.docx` | обычная установка проекта | шаг 0, `-e ".[dev]"` |
+| `scan_en.pdf`, `scan_ru.pdf`, `mixed.pdf` | **плюс** необязательный набор `[ocr]` (он приносит Pillow) | команда ниже |
+
+Контроли-сканы рисуются в растр через Pillow — иначе они несли бы текстовый слой
+и не были бы сканами. Pillow приходит с набором `[ocr]`:
+
+```bash
+uv pip install --python .venv/bin/python -e ".[dev,ocr]"
+"$PY" -c "import PIL.Image, pypdfium2; print('Pillow и pypdfium2 доступны')"
+```
+
+> **Это чисто Python-зависимости, и они не имеют отношения к движку
+> распознавания.** Установка `[ocr]` даёт возможность *сгенерировать*
+> image-only PDF — и ничего больше. Она **не** устанавливает Tesseract, **не**
+> включает OCR и **ничего не подтверждает** о распознавании. Системный движок и
+> его языки — это шаг 6, и до него ни один шаг их не требует.
+
+Если вы не собираетесь проверять OCR вообще, набор `[ocr]` можно не ставить: тогда
+пропустите контроли-сканы, а DOC-C, DOC-D и DOC-E останутся `NOT_RUN`. DOC-A,
+DOC-B, DOC-F и DOC-G от него не зависят.
+
+---
+
+## Шаг 4. Контрольные документы
 
 Контроли берутся из **уже существующих** построителей фикстур репозитория
 (`tests/pdfs.py`, `tests/docxs.py`, `tests/ocr_fixtures.py`). Новый фикстурный
 фреймворк не вводится, и ничего не записывается внутрь checkout.
 
+Генератор **никогда не перезаписывает существующий файл**. Это важно: байты
+`doc.docx` и сканов не воспроизводимы между запусками, а их дайджест мог быть уже
+загружен на сервер — перегенерация сделала бы сохранённые `file_ref` ссылками на
+файлы, которых больше нет на диске.
+
 ```bash
 cat > "$ACC/bin/make_controls.py" <<'PY'
 """Генерирует контрольные документы приёмки из фикстур самого репозитория.
 
+Usage: make_controls.py <каталог> [--scans]
+
 Запускать из корня репозитория интерпретатором проекта. Пишет в каталог,
 переданный первым аргументом; внутрь checkout ничего не записывается.
+
+НИКОГДА не перезаписывает существующий файл. Байты `doc.docx` и сканов не
+воспроизводимы между запусками, а их дайджест уже мог быть загружен на сервер --
+поэтому повторный запуск (например, чтобы добавить `--scans`) оставляет всё
+готовое как есть и создаёт только отсутствующее.
 """
 
 import sys
@@ -339,28 +637,44 @@ from tests import docxs, pdfs
 
 OUT = Path(sys.argv[1]).resolve()
 OUT.mkdir(parents=True, exist_ok=True)
+created, kept = 0, 0
 
 
-def write(name: str, data: bytes) -> None:
-    (OUT / name).write_bytes(data)
-    print(f"{name:22s} {len(data):9d} bytes")
+def write(name: str, build) -> None:
+    """Создать файл, если его ещё нет; иначе оставить существующий."""
+    global created, kept
+    path = OUT / name
+    if path.exists():
+        kept += 1
+        print(f"{name:22s} {path.stat().st_size:9d} bytes  СОХРАНЁН (уже существует)")
+        return
+    data = build()
+    path.write_bytes(data)
+    created += 1
+    print(f"{name:22s} {len(data):9d} bytes  создан")
 
 
 # DOC-A: текст на страницах 1 и 3, физически пустая страница 2, /Title в метаданных.
-write("text.pdf", pdfs.blank_middle_pdf(title=pdfs.METADATA_TITLE))
+write("text.pdf", lambda: pdfs.blank_middle_pdf(title=pdfs.METADATA_TITLE))
 
 # DOC-B: абзац A, таблица 2x2, абзац B, с заголовком в core properties.
-write("doc.docx", docxs.paragraph_table_paragraph_docx(title=docxs.CORE_TITLE))
+write("doc.docx", lambda: docxs.paragraph_table_paragraph_docx(title=docxs.CORE_TITLE))
 # DOC-B (контроль приоритета заголовка): то же тело без заголовка в core properties.
-write("untitled.docx", docxs.paragraph_table_paragraph_docx())
+write("untitled.docx", lambda: docxs.paragraph_table_paragraph_docx())
 
-if len(sys.argv) > 2 and sys.argv[2] == "--scans":
+if "--scans" in sys.argv[2:]:
     from tests import ocr_fixtures
 
-    write("scan_en.pdf", ocr_fixtures.english_scan())
-    write("scan_ru.pdf", ocr_fixtures.russian_scan())
-    write("mixed.pdf", ocr_fixtures.mixed_document())
+    write("scan_en.pdf", ocr_fixtures.english_scan)
+    write("scan_ru.pdf", ocr_fixtures.russian_scan)
+    write("mixed.pdf", ocr_fixtures.mixed_document)
+else:
+    print()
+    print("Сканы не запрашивались. Добавьте --scans, когда установите набор [ocr];")
+    print("повторный запуск не перезапишет уже созданные файлы выше.")
 
+print()
+print(f"создано: {created}, сохранено без изменений: {kept}")
 print()
 print("expected text of text.pdf page 1:", repr(pdfs.TWO_PAGE_TEXT_EXTRACTED))
 print("expected text of text.pdf page 3:", repr(pdfs.TWO_PAGE_SECOND_EXTRACTED))
@@ -371,32 +685,34 @@ print("expected docx title             :", repr(docxs.CORE_TITLE))
 PY
 ```
 
-Сначала — только PDF и DOCX (сканы требуют Pillow, он приходит с набором
-`[ocr]`; см. шаг 5):
+Если набор `[ocr]` не установлен — только PDF и DOCX:
 
 ```bash
-PYTHONPATH="$REPO" "$PY" "$ACC/bin/make_controls.py" "$ACC/in"
+"$PY" "$ACC/bin/make_controls.py" "$ACC/in"
 ```
 
-Когда набор `[ocr]` установлен, добавьте контроли-сканы:
+Если установлен — сразу всё, включая сканы:
 
 ```bash
-PYTHONPATH="$REPO" "$PY" "$ACC/bin/make_controls.py" "$ACC/in" --scans
+"$PY" "$ACC/bin/make_controls.py" "$ACC/in" --scans
 ```
 
-Ожидаемо появятся: `text.pdf`, `doc.docx`, `untitled.docx`, а с `--scans` ещё
-`scan_en.pdf`, `scan_ru.pdf`, `mixed.pdf`.
+Обе команды можно выполнить по очереди: вторая допишет только сканы и напечатает
+`СОХРАНЁН (уже существует)` для трёх уже готовых файлов. Так добавление сканов
+позже не ломает уже загруженные байты и не требует возврата к предыдущим шагам.
+
+Сканы рендерятся из системного шрифта с кириллицей. Если такого шрифта нет,
+генерация откажет и назовёт причину — тогда установите, например,
+`fonts-dejavu-core` (Debian/Ubuntu) и повторите. Шрифт — это шрифт, а не движок
+распознавания.
 
 Из этих шести файлов побайтово воспроизводим между запусками только
 `text.pdf`: он собран байт за байтом и не содержит даты. `doc.docx` и
 `untitled.docx` штампуют время модификации в ZIP, а сканы получают дату создания
-от PDF-писателя, поэтому их sha256 у каждого запуска свой. Это нормально — ни
+от PDF-писателя, поэтому их sha256 у каждого прогона свой. Это нормально — ни
 один шаг ниже не сверяется с дайджестом из документации, все сверки идут с
 дайджестом **вашей собственной** загрузки, который печатается рядом.
 
-Сканы рендерятся из системного шрифта с кириллицей. Если такого шрифта нет,
-генерация откажет и назовёт причину — тогда установите, например,
-`fonts-dejavu-core` (Debian/Ubuntu) и повторите.
 
 ### Доказать, что сканы действительно без текстового слоя
 
@@ -404,10 +720,10 @@ PYTHONPATH="$REPO" "$PY" "$ACC/bin/make_controls.py" "$ACC/in" --scans
 текста, а не отказ и не распознавание.
 
 ```bash
-PYTHONPATH="$REPO" "$PY" "$ACC/bin/embedded_text.py" "$ACC/in/scan_en.pdf"
-PYTHONPATH="$REPO" "$PY" "$ACC/bin/embedded_text.py" "$ACC/in/scan_ru.pdf"
-PYTHONPATH="$REPO" "$PY" "$ACC/bin/embedded_text.py" "$ACC/in/mixed.pdf"
-PYTHONPATH="$REPO" "$PY" "$ACC/bin/embedded_text.py" "$ACC/in/text.pdf"
+"$PY" "$ACC/bin/embedded_text.py" "$ACC/in/scan_en.pdf"
+"$PY" "$ACC/bin/embedded_text.py" "$ACC/in/scan_ru.pdf"
+"$PY" "$ACC/bin/embedded_text.py" "$ACC/in/mixed.pdf"
+"$PY" "$ACC/bin/embedded_text.py" "$ACC/in/text.pdf"
 ```
 
 Ожидается:
@@ -425,17 +741,20 @@ PYTHONPATH="$REPO" "$PY" "$ACC/bin/embedded_text.py" "$ACC/in/text.pdf"
 
 ---
 
-## Шаг 4. Запустить сервер приёмки (обычный режим)
+## Шаг 5. Запустить сервер приёмки (обычный режим)
 
 **Откройте второй терминал** и держите сервер в нём на переднем плане. Так его
 останавливают одним `Ctrl+C` — не нужен ни `pkill`, ни поиск PID, и невозможно
 случайно убить чужой процесс.
 
-Второй терминал:
+Второй терминал. Первая строка — **та самая, которую напечатал шаг 1**: она
+содержит путь этого прогона с меткой времени, и подставлять его по памяти нельзя,
+иначе сервер поднимется над другим каталогом данных.
 
 ```bash
-source "$HOME/unimem-acceptance/env.sh"
+source "<путь, напечатанный на шаге 1>/env.sh"
 cd "$REPO"
+echo "каталог данных этого прогона: $ACC/data"     # сверьте с первым терминалом
 "$PY" -m unimem_api --data-dir "$ACC/data" --port 8791
 ```
 
@@ -452,7 +771,7 @@ curl -sS "$API/health"          # ожидается {"status":"ok"}
 
 ## DOC-A. Обычный PDF, обычный режим
 
-**Нужно:** сервер из шага 4 (без `--pdf-ocr`), файл `$ACC/in/text.pdf`.
+**Нужно:** сервер из шага 5 (без `--pdf-ocr`), файл `$ACC/in/text.pdf`.
 
 Шаг первый — положить байты:
 
@@ -507,17 +826,24 @@ curl -sS "$API/v1/captures/doc_a_pdf/content" \
 Сверить оригинал — дайджест и байты, через тот же raw-store, куда писал сервер:
 
 ```bash
-PYTHONPATH="$REPO" "$PY" "$ACC/bin/original.py" \
+"$PY" "$ACC/bin/original.py" \
   "$ACC/data" "$ACC/out/a_content.json" "$ACC/in/text.pdf"
 ```
 
-**Ожидается:** `exists in store: True`, все четыре sha256 совпадают,
+**Ожидается:** `exists in store: True` и одно и то же значение в четырёх строках —
+`digest from ref`, `raw handle id`, `sha256 of file`, `sha256 stored` — плюс
 `BYTES IDENTICAL: True`.
+
+Отдельно обратите внимание на `record id`: это id **записи об ассете** (UUID), и
+он совершенно законно отличается от дайджеста. Идентичность сохранённых байтов
+несёт `ref`, а не id записи, — поэтому `original.py` берёт дайджест из `ref` и
+требует, чтобы записанный `sha256` с ним совпадал. Расхождение — это
+`MISMATCH` и отказ, а не повод что-то подправить.
 
 **Провал, если:** capture не `201`; `status` не `complete`; сегментов не 2;
 номера страниц не `1, 3`; `position` не `0, 1`; `source_type` не `original`;
 текст отличается хотя бы одним символом (включая перевод строки на конце);
-`BYTES IDENTICAL: False`.
+`BYTES IDENTICAL: False`; `original.py` сообщил `MISMATCH`.
 
 **Что прислать:** вывод `show.py record`, `show.py content` и `original.py`.
 
@@ -591,7 +917,7 @@ curl -sS "$API/v1/captures/doc_b_titled/content" -o "$ACC/out/b3_content.json"
 Оригинал:
 
 ```bash
-PYTHONPATH="$REPO" "$PY" "$ACC/bin/original.py" \
+"$PY" "$ACC/bin/original.py" \
   "$ACC/data" "$ACC/out/b_content.json" "$ACC/in/doc.docx"
 ```
 
@@ -614,7 +940,7 @@ B2 и B3, вывод `original.py`.
 ## DOC-C. Скан при выключенном OCR
 
 **Нужно:** тот же сервер **без** `--pdf-ocr`; `$ACC/in/scan_en.pdf`, у которого
-на шаге 3 уже независимо доказано отсутствие текстового слоя.
+на шаге 4 уже независимо доказано отсутствие текстового слоя.
 
 Это **ожидаемый отказ**, а не дефект продукта. Смысл в том, что пустой
 `complete` был бы ложью: он утверждал бы, что документ запомнен, когда он не
@@ -659,7 +985,7 @@ Staged-оригинал остаётся на месте — это то, что
 байты позже:
 
 ```bash
-PYTHONPATH="$REPO" "$PY" "$ACC/bin/original.py" \
+"$PY" "$ACC/bin/original.py" \
   "$ACC/data" "$ACC/out/c_record.json" "$ACC/in/scan_en.pdf"
 ```
 
@@ -675,31 +1001,35 @@ PYTHONPATH="$REPO" "$PY" "$ACC/bin/original.py" \
 
 ---
 
-## Шаг 5. Предпосылки OCR и запуск с `--pdf-ocr`
+## Шаг 6. Системный движок распознавания и запуск с `--pdf-ocr`
 
-Три **разные** вещи, и их нужно различать:
+Здесь добавляется последняя из трёх разных вещей, и только она:
 
-1. **Обычная установка проекта** — уже сделана на шаге 0. OCR ей не нужен.
-2. **Необязательный Python-набор `[ocr]`** — добавляет `pypdfium2` и `Pillow`:
+| | Что это | Где |
+| --- | --- | --- |
+| 1 | обычная установка проекта | шаг 0 |
+| 2 | необязательный Python-набор `[ocr]` — Pillow и pypdfium2 | шаг 3 |
+| 3 | **системный Tesseract и языковые данные `eng` и `rus`** | **этот шаг** |
 
-   ```bash
-   uv pip install --python .venv/bin/python -e ".[dev,ocr]"
-   ```
+Шаги 0–5 движок не требуют и ничего о нём не утверждают. Если вы дошли сюда, у
+вас уже есть контроли-сканы и подтверждённое отсутствие в них текстового слоя —
+это работа Pillow с шага 3, а не распознавания.
 
-3. **Системный Tesseract и языковые данные `eng` *и* `rus`** — это не
-   Python-пакеты, и проект их не устанавливает. Имена пакетов зависят от вашей
-   системы (вы смотрели `/etc/os-release` на шаге 0). README, раздел *Scanned
-   PDFs: opt-in local OCR*, приводит команды для Debian/Ubuntu, macOS и Fedora.
+Tesseract и его языковые файлы — **не** Python-пакеты, и проект их не
+устанавливает, не скачивает и не вендорит. Имена пакетов зависят от вашей системы
+(вы смотрели `/etc/os-release` на шаге 0). README, раздел *Scanned PDFs: opt-in
+local OCR*, приводит команды для Debian/Ubuntu, macOS и Fedora.
 
 > **Этот чек-лист не устанавливает системные пакеты за вас.** Установите их
 > сами, обычным менеджером пакетов вашей системы, и только потом продолжайте.
+> Если вы не хотите их ставить — остановитесь здесь: DOC-D и DOC-E останутся
+> `NOT_RUN`, а DOC-F выполняется в части без OCR.
 
-Проверить предпосылки до запуска сервера:
+Проверить движок до запуска сервера:
 
 ```bash
 command -v tesseract && tesseract --version | head -1
 tesseract --list-langs                 # в списке должны быть И eng, И rus
-"$PY" -c "import pypdfium2, PIL.Image; print('pypdfium2 и Pillow импортируются')"
 ```
 
 Нужны **оба** языка. Распознавание идёт одним проходом `eng+rus`, и сборка,
@@ -730,7 +1060,7 @@ curl -sS "$API/health"          # ожидается {"status":"ok"}
 
 ## DOC-D. Тот же скан при включённом OCR
 
-**Нужно:** сервер с `--pdf-ocr` из шага 5 на **том же** `$ACC/data`.
+**Нужно:** сервер с `--pdf-ocr` из шага 6 на **том же** `$ACC/data`.
 
 Тот же `file_ref`, что и в DOC-C, но **новый** capture id. Повторно положить
 файл не нужно — байты уже в raw-store:
@@ -825,7 +1155,7 @@ curl -sS "$API/v1/captures/doc_c_scan_default/content" -o /dev/null -w 'content 
 
 ## DOC-E. Смешанный PDF
 
-**Нужно:** сервер с `--pdf-ocr`, файл `$ACC/in/mixed.pdf`. По шагу 3 у него
+**Нужно:** сервер с `--pdf-ocr`, файл `$ACC/in/mixed.pdf`. По шагу 4 у него
 встроенный текст **только** на странице 1; страница 2 — скан; страница 3 —
 контрольная пустая.
 
@@ -899,26 +1229,49 @@ curl -sS "$API/v1/captures/doc_e_mixed/content" -o "$ACC/out/e_content.json"
 
 Проверяется долговечность, а не повторная работа. Собрать другой объект
 приложения внутри Python **не считается** перезапуском: нужен именно
-останов и старт процесса.
+останов и старт процесса. И тот же `--data-dir` — перезапуск на другом каталоге
+проверял бы пустую базу.
 
-Сначала запишите, что должно сохраниться:
+### Ф1. Снять состояние до перезапуска
+
+Снимаются **оба** ответа для каждого сценария — и `CaptureRecord`, и
+`ContentObject` — вместе с HTTP-кодом каждого. Код сохраняется отдельным файлом,
+потому что тело `404` само по себе ничего не доказывает:
 
 ```bash
-for id in doc_a_pdf doc_b_docx doc_c_scan_default doc_d_scan_ocr doc_e_mixed; do
-  curl -sS "$API/v1/captures/$id"         -o "$ACC/out/before_${id}_record.json"
-  curl -sS "$API/v1/captures/$id/content" -o "$ACC/out/before_${id}_content.json" \
-    -w "$id content HTTP %{http_code}\n"
-done
+snap() {
+  local phase=$1
+  for id in doc_a_pdf doc_b_docx doc_c_scan_default doc_d_scan_ocr doc_e_mixed; do
+    for kind in record content; do
+      case $kind in
+        record)  url="$API/v1/captures/$id" ;;
+        content) url="$API/v1/captures/$id/content" ;;
+      esac
+      curl -sS "$url" -o "$ACC/out/${phase}_${id}_${kind}.json" \
+        -w '%{http_code}' > "$ACC/out/${phase}_${id}_${kind}.status"
+    done
+    printf '%-20s record %s  content %s\n' "$id" \
+      "$(cat "$ACC/out/${phase}_${id}_record.status")" \
+      "$(cat "$ACC/out/${phase}_${id}_content.status")"
+  done
+}
+
+snap before
 ```
 
-Теперь **остановите сервер**: `Ctrl+C` во втором терминале. Убедитесь, что он
-действительно остановлен:
+Сценарии, которые вы не выполняли, дадут здесь `404` — так и должно быть, и
+проверка ниже превратит это в `BLOCKED`, а не в успех.
+
+### Ф2. Остановить и запустить процесс заново
+
+Остановите сервер: `Ctrl+C` во втором терминале. Убедитесь, что он действительно
+остановлен:
 
 ```bash
 curl -sS --max-time 3 "$API/health" || echo "сервер остановлен, как и ожидалось"
 ```
 
-Запустите заново в том же втором терминале, **на том же каталоге данных** и
+Запустите заново в том же втором терминале, на **том же** каталоге данных и
 **в обычном режиме, без `--pdf-ocr`**:
 
 ```bash
@@ -929,57 +1282,64 @@ curl -sS --max-time 3 "$API/health" || echo "сервер остановлен, 
 повторного запуска OCR-движка.** Объект, полученный распознаванием в DOC-D и
 DOC-E, обязан читаться сервером без флага.
 
-Прочитайте всё обратно и сравните:
+### Ф3. Снять состояние после и проверить
 
 ```bash
-for id in doc_a_pdf doc_b_docx doc_c_scan_default doc_d_scan_ocr doc_e_mixed; do
-  curl -sS "$API/v1/captures/$id"         -o "$ACC/out/after_${id}_record.json" \
-    -w "$id record HTTP %{http_code}  "
-  curl -sS "$API/v1/captures/$id/content" -o "$ACC/out/after_${id}_content.json" \
-    -w "content HTTP %{http_code}\n"
-done
-
-for id in doc_a_pdf doc_b_docx doc_d_scan_ocr doc_e_mixed; do
-  if ! grep -q '"segments"' "$ACC/out/before_${id}_content.json"; then
-    echo "$id: НЕЧЕГО СРАВНИВАТЬ -- до перезапуска содержимого не было"
-  elif ! grep -q '"segments"' "$ACC/out/after_${id}_content.json"; then
-    echo "$id: СОДЕРЖИМОЕ ПРОПАЛО после перезапуска"
-  elif cmp -s "$ACC/out/before_${id}_content.json" "$ACC/out/after_${id}_content.json"; then
-    echo "$id: содержимое побайтово совпадает"
-  else
-    echo "$id: СОДЕРЖИМОЕ ОТЛИЧАЕТСЯ"
-  fi
-done
-
-"$PY" "$ACC/bin/show.py" content "$ACC/out/after_doc_e_mixed_content.json"
-PYTHONPATH="$REPO" "$PY" "$ACC/bin/original.py" \
-  "$ACC/data" "$ACC/out/after_doc_a_pdf_content.json" "$ACC/in/text.pdf"
+snap after
 ```
 
-**Ожидается:**
+Теперь проверка. Она разбирает JSON, сверяет коды, идентификаторы, статусы и
+связь content↔capture, и только потом сравнивает снимки:
 
-- `doc_a_pdf`, `doc_b_docx`, `doc_d_scan_ocr`, `doc_e_mixed` — record `200`
-  `complete`, content `200`, и ответ **побайтово тот же**, что до перезапуска:
-  те же `content id`, тот же текст, те же `provenance`, те же `page`, та же
-  `metadata` (включая `metadata.pdf_ocr`).
-- `doc_c_scan_default` — по-прежнему `failed`, content по-прежнему `404`.
-- `original.py` — `BYTES IDENTICAL: True`, дайджест тот же.
+```bash
+"$PY" "$ACC/bin/restart_check.py" "$ACC/data" "$ACC/out" \
+  complete:doc_a_pdf:"$ACC/in/text.pdf" \
+  complete:doc_b_docx:"$ACC/in/doc.docx" \
+  failed:doc_c_scan_default:"$ACC/in/scan_en.pdf" \
+  complete:doc_d_scan_ocr:"$ACC/in/scan_en.pdf" \
+  complete:doc_e_mixed:"$ACC/in/mixed.pdf"
+echo "код возврата: $?"
+```
 
-> Проверка `cmp` осмысленна только там, где содержимое было и до, и после: два
-> одинаковых ответа `404` тоже «совпадают побайтово». Поэтому цикл выше сначала
-> убеждается, что в снимке вообще есть `segments`, и говорит
-> `НЕЧЕГО СРАВНИВАТЬ`, если сценарий не выполнялся. Строку
-> `НЕЧЕГО СРАВНИВАТЬ` нельзя считать успехом.
+Что проверяется для каждого завершённого сценария (`complete:`):
 
-**Провал, если:** какой-либо `complete` стал другим статусом; идентификаторы
-поменялись; `metadata.pdf_ocr` исчезла или изменилась; чтение
-OCR-содержимого потребовало `--pdf-ocr`; дайджест оригинала отличается.
+| | Проверка |
+| --- | --- |
+| 1 | до перезапуска `GET record` был `200` и это разобранный `CaptureRecord` со статусом `complete` — иначе `BLOCKED` |
+| 2 | после перезапуска `GET record` снова `200`, `id` тот, что ожидался, статус снова `complete` |
+| 3 | снимок `CaptureRecord` не изменился ни в одном поле |
+| 4 | до и после `GET content` вернул `200` с `segments` |
+| 5 | `content.source.capture_id` — это тот же capture, и `content id` не изменился |
+| 6 | снимок `ContentObject` не изменился ни в одном поле |
+| 7 | оригинал побайтово тот же: ссылка из asset'а `role=original`, чтение через raw-store, сверка с отправленным файлом |
 
-**Что прислать:** строки HTTP-кодов, четыре строки сравнения `cmp`, вывод
-`show.py content` для `doc_e_mixed` после перезапуска и последние две строки
-`original.py`.
+Для намеренно упавшего DOC-C (`failed:`) — отдельно и иначе:
 
----
+| | Проверка |
+| --- | --- |
+| 1 | до и после перезапуска `GET record` = `200`, статус `failed`, снимок записи не изменился |
+| 2 | `GET content` вернул именно `404` **и** `error.code = not_found` — это проверка кода и кода ошибки, а **не** сравнение двух тел ошибок друг с другом |
+| 3 | staged-оригинал по-прежнему читается из raw-store через `raw_object` записи и побайтово совпадает с отправленным файлом |
+
+Три вердикта, и ни один из них не пишется в вашу таблицу автоматически:
+
+- **PASS** — всё перечисленное выполнено.
+- **FAIL** — что-то изменилось: пропал capture, сменился статус, разошёлся снимок,
+  отличаются байты оригинала. Код возврата `1`.
+- **BLOCKED** — проверять нечего: нет годного снимка до перезапуска, или сценарий
+  не выполнялся (например, DOC-D и DOC-E без движка). Код возврата `1`.
+  **`BLOCKED` — это не успех**, и в таблице такой сценарий остаётся `NOT_RUN`.
+
+Ожидается, что при выполненных DOC-A, DOC-B и DOC-C первые три строки дадут
+`PASS`. Если DOC-D и DOC-E не выполнялись, они дадут `BLOCKED`, и общий итог тоже
+будет `BLOCKED` — это правильный результат, а не провал продукта.
+
+**Провал, если:** любой сценарий дал `FAIL`; выполненный ранее сценарий
+неожиданно дал `BLOCKED`; чтение OCR-содержимого потребовало `--pdf-ocr`.
+
+**Что прислать:** вывод `snap before`, `snap after`, полный вывод
+`restart_check.py` и его код возврата.
+
 
 ## DOC-G. Идентичность и безопасные отказы
 
@@ -1088,9 +1448,14 @@ curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   -o "$ACC/out/own_capture.json" -w 'capture HTTP %{http_code}\n'
 curl -sS "$API/v1/captures/$MY_ID"         -o "$ACC/out/own_record.json"
 curl -sS "$API/v1/captures/$MY_ID/content" -o "$ACC/out/own_content.json"
-"$PY" "$ACC/bin/show.py" record "$ACC/out/own_record.json"
+```
+
+**Смотрите локально** (эти команды печатают содержимое вашего документа):
+
+```bash
+"$PY" "$ACC/bin/show.py" record  "$ACC/out/own_record.json"
 "$PY" "$ACC/bin/show.py" content "$ACC/out/own_content.json"
-PYTHONPATH="$REPO" "$PY" "$ACC/bin/original.py" "$ACC/data" "$ACC/out/own_content.json" "$MY"
+"$PY" "$ACC/bin/original.py" "$ACC/data" "$ACC/out/own_content.json" "$MY"
 ```
 
 На что смотреть в своём документе:
@@ -1100,16 +1465,42 @@ PYTHONPATH="$REPO" "$PY" "$ACC/bin/original.py" "$ACC/data" "$ACC/out/own_conten
 - `BYTES IDENTICAL: True` — оригинал не переписан;
 - скан отказан в обычном режиме, а не сохранён пустым `complete`.
 
-Полезно сначала посмотреть, есть ли у вашего PDF текстовый слой вообще:
+Полезно сначала посмотреть, есть ли у вашего PDF текстовый слой вообще (эта
+команда тоже печатает текст — тоже только локально):
 
 ```bash
-PYTHONPATH="$REPO" "$PY" "$ACC/bin/embedded_text.py" "$MY"
+"$PY" "$ACC/bin/embedded_text.py" "$MY"
 ```
 
-> **Никуда наружу ваш документ не уходит.** Всё выполняется на вашей машине,
-> против локального сервера. Не прикладывайте сам документ к отчёту о приёмке —
-> достаточно вывода `show.py` и `original.py`, и при необходимости обезличенной
-> выдержки текста.
+### Что именно отправлять по своим документам
+
+Ваш документ никуда наружу не уходит: всё выполняется на вашей машине против
+локального сервера, и ни один шаг не обращается к внешнему сервису. Но
+**отправка вывода — это отдельный вопрос**, и здесь легко ошибиться:
+
+> `show.py content` печатает **весь извлечённый текст целиком**. Для вашего
+> документа это и есть его содержимое. Такой вывод — не «обезличенный протокол»
+> и пересылать его нельзя.
+
+Для отправки есть режим, который текста не печатает вовсе — только технические
+поля, типы сегментов, provenance, номера страниц, дайджесты и длины текста:
+
+```bash
+"$PY" "$ACC/bin/show.py" content-fields "$ACC/out/own_content.json"
+```
+
+Отправляйте:
+
+- вывод `show.py record` и `show.py content-fields`;
+- строку `BYTES IDENTICAL` из `original.py` (при желании — без дайджеста, если
+  дайджест документа сам по себе для вас чувствителен);
+- HTTP-коды;
+- и, **только если это нужно для объяснения дефекта**, короткую выдержку текста,
+  которую вы отредактировали вручную и осознанно.
+
+Не отправляйте: сам документ, полный вывод `show.py content`, вывод
+`embedded_text.py`. Если дефект нельзя показать без содержимого — скажите об этом
+словами, и решение о том, что раскрывать, останется за вами.
 
 ---
 
@@ -1120,7 +1511,7 @@ PYTHONPATH="$REPO" "$PY" "$ACC/bin/embedded_text.py" "$MY"
 
 | Сценарий | Статус владельца | Доказательство | Заметки |
 | --- | --- | --- | --- |
-| Шаг 3 — контроли без текстового слоя | NOT_RUN | | |
+| Шаг 4 — контроли без текстового слоя | NOT_RUN | | |
 | DOC-A — обычный PDF, обычный режим | NOT_RUN | | |
 | DOC-B — DOCX, обычный режим | NOT_RUN | | |
 | DOC-C — скан при выключенном OCR | NOT_RUN | | |
@@ -1139,58 +1530,70 @@ Macro Phase 3 остаётся **открытой**, пока эта табли�
 ## Что уже проверено, а что нет
 
 Проверялось в облачной сессии на коммите `00bcb67` (`main`, включает PR #17 и
-PR #18) в контейнере Ubuntu 24.04, Python 3.13.12, установка
-`-e ".[dev,ocr]"`. Ниже — то, что **действительно выполнялось**, а не то, что
-ожидается.
+PR #18) в контейнере Ubuntu 24.04, Python 3.13.12, установка `-e ".[dev,ocr]"`.
+Ниже строго разделены **выполнение** (команда была запущена, результат наблюдался)
+и **осмотр** (код и тесты прочитаны, команда не запускалась).
 
-**Выполнено по-настоящему, через реальный HTTP к реальному процессу сервера:**
+### Выполнено — реальный HTTP к реальному процессу сервера
 
-- генерация контролей (`text.pdf`, `doc.docx`, `untitled.docx`, `scan_en.pdf`,
-  `scan_ru.pdf`, `mixed.pdf`) и доказательство отсутствия текстового слоя у
-  обоих сканов через продуктовый `extract_pages`;
-- DOC-A целиком, включая сверку оригинала через raw-store;
-- DOC-B целиком, включая оба подшага приоритета заголовка;
-- DOC-C целиком, включая сохранность staged-оригинала упавшего capture;
-- DOC-F в части без OCR: настоящий останов и старт процесса на том же каталоге
-  данных, побайтово совпавшее обратное чтение;
-- DOC-G целиком (G1–G4);
+- создание свежего изолированного каталога прогона и отказ повторного `mkdir`;
+- генерация контролей и её неперезаписывающее поведение: повторный запуск с
+  `--scans` дописал три скана и оставил `text.pdf`, `doc.docx`, `untitled.docx`
+  нетронутыми;
+- доказательство отсутствия текстового слоя у `scan_en.pdf` и `scan_ru.pdf` и
+  наличия текста только на странице 1 у `mixed.pdf` — через продуктовый
+  `extract_pages`;
+- **DOC-A** целиком, включая сверку оригинала через raw-store;
+- **DOC-B** целиком, включая оба подшага приоритета заголовка;
+- **DOC-C** целиком, включая сохранность staged-оригинала упавшего capture;
+- **DOC-F** в части без OCR: снимки до, реальный останов и старт процесса на том
+  же каталоге данных, снимки после, и `restart_check.py` — `PASS` по DOC-A, DOC-B
+  и DOC-C, `BLOCKED` по невыполненным DOC-D и DOC-E;
+- **DOC-G** целиком (G1–G4);
+- режим `show.py content-fields` — текст не печатается;
+- `original.py` на обоих поддерживаемых входах, включая `ContentObject`, у
+  которого `asset.id` (UUID) отличается от дайджеста, и отказ при расхождении
+  `ref` и `sha256`;
+- четыре негативные пробы `restart_check.py` (изменившийся статус при неизменном
+  содержимом; пропавший capture; два одинаковых тела `404`; неизменные снимки как
+  положительный контроль);
 - отказ запуска с `--pdf-ocr` без Tesseract: код возврата 1, предложение,
   называющее нехватку, порт не открыт.
 
-**Не проверено, потому что в контейнере нет системного Tesseract** (установка
-системных пакетов там недоступна, и этот чек-лист её и не предполагает):
+### Не выполнено — только осмотр реализации
 
-- **DOC-D** полностью — распознавание английского и русского контролей;
-- **DOC-E** в части распознавания. Встроенный текст `mixed.pdf` (страница 1) и
-  отсутствие текста на страницах 2–3 проверены; сами OCR-сегменты и блок
-  `metadata.pdf_ocr` — нет;
+**В этом окружении нет системного Tesseract, и установка системных пакетов в нём
+недоступна.** Поэтому целиком **не выполнялись**:
+
+- **DOC-D** — ни одна команда сценария не запускалась;
+- **DOC-E** — ни одна команда сценария не запускалась;
 - **DOC-F** в части обратного чтения OCR-содержимого.
 
-Ожидания для этих шагов взяты из реализации (`src/core/processing/pdf_ocr.py`,
-`src/unimem_api/wiring.py`) и из существующих тестов
-(`tests/integration/ocr/test_real_pdf_ocr_http.py`), а не из наблюдения.
-Мокированный движок здесь за доказательство не выдаётся.
+Ожидаемые результаты этих трёх пунктов получены **осмотром**
+`src/core/processing/pdf_ocr.py`, `src/unimem_api/wiring.py` и
+`tests/integration/ocr/test_real_pdf_ocr_http.py`. Это чтение кода, а не
+наблюдение работы.
 
-Команды DOC-D и DOC-E по форме совпадают с DOC-C и DOC-A, которые выполнялись
-по-настоящему, поэтому непроверенной остаётся именно работа движка, а не
-синтаксис шагов.
+То, что похожие по форме команды DOC-A и DOC-C выполнялись успешно, **не
+является** свидетельством в пользу DOC-D и DOC-E: последовательность этих
+сценариев не запускалась ни разу, и ничто здесь не подтверждает ни их вывод, ни
+их синтаксис. Мокированный движок за доказательство тоже не выдаётся.
 
-Команды не переписывались «по мотивам»: блоки `bash` были извлечены **из этого
-файла** и выполнены дословно — создание четырёх вспомогательных скриптов,
-генерация контролей, доказательство отсутствия текстового слоя, DOC-A, DOC-B
-(включая B2 и B3), DOC-C, проверка предпосылок OCR, отказ запуска с `--pdf-ocr`,
-останов/старт и обратное чтение DOC-F, DOC-G G1–G4.
+### Прочее
 
-Дополнительно на этом коммите выполнялось: `ruff check` и `ruff format --check`
-(чисто, 199 файлов), `mypy` в strict (`no issues found in 168 source files`);
-`pytest` по
+Блоки `bash` для выполненных шагов извлекались **из этого файла** и запускались
+дословно, а не переписывались по мотивам.
+
+На этом коммите дополнительно запускались обычные проверки репозитория:
+`ruff check` и `ruff format --check` (чисто), `mypy` в strict
+(`no issues found in 168 source files`), и суиты
 `tests/integration/api/test_pdf_document_capture.py`,
-`test_docx_document_capture.py`, `test_pdf_ocr_document_capture.py` —
-**186 passed**; `pytest tests/integration/ocr -rs` — **25 passed, 2 skipped**,
-и обе пропущенные помечены как «tesseract не установлен». Это результат
-**этого** прогона, а не перенесённые исторические числа.
+`test_docx_document_capture.py`, `test_pdf_ocr_document_capture.py`
+(186 passed), `tests/integration/ocr -rs` (25 passed, 2 skipped — обе по причине
+«tesseract не установлен»). **Это проверки репозитория, а не шаги этого
+чек-листа**: они ничего не говорят о том, что описанные здесь команды у вас
+пройдут, и не заменяют ни одного сценария DOC-A…DOC-G.
 
----
 
 ## Известные ограничения
 
@@ -1225,8 +1628,13 @@ PR #18) в контейнере Ubuntu 24.04, Python 3.13.12, установка
 
 - Остановите сервер приёмки `Ctrl+C` во втором терминале. Никаких широких
   `pkill`.
-- `$ACC` можно оставить как есть: там лежат и доказательства, и входные файлы.
-- Если вы всё же убираете за собой, удаляйте **только** свой каталог приёмки
-  (`$ACC`) и никогда не `./data`, `unimem.sqlite3` или `raw/` обычной установки.
+- Каталог прогона (`$ACC`) лучше оставить как есть: там лежат и доказательства, и
+  входные файлы, и база этого прогона. Новый полный прогон берёт новый каталог и
+  этому не мешает.
+- Если вы всё же убираете за собой, удаляйте **только** каталог конкретного
+  прогона (`$RUNS/run-…`) и никогда не `./data`, `unimem.sqlite3` или `raw/`
+  обычной установки.
+- Ничего сбрасывать в базе не нужно ни для повторного прогона, ни для
+  перезапуска сервера.
 - Контроли, базы и вывод приёмки в репозиторий не коммитятся: они живут в
   `$ACC`, вне checkout.
