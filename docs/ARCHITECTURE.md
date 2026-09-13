@@ -1800,7 +1800,12 @@ and no request-derived string becomes an argument or a path. Every call into
 PDFium — creation and destruction included — is inside one process-wide lock, and
 that lock is never held while the subprocess runs. Named limits bound the work: 50
 pages, 20,000,000 raster pixels per page, 30 s per page, 120 s of recognition per
-document, on a monotonic clock. **They are limits, not a sandbox**: they do not
+document, on a monotonic clock — re-read before each page and again the instant the
+native lock is held, before any page is opened, so a long wait for another
+capture's render cannot spend a budget that is then never checked. Startup proves
+**both** optional packages import, Pillow explicitly, because `pypdfium2` loads it
+lazily and importing the adapter alone does not prove it is installed. **They are
+limits, not a sandbox**: they do not
 bound this process's memory or CPU, they cannot preempt an in-process native
 render, and the HTTP request itself has no deadline.
 

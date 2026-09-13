@@ -27,9 +27,9 @@ from unimem_ocr.policy import RECOGNITION_LANGUAGES, TESSERACT_EXECUTABLE
 #: broken executable cannot hang startup forever.
 PROBE_TIMEOUT_SECONDS: Final = 30.0
 
-#: The optional packages :mod:`unimem_ocr.tesseract` imports, named here for the
-#: message a missing one produces. Kept in sync by the import that follows it:
-#: this tuple is documentation, and the actual check is the real import.
+#: The optional packages local recognition needs, named here for the message a
+#: missing one produces. Both are genuinely checked by :func:`require_rasterizer`;
+#: this tuple is the human-readable half and the imports there are the real test.
 OPTIONAL_PACKAGES: Final = ("pypdfium2", "Pillow")
 
 #: The extra that installs them.
@@ -112,13 +112,35 @@ def available_languages(executable: str = TESSERACT_EXECUTABLE) -> frozenset[str
 
 
 def require_rasterizer() -> None:
-    """Insist the optional rasterization packages are importable, or explain.
+    """Insist **both** optional rasterization packages are importable, or explain.
 
-    The check *is* the real import — the same one
-    :mod:`unimem_ocr.tesseract` performs — rather than a spec lookup that could
-    succeed for a package that then fails to load its native library.
+    The check *is* the real import rather than a spec lookup, because a spec can
+    resolve for a package that then fails to load its native library.
+
+    Two imports, and neither is redundant. Importing
+    :mod:`unimem_ocr.tesseract` proves PDFium is loadable, but it does **not**
+    prove Pillow is: the adapter names no PIL symbol, and ``pypdfium2`` defers
+    loading Pillow until :meth:`PdfBitmap.to_pil` is actually called. So a machine
+    with ``pypdfium2`` installed and ``Pillow`` missing passed this gate and then
+    failed on the first scanned page — a server that starts and then cannot do the
+    one thing it was started for, which is exactly what this function exists to
+    prevent. ``import PIL.Image`` is therefore performed explicitly, naming the
+    submodule the adapter's encode path really needs.
+
+    Both imports happen **here**, inside the OCR-only prerequisite path, and
+    nowhere in ordinary ``core`` or ``unimem_api`` startup: this function is
+    reached only from :func:`unimem_ocr.build_tesseract_ocr`, which is reached only
+    from ``--pdf-ocr``. A default deployment never executes either line.
+
+    Nothing is installed and there is no fallback. A missing package becomes an
+    :class:`~unimem_ocr.errors.OcrPrerequisiteError` naming what is absent and the
+    extra that provides it, with the original ``ImportError`` kept as the cause.
     """
     try:
+        # Pillow first only because the import sorter says so; neither import is
+        # conditional on the other and either failing is the same refusal.
+        import PIL.Image  # noqa: F401 - pypdfium2 loads Pillow lazily, so prove it here
+
         import unimem_ocr.tesseract  # noqa: F401 - imported for its side effect
     except ImportError as exc:
         missing = getattr(exc, "name", None) or "a required package"

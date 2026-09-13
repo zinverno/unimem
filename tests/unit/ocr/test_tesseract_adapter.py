@@ -142,6 +142,96 @@ class RenderSpy:
         monkeypatch.setattr(pdfium.PdfBitmap, "close", close)
 
 
+class MutableClock:
+    """An injected monotonic clock a test can move by hand, recording every read."""
+
+    def __init__(self, now: float = 0.0) -> None:
+        self.now = now
+        self.reads: list[float] = []
+
+    def __call__(self) -> float:
+        self.reads.append(self.now)
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+class AdvancingLock:
+    """A real mutex that charges the clock for the time spent acquiring it.
+
+    This is how a lock *wait* is made deterministic. A real contended wait would
+    need a second thread holding PDFium and a sleep long enough to matter; this
+    double instead says "acquiring me cost this much wall clock", which is the only
+    property the budget check cares about. It is a genuine ``threading.Lock``
+    underneath, so mutual exclusion is unchanged while the test runs.
+    """
+
+    def __init__(self, clock: MutableClock, cost: float) -> None:
+        self._lock = threading.Lock()
+        self._clock = clock
+        self._cost = cost
+        self.acquisitions = 0
+
+    def __enter__(self) -> "AdvancingLock":
+        self._lock.acquire()
+        self.acquisitions += 1
+        self._clock.advance(self._cost)
+        return self
+
+    def __exit__(self, *exception: object) -> None:
+        self._lock.release()
+
+
+class NativeWorkSpy:
+    """Records every native step of a render, so a test can assert none happened."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.pages_opened = 0
+        self.renders = 0
+        self.conversions = 0
+        self.encodes = 0
+        self.documents_closed = 0
+        originals = {
+            "get_page": pdfium.PdfDocument.get_page,
+            "render": pdfium.PdfPage.render,
+            "to_pil": pdfium.PdfBitmap.to_pil,
+            "save": PILImage.Image.save,
+            "close": pdfium.PdfDocument.close,
+        }
+        spy = self
+
+        def get_page(document: Any, index: Any) -> Any:
+            spy.pages_opened += 1
+            return originals["get_page"](document, index)
+
+        def render(page: Any, *args: Any, **kwargs: Any) -> Any:
+            spy.renders += 1
+            return originals["render"](page, *args, **kwargs)
+
+        def to_pil(bitmap: Any) -> Any:
+            spy.conversions += 1
+            return originals["to_pil"](bitmap)
+
+        def save(image: Any, *args: Any, **kwargs: Any) -> Any:
+            spy.encodes += 1
+            return originals["save"](image, *args, **kwargs)
+
+        def close(document: Any) -> None:
+            spy.documents_closed += 1
+            originals["close"](document)
+
+        monkeypatch.setattr(pdfium.PdfDocument, "get_page", get_page)
+        monkeypatch.setattr(pdfium.PdfPage, "render", render)
+        monkeypatch.setattr(pdfium.PdfBitmap, "to_pil", to_pil)
+        monkeypatch.setattr(PILImage.Image, "save", save)
+        monkeypatch.setattr(pdfium.PdfDocument, "close", close)
+
+    @property
+    def touched_anything(self) -> bool:
+        return bool(self.pages_opened or self.renders or self.conversions or self.encodes)
+
+
 @pytest.fixture
 def render_spy(monkeypatch: pytest.MonkeyPatch) -> RenderSpy:
     return RenderSpy(monkeypatch)
@@ -514,7 +604,12 @@ class TestTheRecognitionBudget:
     def test_no_page_is_begun_after_the_budget_is_spent(
         self, engine: Path, render_spy: RenderSpy
     ) -> None:
-        ticks = iter([0.0, 0.0, 0.5, 99.0])
+        """Page one completes; page two is refused before it starts.
+
+        Ticks: deadline, then three reads for page one (pre-render, post-lock,
+        post-render), then page two's pre-render read, which is past the deadline.
+        """
+        ticks = iter([0.0, 0.0, 0.0, 1.0, 99.0])
         recognizer = TesseractPdfPageOcr(
             engine_version=ENGINE_VERSION,
             executable=str(engine),
@@ -522,7 +617,7 @@ class TestTheRecognitionBudget:
             monotonic=lambda: next(ticks),
         )
 
-        with pytest.raises(PdfOcrExecutionError, match="budget"):
+        with pytest.raises(PdfOcrExecutionError, match="before page 2 was begun"):
             recognizer.recognize_missing_pages(io.BytesIO(scan(3)), embedded_pages=frozenset())
 
         assert len(render_spy.calls) == 1
@@ -530,8 +625,14 @@ class TestTheRecognitionBudget:
     def test_a_budget_spent_while_a_page_was_being_rendered_stops_the_run(
         self, engine: Path, engine_dir: Path
     ) -> None:
-        """Rasterization itself takes time, and the budget is re-read after it."""
-        ticks = iter([0.0, 0.0, 100.0])
+        """Rasterization itself takes time, and the budget is re-read after it.
+
+        Four ticks, not three: the deadline, the caller's pre-render check, the
+        post-lock check inside ``_render``, and the post-render read that is the one
+        this test is about. Only the last is past the deadline, so the render really
+        does happen and the refusal really is on its far side.
+        """
+        ticks = iter([0.0, 0.0, 0.0, 100.0])
         recognizer = TesseractPdfPageOcr(
             engine_version=ENGINE_VERSION,
             executable=str(engine),
@@ -559,6 +660,111 @@ class TestTheRecognitionBudget:
             recognizer.recognize_missing_pages(io.BytesIO(scan()), embedded_pages=frozenset())
 
         assert not isinstance(raised.value, ProcessingError)
+
+
+class TestABudgetSpentWaitingForTheNativeLock:
+    """The gap between the caller's check and the work the lock protects.
+
+    ``recognize_missing_pages`` checks the budget, then calls ``_render``, which
+    blocks on the process-wide PDFium lock. Between those two moments this thread
+    can wait for an unbounded time while another capture finishes inside PDFium. A
+    budget that is only checked before the wait is not a budget, so it is rechecked
+    the instant the lock is held and before anything native is touched.
+
+    The wait is made deterministic by an :class:`AdvancingLock` that charges the
+    injected clock for each acquisition — no 120-second sleep, and no race against
+    an unguarded renderer.
+    """
+
+    #: Each lock acquisition costs a second: open, page count, then render.
+    COST: Final = 1.0
+
+    def recognizer(self, engine: Path, clock: MutableClock, budget: float) -> TesseractPdfPageOcr:
+        return TesseractPdfPageOcr(
+            engine_version=ENGINE_VERSION,
+            executable=str(engine),
+            limits=OcrLimits(document_budget_seconds=budget),
+            monotonic=clock,
+        )
+
+    def test_a_budget_spent_waiting_for_the_lock_stops_before_the_page_is_opened(
+        self, engine: Path, engine_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The regression. Budget remains at the attempt; the wait consumes it.
+
+        With a 2.5s budget and a 1s cost per acquisition: opening the document
+        reaches 1.0s and counting its pages 2.0s, so the caller's pre-render check
+        at 2.0s still has budget left — this is genuinely the lock-wait branch and
+        not the earlier one. Acquiring the lock for the render reaches 3.0s, and
+        nothing native may happen after that.
+        """
+        clock = MutableClock()
+        lock = AdvancingLock(clock, self.COST)
+        monkeypatch.setattr("unimem_ocr.tesseract._PDFIUM_LOCK", lock)
+        work = NativeWorkSpy(monkeypatch)
+
+        with pytest.raises(PdfOcrExecutionError, match="waiting for the rasterizer lock"):
+            self.recognizer(engine, clock, 2.5).recognize_missing_pages(
+                io.BytesIO(scan()), embedded_pages=frozenset()
+            )
+
+        # Budget genuinely remained when the render lock was attempted: the
+        # caller's pre-render read is the second one, and it is inside the deadline.
+        assert clock.reads[0] == 0.0
+        assert clock.reads[1] == 2.0
+        assert clock.reads[1] < 2.5
+        # ...and the read taken once the lock was held is past it.
+        assert clock.reads[2] == 3.0
+        assert clock.reads[2] >= 2.5
+        # Three acquisitions before the refusal: open, page count, render.
+        assert lock.acquisitions >= 3
+
+        assert work.pages_opened == 0
+        assert work.renders == 0
+        assert work.conversions == 0
+        assert work.encodes == 0
+        assert not fakes.was_invoked(engine_dir)
+
+    def test_that_refusal_cleans_up_the_document_and_stays_nonterminal(
+        self, engine: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The document is closed under the same lock, and the capture is not failed."""
+        clock = MutableClock()
+        lock = AdvancingLock(clock, self.COST)
+        monkeypatch.setattr("unimem_ocr.tesseract._PDFIUM_LOCK", lock)
+        work = NativeWorkSpy(monkeypatch)
+
+        with pytest.raises(PdfOcrExecutionError) as raised:
+            self.recognizer(engine, clock, 2.5).recognize_missing_pages(
+                io.BytesIO(scan()), embedded_pages=frozenset()
+            )
+
+        assert work.documents_closed == 1
+        assert not isinstance(raised.value, ProcessingError)
+
+    def test_a_control_with_budget_remaining_renders_normally(
+        self, engine: Path, engine_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same lock, the same clock, a budget that is not exhausted.
+
+        Without this the test above could pass for the wrong reason — an
+        ``AdvancingLock`` that broke rendering outright would look identical.
+        """
+        clock = MutableClock()
+        lock = AdvancingLock(clock, self.COST)
+        monkeypatch.setattr("unimem_ocr.tesseract._PDFIUM_LOCK", lock)
+        work = NativeWorkSpy(monkeypatch)
+
+        result = self.recognizer(engine, clock, 100.0).recognize_missing_pages(
+            io.BytesIO(scan()), embedded_pages=frozenset()
+        )
+
+        assert len(result.pages) == 1
+        assert work.pages_opened == 1
+        assert work.renders == 1
+        assert work.encodes == 1
+        assert work.documents_closed == 1
+        assert fakes.was_invoked(engine_dir)
 
 
 class TestATimingOutEngine:

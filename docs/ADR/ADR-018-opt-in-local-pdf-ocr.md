@@ -333,9 +333,18 @@ designed against, and a connector has not asked for one.
 
 `--pdf-ocr` validates, before any request is served:
 
-1. the optional Python packages import;
+1. **both** optional Python packages import;
 2. the Tesseract executable runs and reports a version;
 3. **both** `eng` and `rus` language data files are present.
+
+The first item says "both" for a reason branch review had to point out. Importing
+the adapter proves PDFium is loadable, but the adapter names no PIL symbol and
+`pypdfium2` defers loading Pillow until `PdfBitmap.to_pil()` is actually called —
+so a machine with `pypdfium2` installed and `Pillow` missing passed the gate and
+then failed on the first scanned page, which is the precise failure this section
+claims cannot happen. `import PIL.Image` is now performed explicitly alongside the
+adapter import, inside the OCR-only prerequisite path and nowhere in ordinary
+`core` or `unimem_api` startup.
 
 Any failure exits with a sentence naming what is missing and how to provide it.
 It does **not** silently disable OCR and start the refusing build, does **not**
@@ -457,7 +466,7 @@ Named defaults, in a small frozen dataclass:
 | physical pages per PDF        | 50         | before any rasterization                 |
 | raster pixels per page        | 20,000,000 | before bitmap allocation                 |
 | Tesseract timeout per page    | 30 s       | passed to the subprocess                 |
-| recognition budget per document | 120 s    | monotonic clock, re-read before each page |
+| recognition budget per document | 120 s    | monotonic clock, re-read before each page *and again once the native lock is held* |
 
 These are **initial product limits, not benchmark-derived optimal values**. A
 document over the page limit is refused **whole** rather than partly recognized:
@@ -470,6 +479,18 @@ page and the smaller of it and the per-page timeout is what the next invocation
 gets, so fifty pages cannot each take thirty seconds; a timed-out child is killed
 and reaped before the error leaves the adapter, and no further page is begun once
 the budget is spent.
+
+**The budget is checked twice per page, and the second check is the one branch
+review found missing.** The first is before the render is attempted. The second is
+the instant the process-wide PDFium lock is held and *before* the page is opened, a
+bitmap allocated, or a PNG encoded — because between those two moments a thread can
+block for an unbounded time waiting for another capture to finish inside PDFium. A
+budget checked only before that wait is not a budget: the original code rasterized
+the page anyway and refused on the far side of the work it had no budget for. The
+absolute deadline is passed into the rendering boundary so both checks measure the
+same instant. It is a narrow check and deliberately not preemption: a native render
+already under way is not interrupted, and nothing here is a queue, a worker lease,
+or an HTTP deadline.
 
 **Be precise about what these are not.** They are not a memory or CPU sandbox.
 They do not limit this process's memory, they do not preempt the pure-Python PDF

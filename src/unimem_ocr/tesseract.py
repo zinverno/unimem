@@ -180,6 +180,8 @@ class TesseractPdfPageOcr:
             refuse a document over the page limit  -- before any rasterization
             for each page not excluded:
                 refuse to begin if the budget is spent
+                take the lock, then refuse again if waiting for it spent the
+                    budget                         -- before the page is opened
                 check the computed pixel count     -- before any allocation
                 render, encode to PNG, free        (PDFium, under the lock)
                 recognize                          (subprocess, lock released)
@@ -221,7 +223,7 @@ class TesseractPdfPageOcr:
                         f"the {self._limits.document_budget_seconds:.0f}s recognition budget "
                         f"for this document was exhausted before page {number} was begun"
                     )
-                image = self._render(document, number)
+                image = self._render(document, number, deadline=deadline)
                 remaining = deadline - self._monotonic()
                 if remaining <= 0:
                     raise PdfOcrExecutionError(
@@ -334,8 +336,22 @@ class TesseractPdfPageOcr:
         with _PDFIUM_LOCK:
             document.close()
 
-    def _render(self, document: pdfium.PdfDocument, number: int) -> bytes:
+    def _render(self, document: pdfium.PdfDocument, number: int, *, deadline: float) -> bytes:
         """Rasterize one page and return it as PNG bytes.
+
+        ``deadline`` is the same absolute monotonic instant the caller measured the
+        document budget against, and it is rechecked **immediately after the
+        process-wide lock is acquired** — before the page is opened, before a
+        bitmap is allocated, and before anything is encoded. The caller's check
+        happens before this method is entered, and between those two moments this
+        thread can block for an unbounded time waiting for another capture to
+        finish inside PDFium. Without the second check a document whose budget
+        expired entirely in that queue would still rasterize a page and then be
+        refused on the far side of the work, which is the opposite of a budget.
+
+        This is a *narrow* check and deliberately not preemption: a native render
+        that has already begun is not interrupted, and nothing here is a queue, a
+        worker lease, or an HTTP deadline.
 
         **The buffer lifetime, exactly.** ``PdfBitmap.to_pil()`` builds the image
         with ``Image.frombuffer`` over the bitmap's own memory, so for the formats
@@ -376,6 +392,15 @@ class TesseractPdfPageOcr:
         guess.
         """
         with _PDFIUM_LOCK:
+            # First thing inside the boundary, and outside the PDFium try-block so
+            # that no native handle exists yet to release and no ``PdfiumError``
+            # translation can swallow it.
+            if self._monotonic() >= deadline:
+                raise PdfOcrExecutionError(
+                    f"the {self._limits.document_budget_seconds:.0f}s recognition budget "
+                    f"for this document was exhausted while waiting for the rasterizer "
+                    f"lock before page {number} was opened"
+                )
             try:
                 with closing(document[number - 1]) as page:
                     self._check_raster_size(number, *page.get_size())
