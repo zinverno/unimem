@@ -67,6 +67,16 @@ untouched, and intake still does not open, sniff, unzip, or parse the material i
 points at. That is the result worth noticing: adding a second binary document
 format cost this module a tuple, because the acquisition boundary was designed
 to be format-independent rather than PDF-shaped.
+
+Phase 4 PR 1 adds one payload type on that same staged path. An ``IMAGE``
+capture names a PNG or JPEG that was staged before it existed, and intake treats
+it exactly as it treats a staged document: resolve the reference, prove the
+bytes are there, write no second copy, and record the declared MIME type on the
+capture. The sequence, the ordering guarantee, the reference format and every
+refusal's shape are untouched — and intake still does not open, sniff, decode,
+or look inside the material it points at. Whether those bytes really carry a
+readable image header is a question for :mod:`core.processing.image`, one layer
+later.
 """
 
 from collections.abc import Callable
@@ -137,6 +147,27 @@ DOCUMENT_MIME_TYPES: Final[tuple[str, ...]] = (
 
 #: The supported document formats as they appear in a refusal message.
 _DOCUMENT_MIME_TYPES_PHRASE: Final = " and ".join(DOCUMENT_MIME_TYPES)
+
+#: The still-image formats this build has a processor for. An ``IMAGE`` capture
+#: must declare one of them explicitly, for the same reasons the document tuple
+#: exists: intake does not sniff bytes, read magic numbers, or infer a format
+#: from a filename it was never given, and an image whose format is merely
+#: *probably* one of these is one this build declines to guess at.
+#:
+#: A second tuple rather than a widened first one, and deliberately. These are
+#: not two spellings of one idea: they gate different payload types, they are
+#: quoted in different refusal messages, and a single merged list would let an
+#: ``image/png`` be declared on a ``DOCUMENT`` capture and a PDF on an ``IMAGE``
+#: one. Like its sibling this is a membership test and a message, not a registry.
+#:
+#: Restated here rather than imported from :mod:`core.processing`, exactly as the
+#: document tuple is: intake decides which declarations *this deployment* accepts
+#: at its boundary, which is a fact about the build rather than about any one
+#: processor, and the wiring that registers the processors keeps the two honest.
+IMAGE_MIME_TYPES: Final[tuple[str, ...]] = ("image/png", "image/jpeg")
+
+#: The supported still-image formats as they appear in a refusal message.
+_IMAGE_MIME_TYPES_PHRASE: Final = " and ".join(IMAGE_MIME_TYPES)
 
 
 @dataclass(frozen=True)
@@ -294,19 +325,20 @@ class CaptureIntake:
     def _materialize(self, envelope: CaptureEnvelope) -> _Material:
         """Settle what this capture's one raw original is, without writing it.
 
-        Three payload types are supported, and each names exactly one submitted
+        Four payload types are supported, and each names exactly one submitted
         field as the material::
 
-            TEXT                     payload.text     -> bytes to write
-            WEBPAGE (HTML-backed)    payload.html     -> bytes to write
-            DOCUMENT (staged PDF)    payload.file_ref -> bytes already stored
+            TEXT                       payload.text     -> bytes to write
+            WEBPAGE (HTML-backed)      payload.html     -> bytes to write
+            DOCUMENT (staged PDF/DOCX) payload.file_ref -> bytes already stored
+            IMAGE (staged PNG/JPEG)    payload.file_ref -> bytes already stored
 
         For the two inline types, encoding is the only transformation. Nothing
         is trimmed, Unicode normalized, BOM-prefixed, or line-ending rewritten,
         and no encoding is detected or attempted other than UTF-8 — what the
-        caller submitted is what a future processor reads back. For the staged
-        type there is no transformation at all, because there is nothing to
-        transform: the bytes were immutable before this call.
+        caller submitted is what a future processor reads back. For the two
+        staged types there is no transformation at all, because there is nothing
+        to transform: the bytes were immutable before this call.
 
         The refusals come in three kinds, and they are different things. An
         envelope naming a capability this build does not have is *valid* — a
@@ -322,7 +354,7 @@ class CaptureIntake:
         envelope leaves nothing behind.
 
         The only store call this method may make is a read: the existence check
-        on the document path. Reads are what make the ordering guarantee
+        on the two staged paths. Reads are what make the ordering guarantee
         possible; a write here would be the side effect the guarantee exists to
         prevent.
         """
@@ -333,13 +365,16 @@ class CaptureIntake:
                 return _InlineMaterial(CaptureIntake._webpage_html(envelope).encode(TEXT_ENCODING))
             case CapturePayloadType.DOCUMENT:
                 return self._staged_document(envelope)
+            case CapturePayloadType.IMAGE:
+                return self._staged_image(envelope)
             case _:
                 raise UnsupportedCapturePayloadError(
                     f"capture {envelope.id!r} carries a {envelope.payload.type.value} payload; "
                     f"this build accepts inline {CapturePayloadType.TEXT.value} captures, "
-                    f"html-backed {CapturePayloadType.WEBPAGE.value} captures, and "
+                    f"html-backed {CapturePayloadType.WEBPAGE.value} captures, "
                     f"staged {_DOCUMENT_MIME_TYPES_PHRASE} "
-                    f"{CapturePayloadType.DOCUMENT.value} captures only"
+                    f"{CapturePayloadType.DOCUMENT.value} captures, and staged "
+                    f"{_IMAGE_MIME_TYPES_PHRASE} {CapturePayloadType.IMAGE.value} captures only"
                 )
 
     def _staged_document(self, envelope: CaptureEnvelope) -> _StagedMaterial:
@@ -440,6 +475,116 @@ class CaptureIntake:
             # up in a log.
             raise UnsupportedCapturePayloadError(
                 f"capture {envelope.id!r} carries a document payload whose file_ref is not a "
+                f"UniMem raw object reference; this build resolves references of the form "
+                f"'{RAW_REF_SCHEME}:<64 lowercase hex characters>', as returned when the "
+                f"bytes were staged, and reads no filesystem path or URL"
+            ) from None
+
+        # Minted here rather than taken from a caller: this is the reference the
+        # capture record will carry, and the MIME type on it is the one the
+        # submitter declared for *this capture*, not one the raw store inferred.
+        raw_object = raw_object_ref(digest, mime_type=payload.mime_type)
+        if not self._raw_store.exists(raw_object):
+            raise CaptureMaterialUnavailableError(
+                f"capture {envelope.id!r} refers to staged material that is not in the "
+                f"raw object store; stage the bytes first, then resubmit this capture"
+            )
+        return _StagedMaterial(raw_object)
+
+    def _staged_image(self, envelope: CaptureEnvelope) -> _StagedMaterial:
+        """Resolve an ``IMAGE`` payload to the staged raw object it names.
+
+        The same shape as :meth:`_staged_document`, applied to a different
+        payload type, and written out rather than shared with it. The two look
+        alike because the *acquisition boundary* is the same — that is the result
+        worth noticing, not a duplication to factor away — but what they are
+        deciding differs: they gate different payload types, quote different
+        supported formats, and a single merged check would let a PDF be declared
+        on an ``IMAGE`` capture or a PNG on a ``DOCUMENT`` one. Sharing the
+        document path's code would also mean editing it, and it is closed.
+
+        This build supports exactly one materialization of an image: a
+        ``file_ref`` naming a raw object this store already holds, declared as
+        one of :data:`IMAGE_MIME_TYPES`. The refusals are the ones staged
+        material always had:
+
+        * **A capture stores one raw original.** ``file_ref`` alongside ``text``
+          or ``html`` offers more material than the record can hold, and picking
+          one would durably discard something the client submitted while
+          reporting success.
+        * **A format this build cannot read must not be accepted as if it
+          could.** A WebP or HEIC reaching intake would sail through to a router
+          with no processor for it, and the capture would strand mid-lifecycle
+          for a reason nobody could act on. Refusing at the boundary — where the
+          client is still holding the request — is the honest place to say "not
+          yet", and these formats are deferred rather than rejected forever.
+        * **Only UniMem raw references are resolved.** A filesystem path, a
+          ``file://`` URL, an HTTP URL, or an S3 key is refused as an unsupported
+          capability and is never *opened*, *resolved*, or *fetched*. This is the
+          same line the document path draws, and it is why the upload surface
+          exists at all.
+        * **A well-formed reference naming nothing** is a
+          :class:`~core.intake.errors.CaptureMaterialUnavailableError` — the
+          envelope is right and the material has not been staged.
+
+        Nothing here opens the bytes. Whether they carry a readable PNG or JPEG
+        header is a processing question, and answering it at intake would mean
+        parsing to decide acceptance; the declared type is what this boundary
+        records, and :mod:`core.processing.image` is what verifies the bytes
+        agree with it.
+
+        No submitted value is echoed. The refusals name the payload type, the
+        field *names*, and the MIME types this build supports; they never repeat
+        the ``file_ref``, the declared MIME type, or any other client string back
+        into a message that will be logged.
+        """
+        payload = envelope.payload
+        file_ref = payload.file_ref
+        if file_ref is None:
+            # Unreachable through a freshly validated envelope — ``CapturePayload``
+            # requires ``file_ref`` for an image — but reachable on an instance
+            # whose assignment was rejected *after* the value was written, which
+            # is the mutation semantics the contracts document rather than a
+            # hypothetical. A validated snapshot is not a continuously enforced
+            # object, so this boundary checks rather than assumes.
+            raise InvalidCaptureEnvelopeError(
+                f"capture {envelope.id!r} declares an image payload but carries no file_ref"
+            )
+        alongside = [
+            name
+            for name in MATERIAL_PAYLOAD_FIELDS
+            if name != "file_ref" and getattr(payload, name) is not None
+        ]
+        if alongside:
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries an image payload with file_ref and "
+                f"{' and '.join(alongside)}; a capture stores one raw original, and this "
+                f"build will not choose between submitted representations — resubmit with "
+                f"file_ref alone"
+            )
+        if payload.mime_type is None:
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries an image payload declaring no mime_type; "
+                f"this build ingests {_IMAGE_MIME_TYPES_PHRASE} images only, and does not "
+                f"infer an image's format"
+            )
+        if payload.mime_type not in IMAGE_MIME_TYPES:
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries an image payload declaring a mime_type "
+                f"this build has no processor for; it ingests {_IMAGE_MIME_TYPES_PHRASE} "
+                f"images only"
+            )
+
+        try:
+            digest = parse_raw_ref(file_ref)
+        except InvalidRawObjectRefError:
+            # Deliberately unchained, exactly as on the document path. The store's
+            # own message quotes the reference it rejected, and a rejected
+            # reference is exactly the kind of client string — a home directory
+            # path, a private URL — that must not be carried into a message or a
+            # traceback that ends up in a log.
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries an image payload whose file_ref is not a "
                 f"UniMem raw object reference; this build resolves references of the form "
                 f"'{RAW_REF_SCHEME}:<64 lowercase hex characters>', as returned when the "
                 f"bytes were staged, and reads no filesystem path or URL"

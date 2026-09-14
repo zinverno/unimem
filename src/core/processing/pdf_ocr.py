@@ -263,7 +263,7 @@ class PdfOcrProcessor:
         Storage failures are not translated. If the store cannot produce the
         bytes it raises its own typed
         :class:`~core.storage.errors.RawObjectStoreError`, and that propagates
-        unchanged, exactly as it does from the other four processors — and,
+        unchanged, exactly as it does from the other processors — and,
         importantly, still distinguishably from a
         :class:`~core.processing.ocr.PdfOcrExecutionError`, which also
         propagates unchanged and also leaves the capture non-terminal.

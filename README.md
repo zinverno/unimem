@@ -275,10 +275,13 @@ curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_web_01/content
 
 A few things are worth being precise about:
 
-- **The endpoint now processes plain text, HTML-backed webpages, and PDF and
-  DOCX documents** (see *Capturing a PDF document* and *Capturing a DOCX
-  document*, below). Images, video, and files are still accepted by the contract
-  and refused with `422 unsupported_payload`.
+- **The endpoint now processes plain text, HTML-backed webpages, PDF and DOCX
+  documents, and PNG and JPEG still images** (see *Capturing a PDF document* and
+  *Capturing a DOCX document*, below). An image is held and described, not
+  interpreted: there is no OCR and no vision, so its canonical content object
+  carries the exact original plus the format and dimensions read from its
+  header, and **no segments at all**. Other image formats, video, and files are
+  still accepted by the contract and refused with `422 unsupported_payload`.
 - **Webpage support is deterministic text extraction, not reader mode.** Scripts,
   styles, `noscript`, `template`, and `svg` are dropped, block elements separate
   paragraphs, and entities are decoded. Navigation, menus, and footers are text

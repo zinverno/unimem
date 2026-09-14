@@ -44,6 +44,16 @@ imaging library, and no ``subprocess``; the engine lives behind the port in
 :mod:`core.processing.ocr`, whose result types are validated before anything
 believes them.
 
+Phase 4 PR 1 adds the sixth, and the first whose canonical result carries no
+segments: :class:`ImageProcessor` turns a staged immutable PNG or JPEG into a
+canonical ``image`` content object holding the original as its one asset, the
+encoded format and dimensions read from the header, and **no segments at all**.
+That is the honest normalization of an image nothing has interpreted — the
+pixels are the artifact, not a container for words — and nothing is invented to
+stand in for the interpretation that did not happen. It reads headers only: no
+imaging library, no rasterizer, no decoder, no OCR, and no new ``core``
+dependency. See `ADR-019 <../../docs/ADR/ADR-019-still-image-ingestion.md>`_.
+
 Phase 0H adds the step that calls them in order.
 :class:`ProcessingOrchestrator` takes a capture id, loads the authoritative
 record, insists it is ``stored``, routes it, marks it ``processing`` durably,
@@ -80,6 +90,24 @@ from core.processing.errors import (
     ProcessingOutputError,
     ProcessorRoutingError,
     TextDecodingError,
+)
+from core.processing.image import (
+    ENCODED_FORMAT_KEY,
+    ENCODED_HEIGHT_KEY,
+    ENCODED_WIDTH_KEY,
+    IMAGE_METADATA_KEY,
+    IMAGE_MIME_TYPES,
+    JPEG_FORMAT,
+    JPEG_MIME_TYPE,
+    MAX_JPEG_MARKER_SEGMENTS,
+    MAX_JPEG_SCAN_BYTES,
+    PNG_FORMAT,
+    PNG_HEADER_SIZE,
+    PNG_MIME_TYPE,
+    ImageHeader,
+    ImageProcessor,
+    read_jpeg_header,
+    read_png_header,
 )
 from core.processing.ocr import (
     PdfOcrExecutionError,
@@ -118,14 +146,26 @@ __all__ = [
     "DEFAULT_TEXT_MIME_TYPE",
     "DOCX_MIME_TYPE",
     "EMBEDDED_TEXT_PAGES_KEY",
+    "ENCODED_FORMAT_KEY",
+    "ENCODED_HEIGHT_KEY",
+    "ENCODED_WIDTH_KEY",
     "HTML_ENCODING",
     "IGNORED_TAGS",
+    "IMAGE_METADATA_KEY",
+    "IMAGE_MIME_TYPES",
+    "JPEG_FORMAT",
+    "JPEG_MIME_TYPE",
+    "MAX_JPEG_MARKER_SEGMENTS",
+    "MAX_JPEG_SCAN_BYTES",
     "OCR_ATTEMPTED_PAGES_KEY",
     "OCR_METADATA_KEY",
     "OCR_PAGES_WITHOUT_TEXT_KEY",
     "PAGE_COUNT_KEY",
     "PARAGRAPH_BLOCK",
     "PDF_MIME_TYPE",
+    "PNG_FORMAT",
+    "PNG_HEADER_SIZE",
+    "PNG_MIME_TYPE",
     "STARTING_STATUS",
     "TABLE_ROW_BLOCK",
     "TEXT_ENCODING",
@@ -133,6 +173,8 @@ __all__ = [
     "DocxBlock",
     "DocxProcessor",
     "HtmlTextExtractor",
+    "ImageHeader",
+    "ImageProcessor",
     "InvalidCaptureProcessingStateError",
     "NoProcessorError",
     "PdfOcrExecutionError",
@@ -154,6 +196,8 @@ __all__ = [
     "extract",
     "extract_blocks",
     "extract_pages",
+    "read_jpeg_header",
+    "read_png_header",
     "utc_now",
     "validate_ocr_result",
 ]

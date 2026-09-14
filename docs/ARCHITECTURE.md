@@ -244,6 +244,103 @@ acceptance guide and this status note. It is a checkpoint, not a fourth
 modality feature, and it does not reopen Phases 0, 1 or 2 — those are closed and
 stay closed.
 
+### Macro Phase 4 — Image Ingestion
+
+**Macro Phase 3 is closed and stays closed.** Phase 4 does not reopen document
+ingestion, PDF or DOCX extraction semantics, page segmentation, title
+precedence, the upload and staging architecture, the raw store's identity or
+layout, OCR semantics or the recognition port, replay, persistence, or the
+lifecycle. **The behaviour and semantics of every processor Phase 3 shipped are
+unchanged**, and no existing ADR is rewritten; the only edit Phase 4A makes
+inside a Phase 3 file is one docstring in `pdf_ocr.py`, replacing a hard-coded
+count of the other processors with a numberless phrase that will not go stale
+again.
+
+Phase 4 asks the next question about modality, and it is the first one where the
+material is not a carrier for text at all: **every kind of material UniMem
+ingests today is something it reads words out of. What does it take to ingest
+something whose whole content is what it looks like?**
+
+**Phase 4, PR 1 — still-image ingestion vertical slice.** Answers "how does a
+staged still image become a canonical `IMAGE` `ContentObject` through the
+existing capture lifecycle, without pretending that any interpretation of it
+happened?" `ImageProcessor` in `src/core/processing/image.py`, one widened
+intake capability — an `IMAGE_MIME_TYPES` tuple and a `_staged_image` branch
+alongside the document one — and one name in the composition root's processor
+list. **No new route, no contract change, no new `core` runtime dependency, and
+the schema stays `0.2`** — the contracts have contained
+`CapturePayloadType.IMAGE`, `ContentType.IMAGE`, `file_ref`-backed image
+payloads, `AssetRole.ORIGINAL`, and an optional `ContentObject.segments` since
+Phase 0A.
+
+```
+image bytes
+  -> POST /v1/uploads      the same route, unchanged, still format-blind
+  -> file_ref              "sha256:<digest>"
+  -> POST /v1/captures     the same canonical envelope, payload.type = image
+  -> CaptureIntake         resolve + verify, then RECEIVED, then STORED
+  -> ImageProcessor        the immutable original as one ORIGINAL asset, plus
+                           deterministic header-only structural observations
+  -> ContentObject(image)  segments = []
+  -> COMPLETE
+```
+
+**A zero-segment `COMPLETE` image object is truthful, and that is the central
+decision.** For a document the text is the artifact and the bytes are a
+container for it, so a segment-less result has recorded the wrapping paper —
+which is why [ADR-016](ADR/ADR-016-pdf-document-ingestion.md) and
+[ADR-018](ADR/ADR-018-opt-in-local-pdf-ocr.md) make a textless PDF a failure,
+and why both remain correct and unchanged for documents. For a still image the
+pixels *are* the artifact: an image staged, stored immutably,
+content-addressed, described structurally and tied to its capture has been
+remembered completely. What is absent is an interpretation of it, which is
+optional enrichment and was never promised. Nothing is invented to stand in for
+that absence — no placeholder `VISUAL` segment, no caption, no text, no `OCR` or
+`VISION` provenance for a recognizer that did not run, and no `PARTIAL` for a
+run that was not degraded. Invariant 19 states the rule generally.
+
+**4A is PNG and JPEG only, and reads headers rather than images.** `core` may
+not import an imaging library, `Pillow` stays in the optional `[ocr]` extra, and
+`imghdr` left the standard library in Python 3.13 — so the structural reader is
+a small hand-written header parser, and the supported list is what such a parser
+reads correctly and cheaply. Dimensions come from PNG's mandatory `IHDR` in one
+fixed 33-byte read — the complete chunk including its CRC, which is validated,
+with the header's structural fields checked against the legal combinations — and
+from the first supported JPEG `SOF` in a marker walk with explicit finite limits
+that stops at `SOS`. Nothing is decompressed and no pixel is decoded: no `IDAT`,
+no ancillary chunks, no entropy-coded data. The declared MIME type routes, and
+the processor separately verifies that header bytes are consistent with that
+declaration, refusing a contradiction rather than inferring what it might be.
+WebP, GIF, TIFF, HEIC and AVIF are deferred to a later explicit decision; animated
+formats are excluded because recording a moving picture as a still is a false
+claim; SVG is excluded on different grounds, as an active XML document with a
+materially different security model rather than a raster still.
+
+**Canonical versus derived.** The immutable original is canonical and stays
+exactly as submitted. Structural observations — encoded format, encoded width,
+encoded height — are deterministic, derivable from those bytes without AI, and
+belong in one namespaced mapping under `ContentObject.metadata`; they are named
+for what was measured, since 4A performs no orientation correction and reads no
+EXIF, XMP or ICC at all. Markdown stays derived and lossy: a 4A image object
+projects to its title or the empty string, which is the correct result and the
+cheapest proof that nothing was fabricated.
+
+**Known limitation, recorded and not changed here.** `POST /v1/uploads` has no
+generic upload-size limit, quota, or disk-usage policy, and has not had one
+since Phase 3. That is cross-modality hardening of a shared route, not part of a
+still-image slice, and Phase 4A leaves the route untouched.
+
+**OCR and vision are absent from 4A.** Opt-in local image OCR is later work
+(Phase 4B) and would take the shape [ADR-018](ADR/ADR-018-opt-in-local-pdf-ocr.md)
+already settled — a narrow port in `core`, machinery in an adapter outside it, a
+composition-root flag no request can reach, and a processor that replaces the
+default one rather than joining it. One constraint on it is fixed now: enabling
+OCR must never turn an image that ingests successfully today into a failure,
+because a recognizer finding no words is a fact about the recognizer and not
+about the picture. Phase 4C is owner manual acceptance and Macro Phase 4
+closure. Neither is designed yet. See
+[ADR-019](ADR/ADR-019-still-image-ingestion.md).
+
 ## Future data flow
 
 ```
@@ -1915,8 +2012,24 @@ See [ADR-018](ADR/ADR-018-opt-in-local-pdf-ocr.md).
     and never converts a server failure into a local success. Captured content
     reaches it exactly as the source produced it.
 
-Invariants 1, 4, 7 and 10 are design commitments; 2, 3, 5, 6, 8, 9, 11, 12, 13,
-14, 15, 16, 17 and 18 are enforced by the models, renderers, stores, intake,
+19. A processor asserts only what it observed or produced, and absence of
+    interpretation is represented by absence rather than by placeholder content.
+    A segment exists because a processor actually read, extracted, or recognized
+    something; `metadata` records observations and never guesses; and no
+    processor emits an empty, invented, or stand-in segment to signal that a
+    capability was not run. Three things this does *not* say: it does not
+    require a processor to emit a segment, so a content object with no segments
+    is a normal result rather than a defect; it does not license speculative
+    values in `metadata`, which is for what was measured; and it makes
+    `COMPLETE` no claim that anything was understood. `COMPLETE` means the
+    processor finished what its own `name` and `version` say it does, and what
+    actually ran is recorded on the `ProcessingRecord` and on every
+    `Provenance`. Stated in Phase 4 for still images, where an uninterpreted
+    original is canonical content with no segments at all, and already honoured
+    by every processor Phases 0–3 shipped.
+
+Invariants 1, 4, 7, 10 and 19 are design commitments; 2, 3, 5, 6, 8, 9, 11, 12,
+13, 14, 15, 16, 17 and 18 are enforced by the models, renderers, stores, intake,
 orchestration, the delivery adapter and the connector, and covered by tests.
 
 ## Contract rules
@@ -2028,6 +2141,7 @@ src/core/processing/
   pdf_ocr.py      PdfOcrProcessor, the opt-in embedded-text-first OCR policy
   ocr.py          the PdfPageOcr port, its value types, and its execution error
   docx.py         DocxProcessor, body-ordered text from a DOCX original
+  image.py        ImageProcessor and the bounded PNG/JPEG header readers
   service.py      ProcessingOrchestrator, the stored-to-complete lifecycle
   errors.py       typed processing, routing and lifecycle errors
 src/core/rendering/

@@ -116,6 +116,14 @@ DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.docu
 #: and one this build refuses rather than guesses at.
 DOC_MIME = "application/msword"
 
+#: The two still-image formats this build ingests, from Phase 4 PR 1.
+PNG_MIME = "image/png"
+JPEG_MIME = "image/jpeg"
+
+#: A raster format this build has no parser for. Deferred rather than rejected
+#: forever, and refused at the boundary rather than guessed at.
+WEBP_MIME = "image/webp"
+
 
 def make_document_payload(**overrides: Any) -> CapturePayload:
     """The one document shape this build ingests: a staged PDF file_ref."""
@@ -137,6 +145,26 @@ def make_document_envelope(**overrides: Any) -> CaptureEnvelope:
     return make_envelope(**(fields | overrides))
 
 
+def make_image_payload(**overrides: Any) -> CapturePayload:
+    """The one image shape this build ingests: a staged PNG file_ref."""
+    fields: dict[str, Any] = {
+        "type": CapturePayloadType.IMAGE,
+        "mime_type": PNG_MIME,
+        "file_ref": STAGED_FILE_REF,
+        "title": "A photograph",
+    }
+    return CapturePayload(**(fields | overrides))
+
+
+def make_image_envelope(**overrides: Any) -> CaptureEnvelope:
+    """A valid staged-PNG image envelope, with optional field overrides."""
+    fields: dict[str, Any] = {
+        "id": "cap_intake_img_01",
+        "payload": make_image_payload(),
+    }
+    return make_envelope(**(fields | overrides))
+
+
 def make_unsupported_envelope(
     payload_type: CapturePayloadType, **overrides: Any
 ) -> CaptureEnvelope:
@@ -145,11 +173,11 @@ def make_unsupported_envelope(
     ``WEBPAGE`` is deliberately absent: since Phase 2 PR 1 it is a supported
     type, and *which shapes of it* are supported is a separate question asked
     in ``test_webpage_materialization.py``. ``DOCUMENT`` left for the same
-    reason in Phase 3 PR 1, and its shapes are asked about in
-    ``test_document_materialization.py``.
+    reason in Phase 3 PR 1, and ``IMAGE`` in Phase 4 PR 1; their shapes are
+    asked about in ``test_document_materialization.py`` and
+    ``test_image_materialization.py``.
     """
     payloads: dict[CapturePayloadType, dict[str, Any]] = {
-        CapturePayloadType.IMAGE: {"file_ref": "blob://image"},
         CapturePayloadType.VIDEO: {"file_ref": "blob://video"},
         CapturePayloadType.FILE: {"file_ref": "blob://file"},
         CapturePayloadType.URL: {},
