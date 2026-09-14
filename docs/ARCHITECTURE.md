@@ -217,8 +217,32 @@ rasterizer, imaging library, or engine imported, probed, or executed.
 `src/core/processing/pdf.py` is unchanged, and its public `extract_pages()` is
 reused as-is so that an embedded-text page reaches a segment through exactly the
 path it always did. See *Opt-in local PDF OCR (Phase 3)*, below, and
-[ADR-018](ADR/ADR-018-opt-in-local-pdf-ocr.md). **Macro Phase 3 remains
-open.**
+[ADR-018](ADR/ADR-018-opt-in-local-pdf-ocr.md).
+
+**Macro Phase 3 is closed.** The PDF, DOCX and opt-in local PDF OCR
+implementation described above is exactly what PRs 1–3 shipped and is unchanged
+by this closure. What closure needed was validation, not another slice: the
+manual acceptance guide,
+[docs/MANUAL_DOCUMENT_ACCEPTANCE.md](MANUAL_DOCUMENT_ACCEPTANCE.md), was merged
+in PR #19 — documentation only, adding no processor, route or contract. The
+owner then ran that checklist by hand on 2026-09-14 against merged
+`main` `d665bf57f4debb9c7a6506b8dd279d9d838da90d`, on a local Manjaro Linux
+machine with Python 3.13.13 and a system Tesseract carrying both `eng` and
+`rus`, and **all nine acceptance rows passed** — the control files, DOC-A
+through DOC-G, and one real owner-supplied PDF.
+
+That is a *human* result and is recorded as one. CI covers the flows, the
+contracts, the refusals and the real OCR engine, and it deliberately does not
+submit the owner's own documents; nothing here claims CI drove that run. The
+guide itself keeps the authoring-environment smoke record separate from the
+owner's acceptance, because the cloud session that wrote it had no Tesseract and
+could not execute the OCR scenarios at all.
+
+**Closure adds no capability.** No format, route, contract field, enum,
+lifecycle state, schema version or semantic changed; the only artifacts are the
+acceptance guide and this status note. It is a checkpoint, not a fourth
+modality feature, and it does not reopen Phases 0, 1 or 2 — those are closed and
+stay closed.
 
 ## Future data flow
 
