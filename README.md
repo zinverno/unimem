@@ -749,6 +749,11 @@ the same whether or not everything on the page was read:
 
 See [ADR-018](docs/ADR/ADR-018-opt-in-local-pdf-ocr.md).
 
+To check PDF, DOCX and OCR ingestion by hand on your own machine, work through
+[docs/MANUAL_DOCUMENT_ACCEPTANCE.md](docs/MANUAL_DOCUMENT_ACCEPTANCE.md) — a
+runnable owner acceptance guide, in Russian. Nothing in it is claimed to have
+passed automatically.
+
 `GET /health` reports process liveness only and checks nothing else.
 
 ## Browser capture
