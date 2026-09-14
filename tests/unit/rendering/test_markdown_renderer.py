@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.contracts import ContentObject
+from core.contracts import ContentObject, ContentType
 from core.rendering import BLOCK_SEPARATOR, MarkdownRenderer
 from tests.unit.rendering.builders import (
     ORIGINAL_SHA256,
@@ -156,6 +156,51 @@ def test_no_title_and_no_segments_is_the_empty_string(
     content = make_content_object(title=None, segments=[])
 
     assert markdown_renderer.render(content) == ""
+
+
+# --- an uninterpreted image ------------------------------------------------
+#
+# Phase 4 PR 1 makes a segment-less content object an ordinary result rather
+# than an edge case, so these assert what the projection of one looks like. The
+# renderer is unchanged: what is being checked is that an image object flows
+# through the *existing* contract without anything being fabricated to fill the
+# space where an interpretation would go.
+
+
+def uninterpreted_image(title: str | None) -> ContentObject:
+    """What ``ImageProcessor`` produces: an original, three observations, no segments."""
+    return make_content_object(
+        type=ContentType.IMAGE,
+        title=title,
+        segments=[],
+        metadata={"image": {"encoded_format": "png", "encoded_width": 7, "encoded_height": 3}},
+    )
+
+
+def test_an_uninterpreted_image_with_no_title_renders_as_nothing(
+    markdown_renderer: MarkdownRenderer,
+) -> None:
+    """There is no text to project, and none is invented to have some."""
+    assert markdown_renderer.render(uninterpreted_image(title=None)) == ""
+
+
+def test_an_uninterpreted_image_with_a_title_renders_only_that_title(
+    markdown_renderer: MarkdownRenderer,
+) -> None:
+    assert markdown_renderer.render(uninterpreted_image(title="Harbour at dusk")) == (
+        "# Harbour at dusk"
+    )
+
+
+def test_an_image_projection_carries_no_structural_observations(
+    markdown_renderer: MarkdownRenderer,
+) -> None:
+    """Encoded format and dimensions are metadata, and Markdown is not for metadata."""
+    rendered = markdown_renderer.render(uninterpreted_image(title="Harbour at dusk"))
+
+    assert "png" not in rendered
+    assert "encoded_width" not in rendered
+    assert "7" not in rendered
 
 
 def test_machine_state_is_not_projected(

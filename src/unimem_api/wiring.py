@@ -57,6 +57,7 @@ from core.intake import CaptureIntake
 from core.persistence import SqliteCaptureRecordStore, SqliteContentObjectStore
 from core.processing import (
     DocxProcessor,
+    ImageProcessor,
     PdfOcrProcessor,
     PdfProcessor,
     ProcessingOrchestrator,
@@ -108,6 +109,7 @@ def build_local_app(data_dir: Path, *, pdf_ocr: PdfPageOcr | None = None) -> Fas
         PdfProcessor               stored pdf document  -> canonical content
           or PdfOcrProcessor         ...recognizing pages that carry no text
         DocxProcessor              stored docx document -> canonical content
+        ImageProcessor             stored png/jpeg image -> canonical content
         ProcessorRouter            exactly one processor per capture
         ProcessingOrchestrator     stored -> complete, or a truthful failure
 
@@ -123,11 +125,17 @@ def build_local_app(data_dir: Path, *, pdf_ocr: PdfPageOcr | None = None) -> Fas
     Everything else is unchanged and none of it knows OCR exists. The router's
     exactly-one-match rule is doing the same real work it was: ``TEXT`` reaches
     ``TextProcessor``, ``WEBPAGE`` reaches ``WebpageProcessor``, a ``DOCUMENT``
-    declared ``application/pdf`` reaches whichever PDF processor was chosen, and
-    one declared ``.docx`` reaches ``DocxProcessor`` — each because of what it
-    claims, never because of where it sits in this list. Order here is not
-    precedence, there is no fallback processor, and an overlap would be an error
-    rather than an accident of ordering.
+    declared ``application/pdf`` reaches whichever PDF processor was chosen, one
+    declared ``.docx`` reaches ``DocxProcessor``, and an ``IMAGE`` declared
+    ``image/png`` or ``image/jpeg`` reaches ``ImageProcessor`` — each because of
+    what it claims, never because of where it sits in this list. Order here is
+    not precedence, there is no fallback processor, and an overlap would be an
+    error rather than an accident of ordering.
+
+    ``ImageProcessor`` is registered unconditionally and takes no option. It is
+    not an alternative to anything, it has no OCR-enabled twin in this build, and
+    ``pdf_ocr`` neither reaches it nor changes it: recognition for images is
+    later work, and nothing here anticipates it.
 
     ``pdf_ocr`` is a keyword-only port and defaults to ``None``, which is the
     default deployment: identical registrations, identical behaviour, and no
@@ -155,6 +163,7 @@ def build_local_app(data_dir: Path, *, pdf_ocr: PdfPageOcr | None = None) -> Fas
             WebpageProcessor(raw_store),
             _pdf_processor(raw_store, pdf_ocr),
             DocxProcessor(raw_store),
+            ImageProcessor(raw_store),
         ]
     )
     orchestrator = ProcessingOrchestrator(router, record_store, content_store)

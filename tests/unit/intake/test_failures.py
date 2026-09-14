@@ -35,12 +35,12 @@ from tests.unit.intake.builders import (
 from tests.unit.intake.doubles import FakeCaptureRecordStore, FakeClock, FakeRawObjectStore
 
 #: Payload types this build cannot materialize at all. ``WEBPAGE`` left this
-#: list in Phase 2 PR 1 and ``DOCUMENT`` in Phase 3 PR 1, each when it became a
-#: supported type; which *shapes* of them are supported is asked in
-#: ``test_webpage_materialization.py`` and ``test_document_materialization.py``
+#: list in Phase 2 PR 1, ``DOCUMENT`` in Phase 3 PR 1 and ``IMAGE`` in Phase 4
+#: PR 1, each when it became a supported type; which *shapes* of them are
+#: supported is asked in ``test_webpage_materialization.py``,
+#: ``test_document_materialization.py`` and ``test_image_materialization.py``
 #: instead.
 UNSUPPORTED = [
-    CapturePayloadType.IMAGE,
     CapturePayloadType.VIDEO,
     CapturePayloadType.FILE,
     CapturePayloadType.URL,
@@ -72,7 +72,7 @@ def test_an_unsupported_payload_has_no_side_effects(
 
 def test_unsupported_payload_errors_share_one_base(intake: CaptureIntake) -> None:
     with pytest.raises(CaptureIntakeError):
-        intake.accept(make_unsupported_envelope(CapturePayloadType.IMAGE))
+        intake.accept(make_unsupported_envelope(CapturePayloadType.VIDEO))
 
 
 def emptied_text_envelope() -> CaptureEnvelope:
@@ -118,7 +118,7 @@ def test_an_inconsistent_envelope_is_not_an_unsupported_payload(
 def test_an_unsupported_payload_is_not_an_invalid_envelope(intake: CaptureIntake) -> None:
     """The envelope is perfectly valid; this phase simply cannot handle it."""
     with pytest.raises(UnsupportedCapturePayloadError) as raised:
-        intake.accept(make_unsupported_envelope(CapturePayloadType.IMAGE))
+        intake.accept(make_unsupported_envelope(CapturePayloadType.VIDEO))
 
     assert not isinstance(raised.value, InvalidCaptureEnvelopeError)
 

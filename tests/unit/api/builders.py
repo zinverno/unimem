@@ -106,12 +106,14 @@ def webpage_envelope(**overrides: Any) -> dict[str, Any]:
 
 
 def image_envelope(**overrides: Any) -> dict[str, Any]:
-    """A structurally valid envelope naming a capability this build lacks.
+    """A structurally valid envelope whose staged material this build cannot resolve.
 
     The envelope is *correct*: it satisfies every rule ``CaptureEnvelope``
-    imposes, so it passes HTTP validation and reaches intake, which refuses it
-    on capability grounds. A later phase will accept this exact document
-    unchanged.
+    imposes, so it passes HTTP validation and reaches intake, which refuses it.
+    Since Phase 4 PR 1 the reason is narrower than it was — ``image/png`` is a
+    format this build ingests — and ``blob://screenshot`` is not a reference the
+    raw store resolves, which is what the refusal is about now. It is still
+    refused at the capability boundary, and still leaves nothing behind.
     """
     return text_envelope(
         payload={"type": "image", "mime_type": "image/png", "file_ref": "blob://screenshot"},

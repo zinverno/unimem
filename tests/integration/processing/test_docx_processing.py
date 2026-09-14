@@ -1,8 +1,10 @@
 """A DOCX document through the real processing layer, end to end below HTTP.
 
-Real ``CaptureIntake``, real ``ProcessorRouter`` holding all four real
-processors, real ``ProcessingOrchestrator``, real ``LocalRawObjectStore`` on a
-real directory, real SQLite. Nothing is stubbed.
+Real ``CaptureIntake``, real ``ProcessorRouter`` holding the four real
+processors Phase 3 registered, real ``ProcessingOrchestrator``, real
+``LocalRawObjectStore`` on a real directory, real SQLite. Nothing is stubbed.
+(The composition root has since grown a fifth; that the whole registered set
+stays unambiguous is asserted in ``test_real_processor_routing.py``.)
 
 Three things are asked here that only the real stack can answer. **Does a second
 document format run on the lifecycle that already existed** — ``stored`` to
@@ -64,7 +66,7 @@ class Stack:
         self.record_store = SqliteCaptureRecordStore(database)
         self.content_store = SqliteContentObjectStore(database)
         self.intake = CaptureIntake(self.raw_store, self.record_store)
-        #: All four real processors, in the order the composition root uses.
+        #: The four processors this phase's stack needs, in composition order.
         self.router = ProcessorRouter(
             [
                 TextProcessor(self.raw_store),
