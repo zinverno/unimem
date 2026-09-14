@@ -23,9 +23,22 @@ material whose content is what it looks like.
 chunk is read whole — signature, length, type, data and CRC, 33 bytes, with the
 CRC verified and the structural fields checked against the combinations the
 specification permits. A JPEG's dimensions are taken from the first supported
-``SOF`` marker, reached by a marker walk with explicit finite bounds that stops
-before the entropy-coded scan data begins. Those two numbers, plus which format
-the header turned out to be, are the whole of what this processor observes.
+``SOF`` marker, reached by a *streaming* marker walk with explicit finite bounds:
+it consumes the stream incrementally, steps over payloads it does not need, and
+stops at the frame header, so the scan data behind it is never read. Those two
+numbers, plus which format the header turned out to be, are the whole of what
+this processor observes.
+
+**What that does not establish is worth saying out loud.** Accepting a PNG here
+means its signature and ``IHDR`` are structurally valid — nothing more. The
+parser stops after 33 bytes, so an ``acTL`` animation-control chunk behind that
+prefix is never seen, and this build therefore does **not** classify a PNG
+datastream as static or animated. ``encoded_format`` recording ``"png"`` is a
+statement about the header that was read, not a guarantee that one frame
+follows. ``image/apng`` is not an accepted declared type, and a later phase that
+wants frame-level facts has every byte of the original still in storage to read
+them from. "Still image" here names the modality this build has a processor for —
+raster images rather than video — and is not a per-file verdict on frame count.
 
 **Nothing is decoded, and nothing is decompressed.** No ``IDAT``, no ancillary
 chunk, no zlib inflate, no Huffman or arithmetic decoding, no inverse DCT, no
@@ -49,6 +62,7 @@ the raw object store hands over. There is no network, no subprocess, and no
 filesystem access anywhere in this module.
 """
 
+import io
 import uuid
 import zlib
 from collections.abc import Callable
@@ -146,6 +160,21 @@ _PNG_LEGAL_BIT_DEPTHS: Final[dict[int, frozenset[int]]] = {
     6: frozenset({8, 16}),  # truecolour with alpha
 }
 
+#: The largest width or height an ``IHDR`` may declare.
+#:
+#: This is the PNG specification's own limit, not a policy of this build: the
+#: four-byte integer type ``IHDR`` uses for both dimensions is normatively
+#: restricted to 0 .. 2^31 - 1, and zero is separately invalid, so the legal
+#: range is 1 .. 2_147_483_647. A header declaring more than that is outside the
+#: format rather than merely large.
+#:
+#: It is emphatically *not* a decode-safety ceiling. Phase 4A decodes nothing, so
+#: a declared size costs nothing to hold and a 100_000 x 100_000 PNG is accepted
+#: and recorded exactly as it says. A pixel or allocation budget belongs to
+#: whatever later phase actually decodes, computed there and enforced before it
+#: allocates.
+PNG_MAX_DIMENSION: Final = 2_147_483_647
+
 #: The two bytes every JPEG begins with: ``SOI``.
 _JPEG_SOI: Final = b"\xff\xd8"
 
@@ -189,6 +218,11 @@ _SOF_STRUCTURE_SIZE: Final = 6
 MAX_JPEG_MARKER_SEGMENTS: Final = 256
 MAX_JPEG_SCAN_BYTES: Final = 1_048_576
 
+#: How much of a skipped payload is read at a time when the stream cannot seek.
+#: Bounded so that stepping over a maximum-size marker segment never holds the
+#: whole of it, and small enough to be unremarkable.
+_SKIP_CHUNK_SIZE: Final = 64 * 1024
+
 
 @dataclass(frozen=True)
 class ImageHeader:
@@ -214,6 +248,21 @@ def _new_id() -> str:
     objects holding two different asset records.
     """
     return str(uuid.uuid4())
+
+
+def _is_seekable(stream: BinaryIO) -> bool:
+    """Whether this stream can be stepped over without reading.
+
+    Asked defensively rather than assumed. ``BinaryIO`` advertises ``seekable``,
+    but a stream is third-party code and a raw store is free to hand over
+    something that raises instead of answering; a parser that cannot read a
+    header because a capability probe threw would be reporting the wrong thing
+    entirely. An unseekable answer costs only a chunked read.
+    """
+    try:
+        return stream.seekable()
+    except (AttributeError, OSError, ValueError):
+        return False
 
 
 def _read_exactly(stream: BinaryIO, size: int) -> bytes:
@@ -256,7 +305,11 @@ def read_png_header(stream: BinaryIO) -> ImageHeader:
       This catches a header that is complete but corrupt.
     * **The structural fields are checked**: compression method 0, filter method
       0, interlace method 0 or 1, and a bit depth legal for the colour type.
-    * **Both dimensions must be nonzero**, which the specification also requires.
+    * **Both dimensions must be within the format's own range**, 1 to
+      :data:`PNG_MAX_DIMENSION`. Zero is invalid and so is anything above what
+      the specification's four-byte integer type permits. This is structural
+      legality, not a size policy: nothing is decoded, so a legal-but-enormous
+      declaration is recorded exactly as it reads.
 
     Nothing beyond those 33 bytes is read. No chunk is walked, no ``IDAT`` is
     touched, no ancillary chunk is inspected, and nothing is decompressed — so
@@ -316,6 +369,12 @@ def read_png_header(stream: BinaryIO) -> ImageHeader:
             "the PNG's IHDR chunk declares a zero width or height; the specification "
             "requires both to be nonzero"
         )
+    if width > PNG_MAX_DIMENSION or height > PNG_MAX_DIMENSION:
+        raise ProcessingInputError(
+            f"the PNG's IHDR chunk declares a width or height above {PNG_MAX_DIMENSION}, "
+            f"which the specification's own integer range does not permit; this is the "
+            f"format's limit and not a size policy of this build"
+        )
 
     bit_depth = data[8]
     colour_type = data[9]
@@ -356,8 +415,106 @@ def read_png_header(stream: BinaryIO) -> ImageHeader:
     return ImageHeader(encoded_format=PNG_FORMAT, width=width, height=height)
 
 
+class _MarkerWalk:
+    """A bounded, forward-only cursor over a JPEG's marker structure.
+
+    It exists so that the walk below reads the structure *as it goes* rather
+    than pulling a prefix of the file into memory first. That distinction is the
+    whole point: a normal JPEG is smaller than the byte budget, so a prefetch of
+    the budget would read the entire file — ``APPn`` payloads, ``SOS``, and the
+    entropy-coded scan with it — before the walk had found anything. Nothing
+    here reads a byte the walk has not reached.
+
+    Two counters bound it. Every byte the cursor advances over, read or skipped,
+    is charged against :data:`MAX_JPEG_SCAN_BYTES`; the caller separately counts
+    marker segments against :data:`MAX_JPEG_MARKER_SEGMENTS`. Exceeding either
+    is a refusal that says this build stopped looking, which is a different
+    statement from calling the file invalid.
+    """
+
+    def __init__(self, stream: BinaryIO) -> None:
+        self._stream = stream
+        self._consumed = 0
+        # Seeking is an optimization, not a requirement. Where the stream offers
+        # it, a skipped payload is never read into this process at all; where it
+        # does not, the bytes are read in bounded chunks and dropped. Either way
+        # nothing looks at them, and either way the span is charged.
+        self._seekable = _is_seekable(stream)
+
+    def _charge(self, count: int) -> None:
+        if self._consumed + count > MAX_JPEG_SCAN_BYTES:
+            raise ProcessingInputError(
+                "no JPEG frame header was found within the structural inspection limit this "
+                "build applies; the file was not examined further and is not being called "
+                "invalid"
+            )
+        self._consumed += count
+
+    def take(self, count: int) -> bytes:
+        """Read exactly ``count`` bytes, or refuse the file as truncated."""
+        self._charge(count)
+        data = _read_exactly(self._stream, count)
+        if len(data) < count:
+            raise _truncated_jpeg()
+        return data
+
+    def skip(self, count: int) -> None:
+        """Advance over ``count`` bytes without interpreting any of them.
+
+        A short file is not detected here, and deliberately so: seeking past the
+        end of a file succeeds, and inventing a size probe to notice would mean
+        this parser learning something about the storage behind the stream. The
+        next :meth:`take` is what fails, and it fails as a truncation, which is
+        the truthful verdict — the structure the file declared is not all there.
+        """
+        if count == 0:
+            return
+        self._charge(count)
+        if self._seekable:
+            self._stream.seek(count, io.SEEK_CUR)
+            return
+        remaining = count
+        while remaining > 0:
+            chunk = self._stream.read(min(remaining, _SKIP_CHUNK_SIZE))
+            if not chunk:
+                raise _truncated_jpeg()
+            remaining -= len(chunk)
+
+    def next_marker(self) -> int:
+        """Read the next marker code, consuming the fill bytes before it.
+
+        A marker is an ``FF`` introducer followed by its code, and repeats of the
+        introducer are fill that carries no meaning. Each byte is charged, so a
+        long run of fill terminates against the byte budget rather than spinning.
+        """
+        introducer = self.take(1)
+        if introducer[0] != _MARKER_INTRODUCER:
+            raise ProcessingInputError(
+                "the JPEG's marker structure is malformed; a marker introducer was expected "
+                "and something else was found"
+            )
+        while True:
+            code = self.take(1)[0]
+            if code != _MARKER_INTRODUCER:
+                return code
+
+
+def _truncated_jpeg() -> ProcessingInputError:
+    """The file ended before the structure it declared was complete."""
+    return ProcessingInputError(
+        "the image ends before its JPEG frame header is complete; it appears to be truncated"
+    )
+
+
 def read_jpeg_header(stream: BinaryIO) -> ImageHeader:
     """Read a JPEG's dimensions from the first supported frame header.
+
+    **The stream is walked incrementally and is never prefetched.** Only the
+    marker structure the walk actually reaches is read: ``SOI`` first, then one
+    marker at a time, and the walk returns as soon as it has validated the first
+    supported frame header. A normal JPEG is smaller than the byte budget, so
+    reading a budget-sized prefix up front would mean reading the whole file —
+    scan data included — to find a header that sits in its first few kilobytes.
 
     The walk, in full:
 
@@ -366,72 +523,48 @@ def read_jpeg_header(stream: BinaryIO) -> ImageHeader:
       fill bytes followed by the marker code. ``TEM`` and the restart markers
       stand alone; every other marker carries a big-endian length that includes
       its own two bytes.
-    * **The first supported ``SOF`` ends the walk successfully.** Its payload
+    * **The first supported ``SOF`` ends the walk successfully**, but only once
+      the *whole* segment it declared has been shown to be present. Its payload
       begins with sample precision, height, width and component count, and both
-      dimensions must be nonzero.
+      dimensions must be nonzero. A frame header whose declared length runs past
+      the end of the file is truncated even when those first six bytes are
+      there, and is refused rather than believed.
     * **``SOS`` or ``EOI`` ends it unsuccessfully.** Entropy-coded scan data
       begins at ``SOS``, and a file whose structural region ends without a frame
-      header is one this build cannot read the dimensions of.
+      header is one this build cannot read the dimensions of. The walk stops at
+      the ``SOS`` marker itself: not one byte of its payload, and not one byte of
+      the scan behind it, is ever read.
     * **Malformation is refused**: a length below 2, a segment reaching past the
-      end of the data, a byte where a marker introducer was required, or any
+      end of the file, a byte where a marker introducer was required, or any
       truncation.
 
     Two explicit bounds keep the walk finite over a crafted file:
     :data:`MAX_JPEG_MARKER_SEGMENTS` segments examined, and
-    :data:`MAX_JPEG_SCAN_BYTES` bytes consumed. Exceeding either is a refusal
-    that says this build stopped looking — it is not a verdict that the file is
+    :data:`MAX_JPEG_SCAN_BYTES` structural bytes traversed — every byte the
+    cursor advances over, read or skipped, counts. Exceeding either is a refusal
+    that says this build stopped looking; it is not a verdict that the file is
     invalid JPEG, and the message says so.
 
-    Nothing is decoded. Entropy-coded data is never entered, no Huffman or
-    arithmetic decoding happens, no quantization table is applied, and ``APPn``
-    payloads — which is where EXIF, XMP and ICC live — are skipped by length
-    without their contents being read.
+    Nothing is decoded and no payload is interpreted. No Huffman or arithmetic
+    decoding happens and no quantization table is applied. ``APPn`` segments —
+    which is where EXIF, XMP and ICC live — are stepped over by their declared
+    length without being interpreted, and where the stream can seek, their bytes
+    are not read into this process at all.
 
     Raises :class:`~core.processing.errors.ProcessingInputError` for anything
     that fails a rule above.
     """
-    # Bounded by construction: at most the scan budget is ever held, so the walk
-    # cannot consume more of the file than the limit allows however the segments
-    # are laid out.
-    data = _read_exactly(stream, MAX_JPEG_SCAN_BYTES)
-    exhausted = len(data) < MAX_JPEG_SCAN_BYTES
+    walk = _MarkerWalk(stream)
 
-    def _ran_out() -> ProcessingInputError:
-        """Whichever of the two reasons the walk could not continue."""
-        if exhausted:
-            return ProcessingInputError(
-                "the image ends before its JPEG frame header; it appears to be truncated"
-            )
-        return ProcessingInputError(
-            "no JPEG frame header was found within the structural inspection limit this "
-            "build applies; the file was not examined further and is not being called "
-            "invalid"
-        )
-
-    if data[:2] != _JPEG_SOI:
+    if walk.take(2) != _JPEG_SOI:
         raise ProcessingInputError(
             "the image does not begin with a JPEG start-of-image marker; the bytes are not "
             "a JPEG, or are not the format this capture declared"
         )
 
-    offset = 2
     examined = 0
     while True:
-        if offset >= len(data):
-            raise _ran_out()
-        if data[offset] != _MARKER_INTRODUCER:
-            raise ProcessingInputError(
-                "the JPEG's marker structure is malformed; a marker introducer was expected "
-                "and something else was found"
-            )
-        # Repeats of the introducer are fill and carry no meaning.
-        while offset < len(data) and data[offset] == _MARKER_INTRODUCER:
-            offset += 1
-        if offset >= len(data):
-            raise _ran_out()
-
-        marker = data[offset]
-        offset += 1
+        marker = walk.next_marker()
 
         examined += 1
         if examined > MAX_JPEG_MARKER_SEGMENTS:
@@ -451,32 +584,37 @@ def read_jpeg_header(stream: BinaryIO) -> ImageHeader:
                 "any entropy-coded scan"
             )
         if marker in (_MARKER_SOS, _MARKER_EOI):
+            # Deliberately before the length is read: at SOS the next bytes are
+            # the scan header and then the entropy-coded data, and this build
+            # does not enter either.
             raise ProcessingInputError(
                 "the JPEG carries no frame header before its scan data ends; this build "
-                "reads dimensions from a baseline or progressive frame header and found none"
+                "reads dimensions from a supported frame header and found none"
             )
 
-        if offset + 2 > len(data):
-            raise _ran_out()
-        segment_length = int.from_bytes(data[offset : offset + 2], "big")
+        segment_length = int.from_bytes(walk.take(2), "big")
         if segment_length < 2:
             raise ProcessingInputError(
                 "the JPEG declares a marker segment shorter than its own length field; "
                 "the marker structure is malformed"
             )
-        payload_start = offset + 2
-        payload_end = offset + segment_length
+        payload_size = segment_length - 2
 
         if marker in _SOF_MARKERS:
-            if segment_length - 2 < _SOF_STRUCTURE_SIZE:
+            if payload_size < _SOF_STRUCTURE_SIZE:
                 raise ProcessingInputError(
                     "the JPEG's frame header is too short to carry its own dimensions; "
                     "the marker structure is malformed"
                 )
-            if payload_start + _SOF_STRUCTURE_SIZE > len(data):
-                raise _ran_out()
-            height = int.from_bytes(data[payload_start + 1 : payload_start + 3], "big")
-            width = int.from_bytes(data[payload_start + 3 : payload_start + 5], "big")
+            structure = walk.take(_SOF_STRUCTURE_SIZE)
+            # The rest of the frame header is the per-component descriptors. They
+            # are not interpreted — nothing here needs them — but they are read
+            # rather than skipped, because a segment that declares more than the
+            # file contains is truncated, and the six bytes above being present
+            # is not evidence that the rest is.
+            walk.take(payload_size - _SOF_STRUCTURE_SIZE)
+            height = int.from_bytes(structure[1:3], "big")
+            width = int.from_bytes(structure[3:5], "big")
             if width == 0 or height == 0:
                 raise ProcessingInputError(
                     "the JPEG's frame header declares a zero width or height; neither is a "
@@ -484,12 +622,9 @@ def read_jpeg_header(stream: BinaryIO) -> ImageHeader:
                 )
             return ImageHeader(encoded_format=JPEG_FORMAT, width=width, height=height)
 
-        # Every other marker is skipped by its declared length without its
-        # payload being read. APPn segments — EXIF, XMP, ICC — are skipped here,
-        # deliberately and without being looked at.
-        if payload_end > len(data):
-            raise _ran_out()
-        offset = payload_end
+        # Every other marker is stepped over by its declared length, payload
+        # uninterpreted. APPn segments — EXIF, XMP, ICC — are passed here.
+        walk.skip(payload_size)
 
 
 #: Which reader runs for which declared MIME type. The declaration decides, and

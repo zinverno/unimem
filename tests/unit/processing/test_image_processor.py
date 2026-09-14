@@ -14,8 +14,9 @@ header validation.
 """
 
 import io
+import os
 import struct
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, cast
 
 import pytest
 
@@ -38,6 +39,7 @@ from core.processing import (
     MAX_JPEG_SCAN_BYTES,
     PDF_MIME_TYPE,
     PNG_HEADER_SIZE,
+    PNG_MAX_DIMENSION,
     PNG_MIME_TYPE,
     ImageProcessor,
     ProcessingInputError,
@@ -69,17 +71,76 @@ def image_capture(
     return store_and_capture(store, data, mime_type=mime_type, **(fields | overrides))
 
 
-class CountingStream(io.BytesIO):
-    """A stream that remembers how many bytes were taken out of it."""
+class RecordingStream(io.BytesIO):
+    """A stream that remembers exactly which byte ranges were read out of it.
+
+    "The parser does not read the scan data" is a claim about behaviour, not
+    about a return value, so the only way to assert it is to watch the reads.
+    Seeks are counted too, because stepping over a payload instead of reading it
+    is the mechanism that makes the claim true.
+    """
 
     def __init__(self, data: bytes) -> None:
         super().__init__(data)
-        self.consumed = 0
+        self.reads: list[range] = []
+        self.seeks = 0
 
     def read(self, size: int | None = -1, /) -> bytes:
+        start = self.tell()
         chunk = super().read(size)
-        self.consumed += len(chunk)
+        if chunk:
+            self.reads.append(range(start, start + len(chunk)))
         return chunk
+
+    def seek(self, offset: int, whence: int = os.SEEK_SET, /) -> int:
+        self.seeks += 1
+        return super().seek(offset, whence)
+
+    @property
+    def consumed(self) -> int:
+        """How many bytes were actually read, skipped ones excluded."""
+        return sum(len(span) for span in self.reads)
+
+    def read_any_of(self, span: range) -> bool:
+        """Whether any byte in ``span`` was read."""
+        return any(set(done) & set(span) for done in self.reads)
+
+    @property
+    def furthest_read(self) -> int:
+        """One past the last byte offset that was read."""
+        return max((span.stop for span in self.reads), default=0)
+
+
+class UnseekableStream(io.RawIOBase):
+    """A readable stream that cannot seek, like a pipe or a socket.
+
+    The parser must work against one of these too — skipping a payload then
+    means reading and dropping it in bounded chunks rather than stepping over
+    it — so the seekable path is an optimization and not a requirement.
+    """
+
+    def __init__(self, data: bytes) -> None:
+        super().__init__()
+        self._data = io.BytesIO(data)
+        self.reads: list[range] = []
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return False
+
+    def read(self, size: int | None = -1, /) -> bytes:
+        start = self._data.tell()
+        chunk = self._data.read(size)
+        if chunk:
+            self.reads.append(range(start, start + len(chunk)))
+        return chunk
+
+
+def unseekable(data: bytes) -> BinaryIO:
+    """``UnseekableStream`` as the ``BinaryIO`` the parsers are typed against."""
+    return cast(BinaryIO, UnseekableStream(data))
 
 
 # --- identity and routing ---------------------------------------------------
@@ -353,7 +414,7 @@ def test_a_valid_png_header_reads_its_dimensions() -> None:
 
 def test_only_the_fixed_prefix_is_consumed() -> None:
     """Nothing after the IHDR chunk is read, whatever the rest of the file holds."""
-    stream = CountingStream(images.png())
+    stream = RecordingStream(images.png())
 
     read_png_header(stream)
 
@@ -713,3 +774,235 @@ def test_a_very_large_declared_jpeg_size_is_not_a_refusal() -> None:
     header = read_jpeg_header(io.BytesIO(images.jpeg(width=65535, height=65535)))
 
     assert (header.width, header.height) == (65535, 65535)
+
+
+# --- what the JPEG walk actually touches ------------------------------------
+#
+# These are the regressions for a real defect: the first implementation read a
+# budget-sized prefix before parsing anything, which for any JPEG smaller than a
+# mebibyte meant reading the whole file — APPn payloads, SOS, and the
+# entropy-coded scan — to find a header sitting in its first few kilobytes. The
+# contract was a streaming walk, and these assert it is one.
+
+
+def test_a_small_jpeg_is_not_prefetched_whole() -> None:
+    """The walk reads what it reaches, not a budget-sized prefix of the file."""
+    data, _, _, _ = images.jpeg_with_labelled_regions()
+    stream = RecordingStream(data)
+
+    read_jpeg_header(stream)
+
+    assert stream.consumed < len(data)
+    assert stream.consumed < MAX_JPEG_SCAN_BYTES
+
+
+def test_nothing_after_the_accepted_frame_header_is_read() -> None:
+    """The walk returns at the frame header; the scan behind it is never touched."""
+    data, _, frame_header, scan = images.jpeg_with_labelled_regions()
+    stream = RecordingStream(data)
+
+    read_jpeg_header(stream)
+
+    assert stream.furthest_read <= frame_header.stop
+    assert not stream.read_any_of(scan)
+
+
+def test_an_app_payload_is_stepped_over_without_being_read() -> None:
+    """EXIF, XMP and ICC live in APPn payloads, and a seekable stream never yields them."""
+    data, app_payload, _, _ = images.jpeg_with_labelled_regions()
+    stream = RecordingStream(data)
+
+    read_jpeg_header(stream)
+
+    assert not stream.read_any_of(app_payload)
+    assert stream.seeks > 0
+
+
+def test_the_scan_is_untouched_even_when_no_frame_header_is_found() -> None:
+    """Refusing at SOS must not mean reading the scan to discover there is none."""
+    data = images.jpeg_without_frame_header()
+    stream = RecordingStream(data)
+
+    with pytest.raises(ProcessingInputError, match="no frame header"):
+        read_jpeg_header(stream)
+
+    # The walk stops at the SOS marker itself, so not even its own length field
+    # — let alone the entropy-coded bytes behind it — is read.
+    assert stream.furthest_read <= data.index(b"\xff\xda") + 2
+
+
+def test_an_unseekable_stream_is_walked_too() -> None:
+    """Seeking is an optimization; a pipe still gets its header read."""
+    data, _, _, _ = images.jpeg_with_labelled_regions()
+
+    header = read_jpeg_header(unseekable(data))
+
+    assert (header.width, header.height) == (images.DEFAULT_WIDTH, images.DEFAULT_HEIGHT)
+
+
+def test_an_unseekable_stream_still_stops_at_the_frame_header() -> None:
+    """Payload bytes have to be read to be dropped, but the scan still is not."""
+    data, _, frame_header, scan = images.jpeg_with_labelled_regions()
+    stream = UnseekableStream(data)
+
+    read_jpeg_header(cast(BinaryIO, stream))
+
+    furthest = max((span.stop for span in stream.reads), default=0)
+    assert furthest <= frame_header.stop
+    assert not any(set(span) & set(scan) for span in stream.reads)
+
+
+def test_an_unseekable_truncated_segment_is_refused() -> None:
+    """Without seek a short payload is noticed while it is being dropped."""
+    data = images.JPEG_SOI + bytes([0xFF, 0xE1]) + struct.pack(">H", 4096) + b"\x00" * 8
+
+    with pytest.raises(ProcessingInputError, match="truncated"):
+        read_jpeg_header(unseekable(data))
+
+
+def test_skipped_bytes_count_against_the_byte_budget() -> None:
+    """A payload stepped over is still traversed, so it still costs budget."""
+    beyond = images.jpeg_with_bulky_segments(MAX_JPEG_SCAN_BYTES)
+    stream = RecordingStream(beyond)
+
+    with pytest.raises(ProcessingInputError, match="structural inspection limit"):
+        read_jpeg_header(stream)
+
+    # The budget was spent on bytes that were skipped rather than read, which is
+    # exactly why the counter has to charge for skipping.
+    assert stream.consumed < MAX_JPEG_SCAN_BYTES
+
+
+# --- a frame header that declares more than it has --------------------------
+
+
+def test_a_frame_header_declaring_more_than_the_file_holds_is_refused() -> None:
+    """The six structural bytes being present is not evidence the segment is."""
+    with pytest.raises(ProcessingInputError, match="truncated"):
+        read_jpeg_header(io.BytesIO(images.jpeg_with_truncated_frame_header()))
+
+
+def test_that_refusal_happens_despite_readable_dimensions() -> None:
+    """The dimensions in such a header are perfectly readable, and not believed."""
+    data = images.jpeg_with_truncated_frame_header()
+    # Marker (2) + length (2) + precision, height, width and component count (6).
+    structure_end = data.index(b"\xff\xc0") + 4 + 6
+
+    # The width and height are right there, complete, before the file runs out.
+    assert len(data) > structure_end
+
+    with pytest.raises(ProcessingInputError):
+        read_jpeg_header(io.BytesIO(data))
+
+
+def test_a_complete_frame_header_with_many_components_is_accepted() -> None:
+    """The descriptors are required to be present; they are not interpreted."""
+    header = read_jpeg_header(
+        io.BytesIO(
+            images.JPEG_SOI
+            + images.sof_segment(components=4, width=21, height=34)
+            + images.JPEG_SCAN_TAIL
+        )
+    )
+
+    assert (header.width, header.height) == (21, 34)
+
+
+# --- the PNG format's own dimension range -----------------------------------
+
+
+def test_the_png_dimension_limit_is_the_formats_own() -> None:
+    """Not a policy of this build: it is what IHDR's integer type permits."""
+    assert PNG_MAX_DIMENSION == 2_147_483_647
+
+
+def test_the_largest_legal_png_dimension_is_accepted() -> None:
+    header = read_png_header(png_header(width=PNG_MAX_DIMENSION, height=PNG_MAX_DIMENSION))
+
+    assert (header.width, header.height) == (PNG_MAX_DIMENSION, PNG_MAX_DIMENSION)
+
+
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [
+        (PNG_MAX_DIMENSION + 1, 3),
+        (7, PNG_MAX_DIMENSION + 1),
+        (0xFFFFFFFF, 0xFFFFFFFF),
+    ],
+)
+def test_a_png_dimension_outside_the_format_is_refused(width: int, height: int) -> None:
+    with pytest.raises(ProcessingInputError, match="format's limit"):
+        read_png_header(png_header(width=width, height=height))
+
+
+def test_a_large_but_legal_png_is_still_not_a_size_policy() -> None:
+    """No decode-safety ceiling: nothing is decoded, so a big number is a number."""
+    header = read_png_header(png_header(width=100_000, height=100_000))
+
+    assert (header.width, header.height) == (100_000, 100_000)
+
+
+# --- what a structurally accepted PNG does and does not prove ---------------
+
+
+def test_an_apng_datastream_is_accepted_as_a_png_header(
+    image_processor: ImageProcessor, store: InMemoryRawObjectStore
+) -> None:
+    """The parser stops after IHDR, so it makes no static-versus-animated claim.
+
+    An APNG is an ``image/png`` datastream whose animation lives in chunks after
+    the header this build reads. Phase 4A accepts it exactly as it accepts any
+    PNG, records that it found a structurally valid ``IHDR``, and asserts nothing
+    about how many frames follow — because it never looked. Classifying that is
+    later work; the immutable original keeps every byte of it meanwhile.
+    """
+    content = image_processor.process(image_capture(store, images.png_with_animation_control()))
+
+    assert content.metadata == {
+        IMAGE_METADATA_KEY: {
+            ENCODED_FORMAT_KEY: "png",
+            ENCODED_WIDTH_KEY: images.DEFAULT_WIDTH,
+            ENCODED_HEIGHT_KEY: images.DEFAULT_HEIGHT,
+        }
+    }
+
+
+def test_the_parser_never_reaches_an_animation_control_chunk() -> None:
+    """Which is why no animation classification is claimed: it is not looked at."""
+    data = images.png_with_animation_control()
+    stream = RecordingStream(data)
+
+    read_png_header(stream)
+
+    assert stream.furthest_read == PNG_HEADER_SIZE
+    assert not stream.read_any_of(range(PNG_HEADER_SIZE, len(data)))
+    assert data.index(b"acTL") > PNG_HEADER_SIZE
+
+
+def test_a_marker_segment_with_an_empty_payload_is_stepped_over() -> None:
+    """A declared length of exactly 2 is a legal segment carrying nothing."""
+    empty = bytes([0xFF, 0xE1]) + struct.pack(">H", 2)
+
+    header = read_jpeg_header(io.BytesIO(images.jpeg(leading=empty + images.JFIF_APP0)))
+
+    assert (header.width, header.height) == (images.DEFAULT_WIDTH, images.DEFAULT_HEIGHT)
+
+
+class HostileStream(io.BytesIO):
+    """A stream that raises when asked whether it can seek.
+
+    Streams are third-party code. A capability probe that throws must not become
+    a failure to read a perfectly good header, so the parser treats an
+    unanswerable question as "no" and reads the payload instead.
+    """
+
+    def seekable(self) -> bool:
+        raise OSError("this stream declines to say")
+
+
+def test_a_stream_that_will_not_say_whether_it_seeks_is_still_read() -> None:
+    data, _, _, _ = images.jpeg_with_labelled_regions()
+
+    header = read_jpeg_header(HostileStream(data))
+
+    assert (header.width, header.height) == (images.DEFAULT_WIDTH, images.DEFAULT_HEIGHT)

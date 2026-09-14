@@ -209,3 +209,47 @@ def jpeg_with_bulky_segments(at_least: int) -> bytes:
     count = at_least // per_segment + 1
     filler = jpeg_segment(0xE1, b"\x00" * MAX_SEGMENT_PAYLOAD) * count
     return JPEG_SOI + filler + sof_segment() + JPEG_SCAN_TAIL
+
+
+def jpeg_with_truncated_frame_header(*, declared_payload: int = 64) -> bytes:
+    """A JPEG whose frame header declares more bytes than the file contains.
+
+    The six structural bytes — precision, height, width, component count — are
+    all present and perfectly readable, and the dimensions they carry are valid.
+    What is missing is the rest of the segment the header declared. A parser that
+    returns as soon as it can read those six bytes accepts this file; one that
+    requires the declared segment to be present refuses it as truncated, which is
+    what it is.
+    """
+    structure = struct.pack(">BHHB", 8, DEFAULT_HEIGHT, DEFAULT_WIDTH, 3)
+    segment = bytes([0xFF, 0xC0]) + struct.pack(">H", declared_payload + 2) + structure
+    return JPEG_SOI + JFIF_APP0 + segment + b"\x00\x00\x00\x00"
+
+
+def jpeg_with_labelled_regions(*, marker_payload: int = 512) -> tuple[bytes, range, range, range]:
+    """A JPEG plus the byte ranges of its ``APPn`` payload, its frame header and its scan.
+
+    Returned together because the interesting assertions about this parser are
+    about *which bytes it touched*, and a test cannot check that against ranges
+    it had to recompute by hand.
+    """
+    app = jpeg_segment(0xE1, b"Exif\x00\x00" + b"\xa5" * (marker_payload - 6))
+    sof = sof_segment()
+
+    app_payload = range(len(JPEG_SOI) + 4, len(JPEG_SOI) + len(app))
+    frame_header = range(len(JPEG_SOI) + len(app), len(JPEG_SOI) + len(app) + len(sof))
+    scan = range(frame_header.stop, frame_header.stop + len(JPEG_SCAN_TAIL))
+
+    return JPEG_SOI + app + sof + JPEG_SCAN_TAIL, app_payload, frame_header, scan
+
+
+def png_with_animation_control(*, frames: int = 3) -> bytes:
+    """A PNG whose IHDR is followed by an ``acTL`` chunk — an APNG, in other words.
+
+    It exists to pin down what Phase 4A does *not* claim. The parser reads the
+    33-byte prefix and stops, so this datastream is structurally accepted exactly
+    like any other PNG: the build records that it found a valid ``IHDR``, and
+    says nothing at all about whether the frames behind it are one or many.
+    """
+    actl = _chunk(b"acTL", struct.pack(">II", frames, 0))
+    return png(tail=actl + _default_tail())

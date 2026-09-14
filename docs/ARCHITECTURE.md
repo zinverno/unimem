@@ -305,16 +305,27 @@ not import an imaging library, `Pillow` stays in the optional `[ocr]` extra, and
 a small hand-written header parser, and the supported list is what such a parser
 reads correctly and cheaply. Dimensions come from PNG's mandatory `IHDR` in one
 fixed 33-byte read — the complete chunk including its CRC, which is validated,
-with the header's structural fields checked against the legal combinations — and
-from the first supported JPEG `SOF` in a marker walk with explicit finite limits
-that stops at `SOS`. Nothing is decompressed and no pixel is decoded: no `IDAT`,
-no ancillary chunks, no entropy-coded data. The declared MIME type routes, and
-the processor separately verifies that header bytes are consistent with that
-declaration, refusing a contradiction rather than inferring what it might be.
-WebP, GIF, TIFF, HEIC and AVIF are deferred to a later explicit decision; animated
-formats are excluded because recording a moving picture as a still is a false
-claim; SVG is excluded on different grounds, as an active XML document with a
-materially different security model rather than a raster still.
+with the structural fields checked against the legal combinations and both
+dimensions required to lie inside the format's own 1..2^31−1 range — and from the
+first supported JPEG `SOF` in a *streaming* marker walk, bounded at 256 segments
+and 1 MiB of structural span, that steps over payloads it does not need and stops
+at the frame header. Neither parser prefetches, nothing is decompressed and no
+pixel is decoded: no `IDAT`, no ancillary chunks, no `APPn` payload interpreted,
+no entropy-coded data read. The declared MIME type routes, and the processor
+separately verifies that header bytes are consistent with that declaration,
+refusing a contradiction rather than inferring what it might be. WebP, GIF, TIFF,
+HEIC and AVIF are deferred to a later explicit decision, their animation
+containers among them; SVG is excluded on different grounds, as an active XML
+document with a materially different security model rather than a raster image.
+
+**What accepting a PNG proves, and what it does not.** The parser stops after
+`IHDR`, so Phase 4A does not classify a PNG datastream as static or animated: an
+`acTL` chunk sits behind that prefix and is never looked at. `image/apng` is not
+an accepted declared type, but an APNG served as `image/png` is ingested like any
+other PNG, and `encoded_format: "png"` means "a structurally accepted PNG header
+was read" rather than "one frame follows". Nothing is lost — the immutable
+original keeps every byte — and frame-level interpretation is later work rather
+than something this phase quietly settled.
 
 **Canonical versus derived.** The immutable original is canonical and stays
 exactly as submitted. Structural observations — encoded format, encoded width,

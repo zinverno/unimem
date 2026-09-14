@@ -331,10 +331,39 @@ Deferred, with reasons rather than dismissals: **WebP** encodes dimensions three
 different ways across `VP8`, `VP8L` and `VP8X`, which is three parsers rather
 than one. **GIF** has a trivially readable header but is an animation container.
 **TIFF** requires IFD traversal with variable endianness. **HEIC** and **AVIF**
-require an ISO-BMFF parser and carry codec baggage. **Animated formats are
-excluded from 4A as a class** — animated GIF and WebP, and APNG — because
-ingesting a moving picture and recording it as a still is a false claim made by
-the content type itself.
+require an ISO-BMFF parser and carry codec baggage. Their MIME types are refused
+at intake, animation containers among them, so no `image/gif` or `image/webp`
+capture is ingested at all — and neither is `image/apng`.
+
+### What a structurally accepted PNG does and does not prove
+
+`image/apng` is not an accepted declared type, but APNG is ordinarily served as
+`image/png`, and that case deserves a precise statement rather than a
+comfortable one.
+
+**Phase 4A does not classify a PNG datastream as static or animated.** The
+parser reads the 33-byte signature-and-`IHDR` prefix and stops, by design; an
+`acTL` animation-control chunk sits after that prefix, so this build never looks
+at one and could not report it if it wanted to. Adding a chunk walk purely to
+detect APNG would trade the parser's whole bounded-read property for a
+classification nothing in this phase uses, and it is not done.
+
+So `ContentType.IMAGE` together with
+`metadata["image"]["encoded_format"] == "png"` means exactly one thing: *the
+staged object begins with a structurally accepted PNG header*. It does **not**
+mean the datastream was proven to contain a single static frame. A reader that
+needs that guarantee does not have it from this build, and this ADR is where it
+should find that out rather than discovering it from a surprising file.
+
+Nothing is lost by not knowing. The immutable original is stored exactly as
+submitted, so every animation chunk is still there for a later phase that
+decides to read them; frame extraction, animation metadata, and any
+static-versus-animated classification are out of scope for 4A, not silently
+resolved by it.
+
+The word "still" throughout this phase therefore names the *modality this build
+has a processor for* — raster images, as opposed to video — and is not a
+per-file verdict about frame count.
 
 **SVG is excluded on different grounds, and the distinction matters.** The
 others are deferred; SVG is not part of this slice at all. It is not a raster
@@ -451,7 +480,16 @@ metadata. The required `image` mapping stays exactly the three keys fixed above.
 A later implementation may surface bit depth and colour type under the
 cheap-and-header-present rule, but Phase 4A does not require it to.
 
-### JPEG: a bounded marker walk, and no entropy decoding
+### JPEG: a bounded streaming marker walk, and no entropy decoding
+
+**The walk consumes the stream incrementally and must never prefetch.** It reads
+`SOI`, then one marker at a time, and returns as soon as it has validated the
+first supported frame header. Reading a budget-sized prefix before parsing would
+be a contradiction of everything else in this section: a normal JPEG is smaller
+than the byte budget, so such a prefetch reads the entire file — `APPn`
+payloads, `SOS`, and the entropy-coded scan with it — in order to find a header
+sitting in its first few kilobytes. Whatever the parser has not reached, it has
+not read.
 
 The parser must:
 
@@ -471,6 +509,12 @@ The parser must:
 * read the `SOF` payload as precision (1 byte), height (2 bytes big-endian),
   width (2 bytes big-endian), component count (1 byte), and require height and
   width to be nonzero;
+* require the **whole** declared `SOF` segment to be present before accepting
+  it. Those six structural bytes being readable is not evidence that the rest of
+  the segment is: a frame header declaring a length the file does not contain is
+  truncated, and returning dimensions out of it would be believing a header that
+  is not all there. The component descriptors behind them are required to exist
+  and are not interpreted;
 * terminate the walk at `SOS` (`FF DA`) or `EOI` (`FF D9`) and refuse if no
   supported `SOF` was found before either — entropy-coded data begins at `SOS`,
   and this build does not enter it;
@@ -479,7 +523,9 @@ The parser must:
   introducer was required, or any truncation.
 
 **The explicit finite bounds on the walk are: at most 256 marker segments
-examined, and at most 1 MiB (1 048 576 bytes) of the file consumed.** Exceeding
+examined, and at most 1 MiB (1 048 576 bytes) of structural span traversed** —
+every byte the cursor advances over counts, whether it was read or stepped over.
+Exceeding
 either is a refusal. Both are generous by orders of magnitude — a real JPEG's
 `SOF` follows its `APPn`, `DQT` and `DHT` segments within a few kilobytes — and
 both exist to make the walk provably finite over a crafted file, which is a
@@ -488,10 +534,19 @@ this build's parser declined to keep looking; it is not a claim that the file is
 invalid JPEG.
 
 The parser must **not** Huffman- or arithmetic-decode, dequantize, inverse-DCT,
-colour-convert, or in any other way process entropy-coded image data, and must
-not read `APPn` payloads for their content.
+colour-convert, or in any other way process entropy-coded image data. It stops at
+the `SOS` marker itself, so neither the scan header nor the entropy-coded bytes
+behind it are read at all.
 
-### Encoded dimensions are recorded truthfully, and are not capped in 4A
+`APPn` payloads — where EXIF, XMP and ICC live — are stepped over by their
+declared length and never interpreted. Where the stream can seek, they are not
+read into the process either; where it cannot, they are read in bounded chunks
+and dropped unexamined. Seeking is an optimization and not a requirement, and
+the wording matters: the guarantee this build makes is that no payload is
+*interpreted*, with the stronger "not read at all" holding for seekable streams,
+which is what the raw object store provides.
+
+### Encoded dimensions are recorded truthfully, within the format's own range
 
 A large encoded width or height is **not** malformed and must not be treated as
 such. A header declaring 100 000 × 100 000 is a header stating a fact about how
@@ -499,13 +554,24 @@ the image is encoded; the parser reads that fact, records it, and moves on.
 Because 4A never decodes, a declared dimension is an integer and costs nothing
 to hold.
 
-Phase 4A therefore imposes **no encoded-dimension ceiling**. Validation is
-structural legality per the format specification — signature, chunk or marker
-structure, mandatory fields, nonzero dimensions, no truncation — and nothing
-else. Refusing a legal image because a hypothetical future decoder would find it
-expensive would be this build declining to record something true about a file it
-can read perfectly well, and it would put a decode-safety policy in a phase that
-performs no decode.
+Phase 4A therefore imposes **no application or decode-safety ceiling** on
+encoded dimensions. What it does enforce is the format's own normative range,
+because that is structural legality rather than policy — and the two are
+genuinely different things. For PNG, `IHDR`'s four-byte integer type is
+normatively restricted to 0 .. 2^31 − 1 and zero is separately invalid, so the
+legal range is **1 .. 2 147 483 647** (`PNG_MAX_DIMENSION`) and a header
+declaring more is outside the specification, not merely big. JPEG needs no such
+rule: its dimensions are 16-bit fields and are bounded by their own encoding, so
+adding a limit there would be inventing one.
+
+Validation is therefore structural legality per the format specification —
+signature, chunk or marker structure, mandatory fields, dimensions inside the
+format's range, no truncation — and nothing else. Refusing a *legal* image
+because a hypothetical future decoder would find it expensive would be this
+build declining to record something true about a file it can read perfectly
+well, and it would put a decode-safety policy in a phase that performs no
+decode. A value the specification does not permit is a different matter: it is
+not made valid by being a cheap integer to hold.
 
 **The obligation this creates lands squarely on whoever adds decoding.** Any
 future path that rasterizes, decodes, thumbnails, or recognizes — Phase 4B's
@@ -562,7 +628,9 @@ change.
   **`segments = []`**, and one `COMPLETE` `ProcessingRecord`.
 * Verification that header bytes are consistent with the declared MIME type, and
   a typed refusal when they are not.
-* Bounded, deterministic PNG and JPEG header parsing to the limits fixed above.
+* Bounded, deterministic PNG and JPEG header parsing to the limits fixed above:
+  one fixed 33-byte PNG read, and a streaming JPEG marker walk that prefetches
+  nothing and stops at the first fully present supported frame header.
 * Typed `ProcessingInputError` for malformed, truncated, structurally illegal,
   or type-mismatched input.
 * One name added to the composition root's processor list.
@@ -585,7 +653,8 @@ change.
   asset.
 * Any pixel decode, and therefore any decode-time resource budget — that
   obligation belongs to the phase that introduces decoding.
-* WebP, GIF, TIFF, HEIC, AVIF, SVG, and animated formats.
+* WebP, GIF, TIFF, HEIC, AVIF and SVG as declared types, `image/apng` among
+  them; and any static-versus-animated classification of an accepted PNG.
 * A generic upload-size limit or any change to `POST /v1/uploads`.
 * Any new `core` runtime dependency; any imaging library, rasterizer, OCR
   engine, or `subprocess` in `core`.
@@ -598,10 +667,12 @@ change.
 * **No decode, so no decompression bomb.** The parser reads headers and stops.
   Declared dimensions are integers, not allocations.
 * **Bounded parsing by construction.** PNG is one fixed 33-byte read — a
-  complete, CRC-validated, structurally checked `IHDR` — with no chunk walk and
-  no decompression. JPEG is a marker walk with explicit finite limits —
-  256 segments, 1 MiB — that terminates at `SOS` and never enters entropy-coded
-  data.
+  complete, CRC-validated, structurally checked `IHDR`, with dimensions inside
+  the format's own range — with no chunk walk and no decompression. JPEG is a
+  *streaming* marker walk with explicit finite limits — 256 segments, 1 MiB of
+  structural span — that terminates at `SOS` and never enters entropy-coded
+  data. Neither parser prefetches: memory held is bounded by the header being
+  validated rather than by the size of the file.
 * **Nothing is executed, fetched, or opened.** The only input is the byte stream
   the raw object store hands over. A file that is simultaneously a valid PNG and
   a valid archive or HTML document is inert here, because nothing renders,
@@ -667,7 +738,22 @@ change.
   narrow verification above gets the safety without the guessing.
 * **Capping encoded dimensions in 4A as a decode-safety measure.** Refuses
   legal images this build can read, and puts a decode policy in a phase that
-  performs no decode. The budget belongs where the allocation happens.
+  performs no decode. The budget belongs where the allocation happens. The
+  format's own range is a different thing and is enforced.
+* **Reading a budget-sized prefix and then parsing it.** Simpler to write and
+  wrong in the common case: a normal JPEG is smaller than the budget, so it
+  reads the whole file — `APPn` payloads, `SOS`, and the entropy-coded scan —
+  to find a header in its first few kilobytes, which is exactly what every other
+  sentence here promises not to do.
+* **Accepting a frame header on its first six bytes.** Those bytes can be
+  present in a file that stops before the segment they belong to ends, and
+  returning dimensions from one is believing a header that is not all there.
+* **Walking PNG chunks to detect APNG.** It would trade the parser's bounded
+  33-byte read — the property that makes chunk floods and compressed ancillary
+  chunks unreachable by construction — for a classification nothing in this
+  phase consumes. The honest alternative was cheaper: say plainly that this
+  build does not classify a PNG as static or animated, and keep every byte of
+  the original for the phase that wants to.
 * **A generic upload-size limit in this slice.** Cross-modality hardening of a
   shared route, with limits that would be invented rather than derived, buried
   inside a still-image PR.
