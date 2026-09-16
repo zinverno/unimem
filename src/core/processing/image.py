@@ -639,6 +639,36 @@ _HEADER_READERS: Final[dict[str, Callable[[BinaryIO], ImageHeader]]] = {
 }
 
 
+def read_image_header(stream: BinaryIO, mime_type: str) -> ImageHeader:
+    """Read the header of a still image declared ``mime_type``.
+
+    A published dispatch over :data:`_HEADER_READERS`, and nothing else. It adds
+    no parsing behaviour, reads no additional byte, and changes no refusal: it
+    exists so that a second processor can reach the *exact* parsers
+    :class:`ImageProcessor` uses rather than assembling its own two-entry lookup
+    and becoming a place where the supported set could drift.
+
+    The declaration still decides, and the reader then verifies the bytes are
+    consistent with it. A MIME type this build has no parser for is refused here
+    exactly as it is inside :meth:`ImageProcessor.process`, and specifically is
+    **not** sniffed: nothing looks at the leading bytes to discover what the file
+    "really" is. Refusing a declaration this build cannot read is not inferring a
+    format.
+
+    Raises :class:`~core.processing.errors.ProcessingInputError` for an
+    unsupported declared type, and whatever the selected parser raises — also a
+    ``ProcessingInputError`` — for a malformed, truncated, structurally illegal,
+    or type-mismatched header.
+    """
+    reader = _HEADER_READERS.get(mime_type)
+    if reader is None:
+        raise ProcessingInputError(
+            f"a raw object declared a mime_type that is not one of "
+            f"{_IMAGE_MIME_TYPES_PHRASE}; this build reads those still images only"
+        )
+    return reader(stream)
+
+
 def _original_asset(raw_object: RawObjectRef, ref: str, mime_type: str) -> Asset:
     """Describe the immutable original image as an asset of the content object.
 

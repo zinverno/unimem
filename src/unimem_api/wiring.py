@@ -26,17 +26,23 @@ There is no settings framework, environment lookup, config file, profile, or DI
 container. The set of processors this application runs with is a list written
 here, exactly as :class:`~core.processing.ProcessorRouter` intends.
 
-**One optional capability now reaches this function, and it arrives as a
-parameter.** Phase 3 PR 3 adds local OCR for scanned PDF pages, and a deployment
-turns it on by handing :func:`build_local_app` a
-:class:`~core.processing.ocr.PdfPageOcr`. What arrives is the *port*, already
-constructed: the concrete PDFium/Tesseract adapter is built one layer out, in
-:mod:`unimem_api.__main__`, so this module still imports no native library, no
-imaging package, and no ``subprocess``, and a default deployment with neither
-installed still loads it. That keeps the optional dependency genuinely optional
-rather than optional-until-something-imports-it, and it keeps this function what
-it has always been: a list of constructor calls with nothing to look anything up
-in. No container, no registry, no module-level service, no ``app.state``.
+**Two optional capabilities now reach this function, and both arrive as
+parameters.** Phase 3 PR 3 added local OCR for scanned PDF pages and Phase 4 PR 2
+adds it for staged images; a deployment turns either on by handing
+:func:`build_local_app` the corresponding port —
+:class:`~core.processing.ocr.PdfPageOcr` or
+:class:`~core.processing.image_recognition.ImageOcr`. They are independent: all
+four combinations are valid, and neither enables, requires, or configures the
+other.
+
+What arrives is the *port*, already constructed: the concrete adapters are built
+one layer out, in :mod:`unimem_api.__main__`, so this module still imports no
+native library, no imaging package, and no ``subprocess``, and a default
+deployment with none of them installed still loads it. That keeps the optional
+dependencies genuinely optional rather than optional-until-something-imports-it,
+and it keeps this function what it has always been: a list of constructor calls
+with nothing to look anything up in. No container, no registry, no module-level
+service, no ``app.state``.
 
 Every processor, intake, *and* the upload route share the one
 ``LocalRawObjectStore`` instance, which is not a detail. A raw original is
@@ -57,6 +63,7 @@ from core.intake import CaptureIntake
 from core.persistence import SqliteCaptureRecordStore, SqliteContentObjectStore
 from core.processing import (
     DocxProcessor,
+    ImageOcrProcessor,
     ImageProcessor,
     PdfOcrProcessor,
     PdfProcessor,
@@ -66,6 +73,7 @@ from core.processing import (
     TextProcessor,
     WebpageProcessor,
 )
+from core.processing.image_recognition import ImageOcr
 from core.processing.ocr import PdfPageOcr
 from core.storage import LocalRawObjectStore
 from unimem_api.app import create_app
@@ -95,7 +103,30 @@ def _pdf_processor(raw_store: LocalRawObjectStore, pdf_ocr: PdfPageOcr | None) -
     return PdfOcrProcessor(raw_store, pdf_ocr)
 
 
-def build_local_app(data_dir: Path, *, pdf_ocr: PdfPageOcr | None = None) -> FastAPI:
+def _image_processor(raw_store: LocalRawObjectStore, image_ocr: ImageOcr | None) -> Processor:
+    """The one image processor this deployment runs. Never both, never neither.
+
+    The same single ``if`` :func:`_pdf_processor` is, for the same reason and with
+    the same consequence: ``ImageProcessor`` and ``ImageOcrProcessor`` make
+    identical capability claims, so registering both is an
+    ``AmbiguousProcessorError`` on every image capture rather than a precedence
+    rule nobody wrote down.
+
+    ``ImageOcrProcessor`` takes the recognizer as a constructor argument, so a
+    deployment that did not supply one cannot end up with a processor holding a
+    ``None`` engine that fails on the first photograph.
+    """
+    if image_ocr is None:
+        return ImageProcessor(raw_store)
+    return ImageOcrProcessor(raw_store, image_ocr)
+
+
+def build_local_app(
+    data_dir: Path,
+    *,
+    pdf_ocr: PdfPageOcr | None = None,
+    image_ocr: ImageOcr | None = None,
+) -> FastAPI:
     """Wire the real stack against ``data_dir`` and return the API over it.
 
     The whole application, in the order it depends on itself::
@@ -110,36 +141,43 @@ def build_local_app(data_dir: Path, *, pdf_ocr: PdfPageOcr | None = None) -> Fas
           or PdfOcrProcessor         ...recognizing pages that carry no text
         DocxProcessor              stored docx document -> canonical content
         ImageProcessor             stored png/jpeg image -> canonical content
+          or ImageOcrProcessor       ...recognizing any text in the pixels
         ProcessorRouter            exactly one processor per capture
         ProcessingOrchestrator     stored -> complete, or a truthful failure
 
-    Every processor that exists is registered — with exactly one exception, which
-    is the point of ``pdf_ocr``. ``PdfProcessor`` and ``PdfOcrProcessor`` both
-    claim ``DOCUMENT`` plus ``application/pdf``, so they are *alternatives*:
-    :func:`_pdf_processor` returns one or the other and never both, because both
-    in one router is an ``AmbiguousProcessorError`` on every PDF capture. Which
-    one a deployment gets is decided here, by whether a recognizer was handed in,
-    and it cannot be decided anywhere else — not by a request field, not by a
-    MIME type, not by a capture intent, and not by registration order.
+    Every processor that exists is registered — with exactly two exceptions,
+    which are the point of ``pdf_ocr`` and ``image_ocr``. ``PdfProcessor`` and
+    ``PdfOcrProcessor`` both claim ``DOCUMENT`` plus ``application/pdf``, and
+    ``ImageProcessor`` and ``ImageOcrProcessor`` both claim ``IMAGE`` plus
+    ``image/png`` or ``image/jpeg``, so each pair is a pair of *alternatives*:
+    :func:`_pdf_processor` and :func:`_image_processor` each return one or the
+    other and never both, because both in one router is an
+    ``AmbiguousProcessorError`` on every capture of that kind. Which one a
+    deployment gets is decided here, by whether a recognizer was handed in, and it
+    cannot be decided anywhere else — not by a request field, not by a MIME type,
+    not by a capture intent, and not by registration order.
 
     Everything else is unchanged and none of it knows OCR exists. The router's
     exactly-one-match rule is doing the same real work it was: ``TEXT`` reaches
     ``TextProcessor``, ``WEBPAGE`` reaches ``WebpageProcessor``, a ``DOCUMENT``
     declared ``application/pdf`` reaches whichever PDF processor was chosen, one
     declared ``.docx`` reaches ``DocxProcessor``, and an ``IMAGE`` declared
-    ``image/png`` or ``image/jpeg`` reaches ``ImageProcessor`` — each because of
-    what it claims, never because of where it sits in this list. Order here is
-    not precedence, there is no fallback processor, and an overlap would be an
-    error rather than an accident of ordering.
+    ``image/png`` or ``image/jpeg`` reaches whichever image processor was chosen —
+    each because of what it claims, never because of where it sits in this list.
+    Order here is not precedence, there is no fallback processor, and an overlap
+    would be an error rather than an accident of ordering.
 
-    ``ImageProcessor`` is registered unconditionally and takes no option. It is
-    not an alternative to anything, it has no OCR-enabled twin in this build, and
-    ``pdf_ocr`` neither reaches it nor changes it: recognition for images is
-    later work, and nothing here anticipates it.
+    **The two capabilities are independent, and the code says so by having two
+    parameters and two helpers rather than one flag consulted twice.** All four
+    combinations are valid deployments: neither, PDF OCR only, image OCR only, and
+    both. ``pdf_ocr`` never reaches an image processor and ``image_ocr`` never
+    reaches a PDF one, so enabling either cannot change what the other does, and
+    their prerequisites differ — PDF recognition needs a rasterizer and an imaging
+    library, image recognition needs neither.
 
-    ``pdf_ocr`` is a keyword-only port and defaults to ``None``, which is the
-    default deployment: identical registrations, identical behaviour, and no
-    OCR dependency imported, probed, or executed anywhere.
+    Both are keyword-only ports defaulting to ``None``, which together are the
+    default deployment: identical registrations, identical behaviour, and no OCR
+    dependency imported, probed, or executed anywhere.
 
     Two apps built against one directory are interchangeable: neither store keeps
     a connection, a cache, or in-process state between calls, which is what makes
@@ -163,7 +201,7 @@ def build_local_app(data_dir: Path, *, pdf_ocr: PdfPageOcr | None = None) -> Fas
             WebpageProcessor(raw_store),
             _pdf_processor(raw_store, pdf_ocr),
             DocxProcessor(raw_store),
-            ImageProcessor(raw_store),
+            _image_processor(raw_store, image_ocr),
         ]
     )
     orchestrator = ProcessingOrchestrator(router, record_store, content_store)

@@ -54,6 +54,21 @@ stand in for the interpretation that did not happen. It reads headers only: no
 imaging library, no rasterizer, no decoder, no OCR, and no new ``core``
 dependency. See `ADR-019 <../../docs/ADR/ADR-019-still-image-ingestion.md>`_.
 
+Phase 4 PR 2 adds the seventh, and the second a deployment has to ask for:
+:class:`ImageOcrProcessor`. It reads the same staged ``image/png`` and
+``image/jpeg`` captures :class:`ImageProcessor` reads, through the same public
+:func:`~core.processing.image.read_image_header` helper over the same Phase 4A
+parsers, and differs in exactly one respect — the image is handed to an
+:class:`~core.processing.image_recognition.ImageOcr` port, and nonblank
+recognition becomes one ``OCR`` segment with ``OCR`` provenance. Because both
+claim the same MIME types they are *alternatives*: a deployment registers one or
+the other, never both. A recognizer that reads nothing, and a deployment budget
+that declines to run one at all, both leave a ``COMPLETE`` image object with no
+segments — for an image the pixels are the artifact, so the enrichment can be
+refused without refusing the capture. ``core`` still imports no imaging library,
+no decoder, and no ``subprocess``. See
+`ADR-020 <../../docs/ADR/ADR-020-opt-in-local-image-ocr.md>`_.
+
 Phase 0H adds the step that calls them in order.
 :class:`ProcessingOrchestrator` takes a capture id, loads the authoritative
 record, insists it is ``stored``, routes it, marks it ``processing`` durably,
@@ -107,8 +122,31 @@ from core.processing.image import (
     PNG_MIME_TYPE,
     ImageHeader,
     ImageProcessor,
+    read_image_header,
     read_jpeg_header,
     read_png_header,
+)
+from core.processing.image_ocr import (
+    ENGINE_INVOKED_KEY,
+    ENGINE_KEY,
+    ENGINE_VERSION_KEY,
+    IMAGE_OCR_METADATA_KEY,
+    MAX_ENCODED_BYTES_KEY,
+    MAX_ENCODED_PIXELS_KEY,
+    SETTINGS_KEY,
+    SKIPPED_REASON_KEY,
+    ImageOcrProcessor,
+)
+from core.processing.image_recognition import (
+    ENCODED_BYTE_LIMIT,
+    ENCODED_PIXEL_LIMIT,
+    LIMIT_REASONS,
+    ImageOcr,
+    ImageOcrExecutionError,
+    ImageOcrLimitExceeded,
+    ImageOcrResult,
+    validate_image_ocr_limit,
+    validate_image_ocr_result,
 )
 from core.processing.ocr import (
     PdfOcrExecutionError,
@@ -147,15 +185,24 @@ __all__ = [
     "DEFAULT_TEXT_MIME_TYPE",
     "DOCX_MIME_TYPE",
     "EMBEDDED_TEXT_PAGES_KEY",
+    "ENCODED_BYTE_LIMIT",
     "ENCODED_FORMAT_KEY",
     "ENCODED_HEIGHT_KEY",
+    "ENCODED_PIXEL_LIMIT",
     "ENCODED_WIDTH_KEY",
+    "ENGINE_INVOKED_KEY",
+    "ENGINE_KEY",
+    "ENGINE_VERSION_KEY",
     "HTML_ENCODING",
     "IGNORED_TAGS",
     "IMAGE_METADATA_KEY",
     "IMAGE_MIME_TYPES",
+    "IMAGE_OCR_METADATA_KEY",
     "JPEG_FORMAT",
     "JPEG_MIME_TYPE",
+    "LIMIT_REASONS",
+    "MAX_ENCODED_BYTES_KEY",
+    "MAX_ENCODED_PIXELS_KEY",
     "MAX_JPEG_MARKER_SEGMENTS",
     "MAX_JPEG_SCAN_BYTES",
     "OCR_ATTEMPTED_PAGES_KEY",
@@ -168,6 +215,8 @@ __all__ = [
     "PNG_HEADER_SIZE",
     "PNG_MAX_DIMENSION",
     "PNG_MIME_TYPE",
+    "SETTINGS_KEY",
+    "SKIPPED_REASON_KEY",
     "STARTING_STATUS",
     "TABLE_ROW_BLOCK",
     "TEXT_ENCODING",
@@ -176,6 +225,11 @@ __all__ = [
     "DocxProcessor",
     "HtmlTextExtractor",
     "ImageHeader",
+    "ImageOcr",
+    "ImageOcrExecutionError",
+    "ImageOcrLimitExceeded",
+    "ImageOcrProcessor",
+    "ImageOcrResult",
     "ImageProcessor",
     "InvalidCaptureProcessingStateError",
     "NoProcessorError",
@@ -198,8 +252,11 @@ __all__ = [
     "extract",
     "extract_blocks",
     "extract_pages",
+    "read_image_header",
     "read_jpeg_header",
     "read_png_header",
     "utc_now",
+    "validate_image_ocr_limit",
+    "validate_image_ocr_result",
     "validate_ocr_result",
 ]
