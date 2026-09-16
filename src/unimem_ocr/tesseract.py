@@ -46,7 +46,6 @@ fifty-page scan costs one page of pixels rather than fifty.
 
 import io
 import math
-import subprocess
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -60,6 +59,14 @@ from pypdfium2.version import PDFIUM_INFO, PYPDFIUM_INFO
 
 from core.processing.errors import ProcessingInputError
 from core.processing.ocr import PdfOcrExecutionError, PdfOcrResult, RecognizedPage
+from unimem_ocr.engine import (
+    LAUNCH_ERROR,
+    NONZERO_EXIT,
+    TIMEOUT,
+    EngineInvocation,
+    EngineInvocationError,
+    run_engine,
+)
 from unimem_ocr.policy import (
     DEFAULT_LIMITS,
     PAGE_IMAGE_FORMAT,
@@ -445,70 +452,84 @@ class TesseractPdfPageOcr:
     def _recognize(self, image: bytes, *, page: int, timeout: float) -> str:
         """Run the engine over one page image and return exactly what it printed.
 
-        The argument list is fixed and built entirely from this package's own
-        constants. ``stdin`` and ``stdout`` are Tesseract's own literals for
-        "read the image from standard input" and "write the text to standard
-        output", so no path is named on either side. ``--dpi`` tells the engine
-        the resolution the page was rendered at, which it cannot infer from a PNG
-        with no resolution metadata and would otherwise warn about and guess.
+        The invocation itself lives in :mod:`unimem_ocr.engine`, which is shared
+        with the direct-image adapter because the parts worth getting right — a
+        fixed argument list with no shell, a timeout that kills and reaps, a
+        strict UTF-8 decode, a captured-and-dropped stderr, and the rule that a
+        nonzero exit is never a verdict about the input — are the same in both
+        and must stay that way. What remains here is this path's *policy* and its
+        *wording*.
 
-        Standard error is captured separately and never mixed into the returned
-        text, and it is never returned to a client: Tesseract writes warnings
-        about the image and, on some builds, paths from this machine. Standard
-        output is decoded as UTF-8 **strictly** and handed back unchanged —
-        every byte the engine produced, whitespace and line endings included.
+        The policy: ``eng+rus``, OEM 1, PSM 3, and ``--dpi`` naming the resolution
+        the page was actually rendered at, which the engine cannot infer from a
+        PNG carrying no resolution metadata and would otherwise warn about and
+        guess. The argument vector this produces is byte-for-byte the one this
+        adapter has always sent.
 
-        A timeout kills and reaps the child before the exception leaves this
-        method: :func:`subprocess.run` sends ``SIGKILL`` and then waits on the
-        process, so no orphan is left holding the pipe.
+        The wording: every failure becomes a
+        :class:`~core.processing.ocr.PdfOcrExecutionError` naming the physical
+        page, exactly as before. The shared runner knows nothing about pages and
+        says nothing about them; translating its structured reason into this
+        path's sentence is this method's job, and the sentences are unchanged.
+
+        A nonzero exit is still not treated as a verdict about the page. It can
+        mean a corrupt image, a missing data file, a build that crashed, or an
+        out-of-memory kill, and this adapter cannot tell those apart — so it
+        reports that recognition did not happen rather than claiming the page is
+        unreadable. The child's stderr is deliberately never copied into a
+        message: it is text from another program, it can name paths on this
+        machine, and the status code plus the page number are what a reader of
+        this error can act on.
         """
-        arguments = [
-            self._executable,
-            "stdin",
-            "stdout",
-            "-l",
-            TESSERACT_LANGUAGE_ARGUMENT,
-            "--oem",
-            str(TESSERACT_OEM),
-            "--psm",
-            str(TESSERACT_PSM),
-            "--dpi",
-            str(RENDER_DPI),
-        ]
+        invocation = EngineInvocation(
+            executable=self._executable,
+            languages=TESSERACT_LANGUAGE_ARGUMENT,
+            oem=TESSERACT_OEM,
+            psm=TESSERACT_PSM,
+            timeout=timeout,
+            dpi=RENDER_DPI,
+        )
         try:
-            completed = subprocess.run(
-                arguments,
-                input=image,
-                capture_output=True,
-                timeout=timeout,
-                shell=False,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise PdfOcrExecutionError(
-                f"the OCR engine did not finish page {page} within {timeout:.1f}s and was killed"
-            ) from exc
-        except OSError as exc:
-            raise PdfOcrExecutionError(
-                f"the OCR engine {self._executable!r} could not be run while recognizing "
-                f"page {page} ({exc.strerror or exc})"
-            ) from exc
+            return run_engine(image, invocation)
+        except EngineInvocationError as exc:
+            # **The chain is reproduced exactly, not approximately.** Before the
+            # invocation moved into the shared runner this method raised from the
+            # exception the operating system or the decoder actually produced —
+            # ``subprocess.TimeoutExpired``, ``OSError``, ``UnicodeDecodeError`` —
+            # and, for a nonzero exit, from nothing at all, because a status code
+            # is not an exception. Those are what a reader of a traceback and any
+            # caller inspecting ``__cause__`` have always seen, so they are part of
+            # what this PR must not change.
+            #
+            # ``run_engine`` chains each underlying exception onto the structured
+            # failure, so ``exc.__cause__`` is the original where one exists. The
+            # nonzero case gets ``from None``: without it the shared runner would
+            # surface as the cause of a PDF error, which is a new fact about a
+            # frozen path and an implementation detail this layer exists to hide.
+            #
+            # The branch is on the structured ``reason``, never on the message.
+            message = self._failure_message(exc, page=page, timeout=timeout)
+            if exc.reason == NONZERO_EXIT:
+                raise PdfOcrExecutionError(message) from None
+            raise PdfOcrExecutionError(message) from exc.__cause__
 
-        if completed.returncode != 0:
-            # Not treated as a verdict about the page. A nonzero exit can mean a
-            # corrupt image, a missing data file, a build that crashed, or an
-            # out-of-memory kill, and this adapter cannot tell those apart — so
-            # it reports that recognition did not happen rather than claiming the
-            # page is unreadable. The child's stderr is deliberately *not* copied
-            # into this message: it is text from another program, it can name
-            # paths on this machine, and the status code plus the page number are
-            # what a reader of this error can act on.
-            raise PdfOcrExecutionError(
-                f"the OCR engine exited with status {completed.returncode} on page {page}"
+    def _failure_message(self, failure: EngineInvocationError, *, page: int, timeout: float) -> str:
+        """This path's own sentence for a structured invocation failure.
+
+        Branching on :attr:`~unimem_ocr.engine.EngineInvocationError.reason` and
+        never on the runner's message text, for the same reason nothing in this
+        module parses a ``PdfiumError``'s prose: a message is not an interface.
+        Each branch reproduces the sentence this adapter produced before the
+        invocation moved, because those sentences are what a server log and the
+        tests around them already say.
+        """
+        if failure.reason == TIMEOUT:
+            return f"the OCR engine did not finish page {page} within {timeout:.1f}s and was killed"
+        if failure.reason == LAUNCH_ERROR:
+            return (
+                f"the OCR engine {self._executable!r} could not be run while recognizing "
+                f"page {page} ({failure.detail})"
             )
-        try:
-            return completed.stdout.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise PdfOcrExecutionError(
-                f"the OCR engine's output for page {page} was not valid UTF-8"
-            ) from exc
+        if failure.reason == NONZERO_EXIT:
+            return f"the OCR engine exited with status {failure.returncode} on page {page}"
+        return f"the OCR engine's output for page {page} was not valid UTF-8"

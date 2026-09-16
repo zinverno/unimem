@@ -341,16 +341,140 @@ generic upload-size limit, quota, or disk-usage policy, and has not had one
 since Phase 3. That is cross-modality hardening of a shared route, not part of a
 still-image slice, and Phase 4A leaves the route untouched.
 
-**OCR and vision are absent from 4A.** Opt-in local image OCR is later work
-(Phase 4B) and would take the shape [ADR-018](ADR/ADR-018-opt-in-local-pdf-ocr.md)
-already settled — a narrow port in `core`, machinery in an adapter outside it, a
-composition-root flag no request can reach, and a processor that replaces the
-default one rather than joining it. One constraint on it is fixed now: enabling
-OCR must never turn an image that ingests successfully today into a failure,
-because a recognizer finding no words is a fact about the recognizer and not
-about the picture. Phase 4C is owner manual acceptance and Macro Phase 4
-closure. Neither is designed yet. See
-[ADR-019](ADR/ADR-019-still-image-ingestion.md).
+**OCR and vision are absent from 4A.** Recognition arrives in PR 2, below;
+vision is further out still, and `SegmentType.VISUAL` and
+`ProvenanceSourceType.VISION` stay unused and unsquatted so they remain available
+to mean what they say. See [ADR-019](ADR/ADR-019-still-image-ingestion.md).
+
+**Phase 4, PR 2 — opt-in local image OCR.** Answers "what are the failure and
+resource semantics of an OCR-enabled image processor when the underlying image is
+*already* valid canonical content?" `ImageOcr` and its value types in
+`src/core/processing/image_recognition.py`, `ImageOcrProcessor` in
+`src/core/processing/image_ocr.py`, `TesseractImageOcr` in
+`src/unimem_ocr/image.py` over a stdlib-only invocation runner in
+`src/unimem_ocr/engine.py`, one flag, and one row in the delivery error table.
+**The schema stays `0.2`, no contract, enum, lifecycle state, route, replay or
+persistence rule changes, `core` gains no runtime dependency, and no new
+architectural invariant is added — invariant 19 already governs this.** **Macro
+Phase 4 remains open**; Phase 4C is owner manual acceptance and closure, and is
+still not designed. See [ADR-020](ADR/ADR-020-opt-in-local-image-ocr.md).
+
+**Recognition is a deployment capability.** A second flag, `--image-ocr`,
+independent of `--pdf-ocr`, giving four valid combinations: neither, PDF OCR
+only, image OCR only, both. No request field, capture intent, MIME variant,
+header, or router precedence can reach it.
+
+**The processor is replaced, not joined.** `ImageOcrProcessor` at `image-ocr@0.1`
+makes byte-for-byte the same capability claim `ImageProcessor` does — payload
+type `IMAGE`, a raw object, a declared `image/png` or `image/jpeg` — so the two
+are alternatives. `build_local_app` registers exactly one from a single `if`, and
+registering both is an `AmbiguousProcessorError` rather than a precedence rule.
+Without the flag the default build is unchanged: `IMAGE -> ImageProcessor
+image@0.1`, no OCR module imported, no engine probed, no subprocess, no imaging
+library loaded.
+
+**One OCR segment, or none.** Nonblank recognition becomes exactly one
+`SegmentType.OCR` segment for the whole image — `position = 0`, `ORIGINAL`-asset
+provenance with `ProvenanceSourceType.OCR`, the engine's string stored exactly as
+returned, and **no** `spatial` at all, because there is no page and no bounding
+box to state and `SpatialLocation` refuses to locate nothing. A successful
+recognition that returns whitespace produces `segments = []` and no placeholder;
+the engine ran and found no nonblank text, which is evidence about the recognizer
+and is never recorded as the image being blank.
+
+**A resource limit refuses the enrichment, not the artifact.** ADR-019 obliged
+the first decoding path to enforce a budget from the encoded dimensions before
+allocating, and simultaneously forbade OCR from turning an image that ingests
+today into a failure. Both hold literally: an image over
+`max_encoded_pixels` (20,000,000) or over the adapter's in-memory
+`max_encoded_bytes` (64 MiB) is **never handed to an engine** and the capture
+still succeeds — `201`, persisted content, `segments = []`, `image-ocr@0.1`
+`COMPLETE`, and the skip recorded durably. Not a 422, not a 503, not `PARTIAL`:
+the bound is deterministic, so a retry would produce the same skip and "come back
+later" would be dishonest. The byte bound exists only because the chosen data
+path holds the original in memory to feed a subprocess; it is not an upload
+limit, not a general image-ingestion rule, and not a rule for PDF or DOCX, and
+`POST /v1/uploads` still has no size limit.
+
+**An execution failure is an untrusted result, not a proven outage.**
+`ImageOcrExecutionError` means exactly "the OCR execution did not produce a
+trusted recognition result" — never "this has been proven transient". Phase 4A
+validates only the structural portion it deliberately reads, so it does **not**
+prove the encoded pixel stream behind the header is decodable; a local Tesseract
+may therefore fail because the executable is gone, it timed out, it crashed or
+was killed, it exited nonzero, its output was not UTF-8, the adapter answered
+inconsistently — **or because the encoded image data beyond 4A's structural
+boundary cannot be decoded**, which may be perfectly deterministic for the same
+bytes. The adapter has no stable typed signal separating those, stderr is never
+parsed to guess, and no decoder is added merely to classify. So the conservative
+answer stands: like `PdfOcrExecutionError`, the error is deliberately not a
+`ProcessingError`, the capture stays `PROCESSING`, nothing is persisted, and
+delivery answers a fixed `503 image_ocr_unavailable` — because the system can
+neither blame the canonical image with a durable 422 nor record "OCR ran and found
+no text". **A retry against a repaired deployment may succeed; it is not
+guaranteed to for identical bytes.** A malformed image or a MIME contradiction is
+unchanged from 4A — header validation runs first and its failures are final:
+`ProcessingInputError`, `422 processing_failed`, durable `FAILED`, OCR never
+invoked.
+
+**The limits are not a sandbox.** They bound a preflight structural pixel count,
+the encoded input bytes accumulated for one invocation, and the wall-clock life of
+the subprocess. Phase 4B imposes **no** subprocess RSS limit, no cgroup or
+`rlimit`, no CPU quota beyond the timeout, no guarantee that Tesseract or
+Leptonica cannot be killed by the OS for memory, and no guarantee that
+pathological but under-limit input cannot cause high transient resource use inside
+the child. `max_encoded_bytes` bounds the adapter's encoded input payload, not
+total Python or subprocess RSS — `subprocess.run` and OS pipe machinery add their
+own overhead. A child that dies or returns nothing trustworthy is the 503 above.
+Process isolation, cgroups, workers and containers are deliberately not
+introduced.
+
+**Direct original bytes reach a local Tesseract.** No Pillow, no PDFium, no pixel
+decode inside UniMem, no re-encode, and no temporary file: the submitted PNG or
+JPEG travels on the child's stdin and strict-UTF-8 text comes back on stdout,
+with a fixed argument list, `shell=False`, and nothing client-supplied anywhere
+in `argv`. Letting the engine own decoding is also what keeps a decompression
+bomb's allocation inside a killable child rather than in the server. `--dpi` is
+**not** passed: the PDF path's `--dpi 300` describes a rasterization that
+actually happened, while a direct image was not rasterized here and Phase 4A
+observes no physical density — so the invocation records `dpi_supplied: false`
+and claims nothing about the picture. PSM 3 is fixed and never chosen per image,
+with the honest consequence recorded that photographs and sparse-scene text may
+read worse than a specialized sparse-text policy would manage.
+
+**A separate port, and no generalization of the PDF one.** `ImageOcr` in
+`core/processing/image_recognition.py` is a sibling of `PdfPageOcr`, not a
+subtype and not a shared `Recognizer` abstraction: it has no pages, no
+`embedded_pages`, no `page_count`, no rasterizer identity, and — because ADR-019
+forbids an image OCR verdict — a strictly smaller error vocabulary. Its
+resource-limit signal is structured (`reason`, `limit`) so processor logic
+branches on attributes and never on a message. The only genuinely common surface
+is the subprocess invocation itself, which moves to a stdlib-only runner in
+`unimem_ocr/`; the PDF path's error types, messages and `argv` — `--dpi 300`
+included — are frozen by that extraction. Image OCR's startup gate requires
+Tesseract plus `eng` and `rus` and nothing else, so it loads neither `pypdfium2`
+nor `Pillow`, and the existing `[ocr]` extra is unchanged.
+
+**CI proves that boundary rather than asserting it.** A fifth job, `Local image
+OCR`, installs the package with dev dependencies **only**, installs a system
+Tesseract with `eng` and `rus`, uninstalls `pypdfium2` and `Pillow` defensively,
+asserts through `importlib` that neither resolves, and then runs real image OCR —
+the adapter against the real engine and a live `python -m unimem_api --image-ocr`
+server — under `UNIMEM_REQUIRE_IMAGE_OCR_INTEGRATION=1`, with the same
+proof-it-ran check the PDF suites get. A separate job rather than a step, because
+the two need incompatible installations: the existing `Local PDF OCR` job is
+defined by having the extra and this one by not having it, and it is untouched,
+with its required classes, required mode and count check unweakened (and now
+also covering the PDF argv and message freeze). The required-mode flags are
+separate for the same reason: one flag would force the image job to install the
+extra it exists to do without.
+
+The fixture is a real greyscale PNG assembled byte by byte from `zlib`, so it
+needs no imaging library to create. Its glyphs are drawn as proportional strokes
+rather than scaled-up bitmap blocks, and its token uses only letters with no
+Cyrillic lookalike: the obvious blocky fixture was read by the real engine as
+Cyrillic, because `eng+rus` makes square Latin capitals genuinely ambiguous. The
+fixture was corrected rather than the policy.
 
 ## Future data flow
 

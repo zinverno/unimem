@@ -28,16 +28,34 @@ invents — none of them appear below, so none is quietly given a friendly statu
 code. They fall through to the ASGI server's ordinary 500, which is what an
 unhandled bug should look like. ``BaseException`` is never caught.
 
-One row is not a ``ProcessingError`` and must never be mistaken for one.
+Two rows are not ``ProcessingError``s and must never be mistaken for ones.
 :class:`~core.processing.ocr.PdfOcrExecutionError` says a recognition *run*
 failed — the engine was missing, crashed, timed out, or answered inconsistently —
 so nothing is known about the document and the capture is deliberately left
-non-terminal by the orchestrator. It maps to a 503 with a fixed public message,
-like every other "the server could not do this right now", and specifically not
-to the 422 a ``ProcessingInputError`` gets: a 422 would tell a client their
-document is the problem, which is exactly the claim this failure cannot support.
-It sits outside the ``ProcessingError`` hierarchy in ``core`` so that no base
-class can adopt it into the 422 row by accident.
+non-terminal by the orchestrator.
+:class:`~core.processing.image_recognition.ImageOcrExecutionError` says the same
+about an image, and says slightly less: it means only that the run produced no
+result this build can trust, and it deliberately does **not** claim the failure
+is transient. Phase 4A validates a header and stops, so it never proves the
+encoded pixel stream behind that header is decodable — an engine may therefore
+have failed on this machine, or on these bytes, and nothing available can tell
+those apart without parsing another program's prose.
+
+Both map to a 503 with a fixed public message, like every other "the server could
+not do this right now", and specifically not to the 422 a ``ProcessingInputError``
+gets: a 422 would tell a client their document or their picture is the problem,
+which is exactly the claim neither failure can support. Both sit outside the
+``ProcessingError`` hierarchy in ``core`` so that no base class can adopt either
+into the 422 row by accident, and they are separate types with separate rows
+because the public sentence a client reads should name what was actually being
+processed.
+
+One core error is deliberately **absent** from this table and must stay absent.
+:class:`~core.processing.image_recognition.ImageOcrLimitExceeded` never reaches
+delivery: it is a control signal that
+:class:`~core.processing.image_ocr.ImageOcrProcessor` consumes, and the capture it
+belongs to succeeds with a ``201``. Giving it a status code here would be
+answering a request that was never failed.
 
 One row is not core's. :class:`~unimem_api.replay.CaptureReplayIntegrityError`
 is raised by this package, when a capture that says ``COMPLETE`` turns out to
@@ -73,6 +91,7 @@ from core.persistence import (
 )
 from core.processing import (
     AmbiguousProcessorError,
+    ImageOcrExecutionError,
     InvalidCaptureProcessingStateError,
     NoProcessorError,
     PdfOcrExecutionError,
@@ -148,6 +167,25 @@ _OCR_UNAVAILABLE: Final = HttpError(
     "text recognition for this document could not be completed; "
     "the capture is stored and no content was produced",
 )
+#: The image counterpart, and a separate row rather than a shared one. Its public
+#: text names an image because that is what the client submitted, and a message
+#: about "this document" would be wrong in a way a client cannot correct for.
+#:
+#: The same 503-not-422 reasoning applies with one extra turn of the screw: this
+#: failure may well be deterministic for these exact bytes, because the engine may
+#: have been unable to decode encoded data that Phase 4A's header check never
+#: looked at. A retry against a repaired deployment *may* succeed and is not
+#: guaranteed to — which is still a better answer than a 422 claiming the picture
+#: is at fault, since this build genuinely cannot tell. The text says nothing
+#: about this machine: no engine version, no exit status, no executable name, no
+#: language path, no subprocess stderr, and no local file name, all of which the
+#: underlying error's own message may carry for a server log.
+_IMAGE_OCR_UNAVAILABLE: Final = HttpError(
+    503,
+    "image_ocr_unavailable",
+    "text recognition for this image could not be completed; "
+    "the capture is stored and no content was produced",
+)
 
 #: Which core error becomes which HTTP response.
 #:
@@ -189,6 +227,7 @@ ERROR_MAPPINGS: Final[tuple[tuple[type[Exception], HttpError], ...]] = (
     (ContentObjectPersistenceError, _STORAGE_UNAVAILABLE),
     (RawObjectStoreError, _STORAGE_UNAVAILABLE),
     (PdfOcrExecutionError, _OCR_UNAVAILABLE),
+    (ImageOcrExecutionError, _IMAGE_OCR_UNAVAILABLE),
 )
 
 #: The code for a body FastAPI/Pydantic rejected before any core code ran.

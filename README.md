@@ -1,8 +1,8 @@
 # capture-core
 
 Core domain contracts, immutable raw-object storage, capture-record
-persistence, capture intake for text, HTML, PDF and DOCX — with optional local OCR
-for scanned PDF pages — and a local HTTP capture API
+persistence, capture intake for text, HTML, PDF, DOCX and still images — with
+optional local OCR for scanned PDF pages and for images — and a local HTTP capture API
 for a universal multimodal capture and ingestion layer. Canonical contracts are at schema
 version **0.2**; `0.1` documents remain readable and are rewritten as `0.1`.
 
@@ -127,6 +127,17 @@ material that is not a string:
   request field, no new MIME type, no contract change, and the schema stays
   `0.2`. Recognition is a deployment decision, never something a request can
   switch. See *Scanned PDFs: opt-in local OCR*, below.
+- **Phase 4, PR 2 — opt-in local OCR for images.** The second *optional*
+  capability, and independent of the first. Started with `--image-ocr`, a
+  deployment registers `ImageOcrProcessor` **instead of** `ImageProcessor` and
+  hands the submitted PNG or JPEG bytes straight to a local Tesseract — no
+  rasterizer, no imaging library, and no Python extra. Nonblank text becomes one
+  `ocr` segment for the whole image; an engine that reads nothing, and a budget
+  that declines to run one, both leave the same complete image object with no
+  segments, because for an image the pixels are the artifact and recognition is
+  enrichment over content that is already canonical. Without the flag the build
+  is byte-for-byte the one above. No new route, no new request field, no contract
+  change, and the schema stays `0.2`. See *Images: opt-in local OCR*, below.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 
@@ -146,11 +157,19 @@ It binds `127.0.0.1:8765` by default and creates `./data` if it is missing:
 ```
 
 That is the **default deployment**, and it needs nothing beyond the Python
-package: no rasterizer, no imaging library, and no OCR engine. There is one
-optional capability, off unless you ask for it — local recognition of scanned PDF
-pages, added with `--pdf-ocr`, which has extra install steps and its own
-[section below](#scanned-pdfs-opt-in-local-ocr). Every other behaviour described
-in this README is identical in both modes.
+package: no rasterizer, no imaging library, and no OCR engine. There are two
+optional capabilities, each off unless you ask for it and each independent of the
+other:
+
+| flag | what it adds | what it needs |
+| ---- | ------------ | ------------- |
+| `--pdf-ocr` | recognizes scanned PDF pages that carry no embedded text | the `ocr` extra (a rasterizer and an imaging library) **plus** a system Tesseract with `eng` and `rus` |
+| `--image-ocr` | recognizes text in staged PNG and JPEG images | a system Tesseract with `eng` and `rus`, and **no Python extra at all** |
+
+Both, either, or neither is a valid deployment. See
+[Scanned PDFs](#scanned-pdfs-opt-in-local-ocr) and
+[Images](#images-opt-in-local-ocr) below. Every other behaviour described in this
+README is identical in every mode.
 
 > **This server has no authentication, authorization, or TLS.** Anyone who can
 > reach the port can submit captures and read everything stored. Keep the default
@@ -277,11 +296,13 @@ A few things are worth being precise about:
 
 - **The endpoint now processes plain text, HTML-backed webpages, PDF and DOCX
   documents, and PNG and JPEG still images** (see *Capturing a PDF document* and
-  *Capturing a DOCX document*, below). An image is held and described, not
-  interpreted: there is no OCR and no vision, so its canonical content object
-  carries the exact original plus the format and dimensions read from its
-  header, and **no segments at all**. Other image formats, video, and files are
-  still accepted by the contract and refused with `422 unsupported_payload`.
+  *Capturing a DOCX document*, below). By default an image is held and described,
+  not interpreted: there is no OCR and no vision, so its canonical content object
+  carries the exact original plus the format and dimensions read from its header,
+  and **no segments at all**. A deployment started with `--image-ocr` reads any
+  text in the pixels as well — see [Images](#images-opt-in-local-ocr) — and never
+  runs a vision model either way. Other image formats, video, and files are still
+  accepted by the contract and refused with `422 unsupported_payload`.
 - **Webpage support is deterministic text extraction, not reader mode.** Scripts,
   styles, `noscript`, `template`, and `svg` are dropped, block elements separate
   paragraphs, and entities are decoded. Navigation, menus, and footers are text
@@ -751,6 +772,108 @@ the same whether or not everything on the page was read:
   is not a repair pass, and no password is attempted.
 
 See [ADR-018](docs/ADR/ADR-018-opt-in-local-pdf-ocr.md).
+
+### Images: opt-in local OCR
+
+`--image-ocr` reads text out of a staged PNG or JPEG with a local Tesseract. It is
+independent of `--pdf-ocr`: enable either, both, or neither.
+
+**It needs no Python extra.** The submitted bytes go straight to the engine, which
+does its own decoding, so this build imports no rasterizer and no imaging library
+for images — `pip install "capture-core[ocr]"` is for `--pdf-ocr` and is not
+required here. What you do need is the same system Tesseract and the same two
+language packs:
+
+```bash
+sudo apt-get install tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus
+```
+
+```bash
+python -m unimem_api --data-dir ./data --image-ocr
+```
+
+Startup fails with a sentence naming what is missing if the engine or either
+language pack is absent. It never starts with the capability quietly disabled.
+
+A recognized image keeps everything the default build gives it — the exact
+original as its one asset, the same `encoded_format`, `encoded_width` and
+`encoded_height`, the title you submitted — and gains **at most one** `ocr`
+segment carrying the engine's text exactly as returned:
+
+```jsonc
+{
+  "type": "image",
+  "segments": [
+    {"type": "ocr", "text": "WINDFALL\n", "position": 0, "spatial": null,
+     "provenance": {"source_type": "ocr", "processor": "image-ocr",
+                    "processor_version": "0.1"}}
+  ],
+  "metadata": {
+    "image": {"encoded_format": "png", "encoded_width": 978, "encoded_height": 232},
+    "image_ocr": {"engine_invoked": true, "engine": "tesseract", "engine_version": "5.3.4",
+                  "settings": {"languages": "eng+rus", "psm": 3, "dpi_supplied": false}}
+  }
+}
+```
+
+There is no page number and no bounding box, because this build detects no
+regions and will not invent one.
+
+**Three things behave differently from PDF OCR, and all three follow from the
+same fact: an image is already complete without recognition.**
+
+- **An image the engine read nothing in still succeeds.** You get `201`, a stored
+  content object, and `segments: []` — the same shape the default build produces.
+  The engine ran and found no nonblank text, which is a fact about the
+  recognizer; nothing here records the picture as blank. `engine_invoked: true`
+  plus no segment is how that stays distinguishable from a deployment that never
+  ran one. A textless *PDF*, by contrast, is still refused.
+- **An image too large for the recognition budget also still succeeds.** Over
+  20,000,000 encoded pixels, or larger than the 64 MiB of encoded bytes this
+  adapter will hold for one invocation, the engine is not run at all and the
+  capture completes with the skip recorded:
+
+  ```jsonc
+  "image_ocr": {"engine_invoked": false, "skipped_reason": "encoded_pixel_limit",
+                "max_encoded_pixels": 20000000}
+  ```
+
+  A valid image is valid whether or not this deployment can afford to interpret
+  it. Neither bound is an upload limit: `POST /v1/uploads` is unchanged and still
+  has none.
+- **A recognition that produced nothing trustworthy is a `503
+  image_ocr_unavailable`**, with the capture left non-terminal and no content
+  stored. That covers a missing or wedged engine, a timeout, a crash, a nonzero
+  exit and undecodable output — **and** encoded image data the engine could not
+  read, which this build has no safe way to tell apart from the rest without
+  parsing the engine's own error text. So a retry against a repaired deployment
+  *may* succeed and is **not** guaranteed to for the same bytes. It is the
+  conservative answer rather than a diagnosis: the alternative would be to record
+  a verdict about your picture that nothing here can support.
+
+The policy is fixed and nothing in a request can reach it: `eng+rus`, OEM 1, PSM
+3, one invocation with a 30-second bound, no orientation detection, no deskew, no
+retries. **No `--dpi` is sent**, unlike the PDF path — that number describes a
+rasterization this build performed, and a submitted image was not rasterized here
+and its physical density is never read, so claiming one would be inventing a fact.
+Tesseract applies its own resolution heuristic instead, and the content object
+records `dpi_supplied: false` rather than any claim about the image.
+
+PSM 3 is tuned for a document page. **Recognition on photographs and scattered
+scene text may well be worse than a specialized sparse-text mode would manage** —
+that is an honest limitation of a fixed policy, not a knob, because choosing a
+mode per image would change what a picture is remembered as saying based on a
+guess.
+
+Nothing is decoded, re-encoded, resized, or written to a temporary file by
+UniMem, no filename or path reaches the engine's argument list, there is no
+network call and no cloud service, and no confidence score, detected language,
+orientation, caption, or bounding box is ever recorded. The limits are limits and
+**not a sandbox**: they bound what this adapter reads and how long the engine may
+run, and they impose no memory or CPU limit on the child process and cannot stop
+the operating system killing it.
+
+See [ADR-020](docs/ADR/ADR-020-opt-in-local-image-ocr.md).
 
 To check PDF, DOCX and OCR ingestion by hand on your own machine, work through
 [docs/MANUAL_DOCUMENT_ACCEPTANCE.md](docs/MANUAL_DOCUMENT_ACCEPTANCE.md) — a

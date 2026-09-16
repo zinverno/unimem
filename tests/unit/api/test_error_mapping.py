@@ -32,6 +32,7 @@ from core.persistence import (
 )
 from core.processing import (
     AmbiguousProcessorError,
+    ImageOcrExecutionError,
     InvalidCaptureProcessingStateError,
     NoProcessorError,
     PdfOcrExecutionError,
@@ -110,6 +111,11 @@ MAPPED_ERRORS: list[Exception] = [
     # own row rather than letting a base class adopt it: its message names a local
     # path and an engine, and neither may reach the wire.
     PdfOcrExecutionError(f"the OCR engine at {BACKEND_DETAIL} exited with status 1"),
+    # The image counterpart, and its own row rather than a share of the one above:
+    # the public sentence should name what the client actually submitted. Same
+    # probe, same rule — the engine and the local path in this message stay out of
+    # the response.
+    ImageOcrExecutionError(f"the OCR engine at {BACKEND_DETAIL} exited with status 1"),
     # The one row this package raises itself. It goes through the same probe as
     # every core failure, because the rule it has to obey is the same one.
     CaptureReplayIntegrityError(f"complete but no content, per {BACKEND_DETAIL}"),

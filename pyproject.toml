@@ -38,13 +38,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The optional local-OCR capability, and deliberately *optional*. A default
-# deployment installs neither of these, imports neither of them, and refuses
-# textless PDFs exactly as it always did; `pip install "capture-core[ocr]"` is
-# what makes `python -m unimem_api --pdf-ocr` possible. Both are native wheels,
-# which is most of the reason they are not unconditional: a build that cannot
-# start without a PDF renderer and an imaging library is a build whose kernel
-# has acquired two system dependencies it does not need.
+# The optional PDF *rasterization* capability, and deliberately optional. A
+# default deployment installs neither of these, imports neither of them, and
+# refuses textless PDFs exactly as it always did; `pip install
+# "capture-core[ocr]"` is what makes `python -m unimem_api --pdf-ocr` possible.
+# Both are native wheels, which is most of the reason they are not
+# unconditional: a build that cannot start without a PDF renderer and an imaging
+# library is a build whose kernel has acquired two system dependencies it does
+# not need.
+#
+# The name is now slightly narrower than it reads, and that is recorded rather
+# than repackaged. `--image-ocr` needs **neither** of these: direct-image
+# recognition hands the submitted bytes to the engine and decodes nothing itself,
+# so `unimem_ocr.image` imports no rasterizer, no imaging library, and not even
+# `unimem_ocr.tesseract`. A machine with a system Tesseract and no extra
+# installed runs image OCR perfectly well, and a CI job proves it by doing
+# exactly that. See ADR-020.
 #
 # Tesseract itself is NOT here and cannot be. It is a system executable with its
 # own language data files, installed by the machine's package manager; see the

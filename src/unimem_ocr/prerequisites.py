@@ -5,6 +5,14 @@ Python packages, the Tesseract executable, and the language data files. All of
 it happens while the application is being assembled, so a deployment that asked
 for OCR and cannot perform it never reaches a request.
 
+**The three are not one gate, and the split is load-bearing.** PDF OCR needs all
+three; direct-image OCR needs only the last two. :func:`require_rasterizer` is
+therefore reached from the PDF factory alone, and an ``--image-ocr`` startup never
+imports ``pypdfium2`` or ``Pillow`` — which is what makes "image OCR requires no
+optional Python extra" a fact about the code path rather than a claim in a
+README. The engine probes below serve both, and say which capability asked so
+that an image-only deployment is never told it needs a PDF rasterizer.
+
 **Nothing here repairs anything.** No package is installed, no model is
 downloaded, no ``apt`` is invoked, no cloud service is contacted, and the
 language set is never narrowed to whatever happens to be present. Silently
@@ -35,8 +43,20 @@ OPTIONAL_PACKAGES: Final = ("pypdfium2", "Pillow")
 #: The extra that installs them.
 OPTIONAL_EXTRA: Final = "capture-core[ocr]"
 
+#: How the engine probes name the capability that asked for them.
+#:
+#: It defaults to ``"PDF"`` everywhere so that every message this module produced
+#: before direct-image OCR existed is byte-for-byte what it produces now. The
+#: image path passes its own word, because telling an operator who typed
+#: ``--image-ocr`` that "Local PDF OCR needs Tesseract" would send them looking
+#: for a rasterizer this capability never loads.
+PDF_CAPABILITY: Final = "PDF"
 
-def _run(executable: str, argument: str) -> str:
+#: What :func:`require_engine` is called for by the direct-image startup gate.
+IMAGE_CAPABILITY: Final = "image"
+
+
+def _run(executable: str, argument: str, *, capability: str = PDF_CAPABILITY) -> str:
     """Run one fixed probe argument against the engine and return its stdout.
 
     A two-element argument list with ``shell=False``: there is no shell, no
@@ -53,9 +73,9 @@ def _run(executable: str, argument: str) -> str:
         )
     except OSError as exc:
         raise OcrPrerequisiteError(
-            f"the OCR engine {executable!r} could not be run ({exc.strerror or exc}). Local PDF "
-            f"OCR needs Tesseract installed on this machine and reachable on PATH; this build "
-            f"does not install it."
+            f"the OCR engine {executable!r} could not be run ({exc.strerror or exc}). Local "
+            f"{capability} OCR needs Tesseract installed on this machine and reachable on "
+            f"PATH; this build does not install it."
         ) from exc
     except subprocess.TimeoutExpired as exc:
         raise OcrPrerequisiteError(
@@ -76,7 +96,9 @@ def _run(executable: str, argument: str) -> str:
     return completed.stdout.decode("utf-8", errors="replace")
 
 
-def engine_version(executable: str = TESSERACT_EXECUTABLE) -> str:
+def engine_version(
+    executable: str = TESSERACT_EXECUTABLE, *, capability: str = PDF_CAPABILITY
+) -> str:
     """The version the installed engine reports for itself.
 
     The first line of ``tesseract --version`` is ``tesseract <version>``; the
@@ -85,7 +107,7 @@ def engine_version(executable: str = TESSERACT_EXECUTABLE) -> str:
     because it is recorded on every recognized segment's content object and a
     constant written here would eventually be a lie.
     """
-    banner = _run(executable, "--version").strip()
+    banner = _run(executable, "--version", capability=capability).strip()
     first = banner.splitlines()[0] if banner else ""
     _, _, version = first.partition(" ")
     reported = version.strip()
@@ -97,7 +119,9 @@ def engine_version(executable: str = TESSERACT_EXECUTABLE) -> str:
     return reported
 
 
-def available_languages(executable: str = TESSERACT_EXECUTABLE) -> frozenset[str]:
+def available_languages(
+    executable: str = TESSERACT_EXECUTABLE, *, capability: str = PDF_CAPABILITY
+) -> frozenset[str]:
     """Every language data file the installed engine can load.
 
     ``tesseract --list-langs`` prints a header line naming the ``tessdata``
@@ -105,7 +129,7 @@ def available_languages(executable: str = TESSERACT_EXECUTABLE) -> frozenset[str
     taking only lines with no whitespace in them, which is what a bare language
     code looks like and what the header is not.
     """
-    listed = _run(executable, "--list-langs")
+    listed = _run(executable, "--list-langs", capability=capability)
     return frozenset(
         line.strip() for line in listed.splitlines() if line.strip() and " " not in line.strip()
     )
@@ -151,21 +175,31 @@ def require_rasterizer() -> None:
         ) from exc
 
 
-def require_engine(executable: str = TESSERACT_EXECUTABLE) -> str:
+def require_engine(
+    executable: str = TESSERACT_EXECUTABLE, *, capability: str = PDF_CAPABILITY
+) -> str:
     """Insist the engine exists and carries every language, and return its version.
 
     Both language packs, not one and not "at least one". A deployment that
     installed Tesseract and only English is a deployment that would silently
     stop reading Russian scans, and it is told so here rather than discovered
     later by whoever reads the results.
+
+    **This is the whole of the direct-image prerequisite.** Image OCR calls it
+    with ``capability="image"`` and calls nothing else — no
+    :func:`require_rasterizer`, no ``pypdfium2``, no ``Pillow``. When a deployment
+    enables both capabilities this probe simply runs twice, which costs two fixed
+    subprocess calls at startup and is deliberately not cached: a module-level
+    memo would make two independent gates secretly depend on each other and on
+    the order they happen to run in.
     """
-    version = engine_version(executable)
-    present = available_languages(executable)
+    version = engine_version(executable, capability=capability)
+    present = available_languages(executable, capability=capability)
     missing = [language for language in RECOGNITION_LANGUAGES if language not in present]
     if missing:
         raise OcrPrerequisiteError(
             f"the OCR engine {executable!r} (version {version}) is missing language data for "
-            f"{', '.join(missing)}. Local PDF OCR recognizes "
+            f"{', '.join(missing)}. Local {capability} OCR recognizes "
             f"{'+'.join(RECOGNITION_LANGUAGES)} and this build neither downloads language data "
             f"nor falls back to the languages that happen to be installed."
         )

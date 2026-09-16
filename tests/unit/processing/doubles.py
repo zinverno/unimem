@@ -11,9 +11,10 @@ spans a record store, a router, and a processor: routing before any state is
 written, the ``processing`` record durable before the processor runs, and
 ``complete`` durable before the caller is handed anything.
 
-``FakePdfPageOcr`` is the last of them and the same idea one layer down: the OCR
-port exists so that the canonical page policy can be tested with no rasterizer,
-no imaging library, no engine, and no subprocess anywhere in the process.
+``FakePdfPageOcr`` and ``FakeImageOcr`` are the last of them and the same idea one
+layer down: the two recognition ports exist so that the canonical policies can be
+tested with no rasterizer, no imaging library, no engine, and no subprocess
+anywhere in the process.
 """
 
 import hashlib
@@ -21,7 +22,7 @@ import io
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
-from typing import BinaryIO
+from typing import BinaryIO, cast
 
 from pydantic import JsonValue
 
@@ -32,6 +33,7 @@ from core.persistence import (
     ContentObjectAlreadyExistsError,
     ContentObjectNotFoundError,
 )
+from core.processing.image_recognition import ImageOcrResult
 from core.processing.ocr import PdfOcrResult, RecognizedPage
 from core.storage import RawObjectNotFoundError, build_raw_ref
 from core.storage.raw import ReadableBinaryStream
@@ -47,6 +49,17 @@ class InMemoryRawObjectStore:
     def __init__(self) -> None:
         self._objects: dict[str, bytes] = {}
         self.accesses: list[str] = []
+        self._seekable = True
+
+    def forbid_seeking(self) -> None:
+        """Hand out forward-only streams from now on.
+
+        A ``RawObjectStore`` is a port, and nothing in it promises a seekable
+        stream — a backend could serve bytes from a socket or a pipe. Turning this
+        on makes any caller that tries to rewind fail loudly, which is how a test
+        proves a processor reads forward rather than merely happening to.
+        """
+        self._seekable = False
 
     def store_bytes(self, data: bytes, *, mime_type: str | None = None) -> RawObjectRef:
         self.accesses.append("store_bytes")
@@ -64,7 +77,8 @@ class InMemoryRawObjectStore:
     @contextmanager
     def open(self, raw_object: RawObjectRef) -> Iterator[BinaryIO]:
         self.accesses.append("open")
-        yield io.BytesIO(self._lookup(raw_object))
+        data = self._lookup(raw_object)
+        yield cast(BinaryIO, _ForwardOnlyStream(data)) if not self._seekable else io.BytesIO(data)
 
     def read_bytes(self, raw_object: RawObjectRef) -> bytes:
         self.accesses.append("read_bytes")
@@ -87,6 +101,39 @@ class InMemoryRawObjectStore:
             raise RawObjectNotFoundError(
                 f"raw object {raw_object.id!r} is not present in this store"
             ) from None
+
+
+class _ForwardOnlyStream:
+    """A stream that reads forward and refuses everything else.
+
+    Deliberately not a ``BytesIO`` subclass with methods disabled: it implements
+    only what a forward reader may use, so anything reaching for a capability a
+    non-seekable backend would not have gets an error rather than a surprise.
+    """
+
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+        self._position = 0
+
+    def read(self, size: int = -1) -> bytes:
+        if size is None or size < 0:
+            chunk = self._data[self._position :]
+        else:
+            chunk = self._data[self._position : self._position + size]
+        self._position += len(chunk)
+        return chunk
+
+    def seekable(self) -> bool:
+        return False
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        raise OSError("this stream is not seekable")
+
+    def tell(self) -> int:
+        raise OSError("this stream does not report a position")
+
+    def close(self) -> None:
+        return None
 
 
 class StubProcessor:
@@ -366,3 +413,80 @@ class FakePdfPageOcr:
         """The bytes the one call read out of the stream it was given."""
         assert len(self.calls) == 1, f"expected exactly one recognition call, got {len(self.calls)}"
         return self.calls[0][1]
+
+
+class FakeImageOcr:
+    """An ``ImageOcr`` that answers from a script and records what it was asked.
+
+    It shares no code with the real Tesseract adapter, imports no engine, and
+    starts no subprocess. It *does* read the stream it is handed, and keeps what
+    it read, so a test can prove the processor opened the original a second time
+    rather than passing on a handle the header parser had already consumed.
+
+    Two answering modes, and only one is used per instance: ``text`` returns a
+    prepared result — including an empty one, which is a real answer rather than
+    an omission — and ``raises`` fails instead of answering, with whichever of the
+    two error types the test is interested in.
+    """
+
+    def __init__(
+        self,
+        *,
+        text: str = "",
+        raises: Exception | None = None,
+        engine: str = "fake-ocr",
+        engine_version: str = "9.9.9",
+        settings: Mapping[str, JsonValue] | None = None,
+    ) -> None:
+        self.text = text
+        self.engine = engine
+        self.engine_version = engine_version
+        self.settings: Mapping[str, JsonValue] = (
+            settings if settings is not None else {"languages": "fake+fake"}
+        )
+        self._raises = raises
+        #: One entry per call: the declared type, the encoded dimensions, and the
+        #: bytes it was handed.
+        self.calls: list[tuple[str, int, int, bytes]] = []
+
+    def recognize_image(
+        self,
+        stream: BinaryIO,
+        *,
+        mime_type: str,
+        encoded_width: int,
+        encoded_height: int,
+    ) -> ImageOcrResult:
+        self.calls.append((mime_type, encoded_width, encoded_height, stream.read()))
+        if self._raises is not None:
+            raise self._raises
+        return ImageOcrResult(
+            text=self.text,
+            engine=self.engine,
+            engine_version=self.engine_version,
+            settings=self.settings,
+        )
+
+    def _only_call(self) -> tuple[str, int, int, bytes]:
+        assert len(self.calls) == 1, f"expected exactly one recognition call, got {len(self.calls)}"
+        return self.calls[0]
+
+    @property
+    def mime_type(self) -> str:
+        """The declared type the one call was given."""
+        return self._only_call()[0]
+
+    @property
+    def width(self) -> int:
+        """The encoded width the one call was given."""
+        return self._only_call()[1]
+
+    @property
+    def height(self) -> int:
+        """The encoded height the one call was given."""
+        return self._only_call()[2]
+
+    @property
+    def received_bytes(self) -> bytes:
+        """The bytes the one call read out of the stream it was given."""
+        return self._only_call()[3]
