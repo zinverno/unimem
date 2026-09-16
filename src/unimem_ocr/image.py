@@ -37,7 +37,7 @@ guessed. The image travels in on the child's stdin and the recognized text comes
 back on its stdout.
 """
 
-from collections.abc import Mapping
+from collections.abc import Buffer, Mapping
 from typing import BinaryIO, Final
 
 from pydantic import JsonValue
@@ -205,8 +205,8 @@ class TesseractImageOcr:
                 limit=self._limits.max_encoded_pixels,
             )
 
-    def _read_bounded(self, stream: BinaryIO) -> bytes:
-        """Read the original forward, refusing once it grows past the byte bound.
+    def _read_bounded(self, stream: BinaryIO) -> bytearray:
+        """Read the original forward into one buffer, refusing once it exceeds the bound.
 
         Forward only: nothing seeks, nothing asks the stream how long it is — the
         raw store's reference carries no size and the port exposes none — so this
@@ -220,31 +220,44 @@ class TesseractImageOcr:
         distinguishable, and it is the entire overshoot. An original of exactly
         ``max_encoded_bytes`` is accepted; one byte more is refused.
 
-        A refusal here happens **before any subprocess exists**, and the bytes
-        read so far are dropped as this unwinds.
+        **One buffer, extended in place, and no join at the end.** Accumulating a
+        list of chunks and returning ``b"".join(...)`` would be the obvious
+        shape and it quietly costs *two* copies of the accepted payload: at the
+        moment the join returns, the finished ``bytes`` and every chunk that fed
+        it are both still alive. For a limit measured in tens of mebibytes that
+        doubles the peak this method was written to bound, and it would make
+        ``max_encoded_bytes`` a bound on half the memory actually held. A
+        ``bytearray`` grown in place never holds the payload twice; what it does
+        hold, beyond the bytes themselves, is the usual amortized slack of a
+        growing buffer, which is a fraction rather than a second copy.
+
+        The result is handed to the engine as-is, so nothing copies it on the way
+        out either. It is a private buffer that lives until the child has been
+        fed and is never exposed to a caller, so its mutability costs nothing.
+
+        A refusal here happens **before any subprocess exists**, and the buffer
+        is dropped as this unwinds.
         """
         limit = self._limits.max_encoded_bytes
-        chunks: list[bytes] = []
-        total = 0
+        buffer = bytearray()
         while True:
             # One past the bound is all the headroom the reader ever takes, so
-            # crossing it is detectable while the memory held stays within the
-            # configured limit plus that single sentinel byte.
-            want = min(IMAGE_READ_CHUNK_SIZE, limit - total + 1)
+            # crossing it is detectable while the memory held stays near the
+            # configured limit rather than a chunk — or a copy — beyond it.
+            want = min(IMAGE_READ_CHUNK_SIZE, limit - len(buffer) + 1)
             chunk = stream.read(want)
             if not chunk:
-                return b"".join(chunks)
-            total += len(chunk)
-            if total > limit:
+                return buffer
+            buffer += chunk
+            if len(buffer) > limit:
                 raise ImageOcrLimitExceeded(
                     f"the image is larger than the {limit} encoded bytes this build will "
                     f"hold for one recognition",
                     reason=ENCODED_BYTE_LIMIT,
                     limit=limit,
                 )
-            chunks.append(chunk)
 
-    def _recognize(self, image: bytes) -> str:
+    def _recognize(self, image: Buffer) -> str:
         """Run the engine over the original bytes and return exactly what it printed.
 
         The policy is fixed and identical in every deployment: ``eng+rus`` in that

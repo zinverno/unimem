@@ -28,6 +28,7 @@ one to the wire.
 """
 
 import subprocess
+from collections.abc import Buffer
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -145,8 +146,14 @@ def build_arguments(invocation: EngineInvocation) -> list[str]:
     return arguments
 
 
-def run_engine(image: bytes, invocation: EngineInvocation) -> str:
+def run_engine(image: Buffer, invocation: EngineInvocation) -> str:
     """Run the engine over one image and return exactly what it printed.
+
+    ``image`` is any read-only buffer, not specifically ``bytes``. A caller that
+    accumulated the encoded input in a ``bytearray`` hands that over directly
+    rather than freezing it into a second full-size copy first, which for an
+    input bounded in tens of mebibytes is the difference between one copy of the
+    payload and two. Nothing here mutates it or keeps a reference past the call.
 
     ``shell=False`` and a *list* of arguments: no shell string is constructed, so
     there is nothing to quote and nothing to interpret. The image travels in on

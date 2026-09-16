@@ -18,6 +18,7 @@ import ast
 import io
 import subprocess
 import sys
+import tracemalloc
 from pathlib import Path
 from types import ModuleType
 from typing import BinaryIO, cast
@@ -244,6 +245,102 @@ class TestTheEncodedByteBound:
 
     def test_a_default_deployment_uses_sixty_four_mebibytes(self) -> None:
         assert DEFAULT_IMAGE_LIMITS.max_encoded_bytes == 64 * 1024 * 1024 == 67_108_864
+
+
+class TestTheAcceptedPayloadIsHeldOnce:
+    """The accepted input exists once in memory, not twice.
+
+    ``max_encoded_bytes`` is a bound on what this adapter holds, so a reader that
+    accumulated chunks and returned ``b"".join(...)`` would make it a bound on
+    *half* the memory actually used: at the instant the join returns, the finished
+    bytes and every chunk that fed it are both alive. At the configured 64 MiB
+    that is the difference between 64 and 128 mebibytes, and nothing in the
+    existing request-size assertions can see it — they measure what was asked of
+    the stream, not what was retained.
+
+    So this measures allocation directly, with :mod:`tracemalloc`, and compares it
+    against the payload rather than against a fixed number of bytes. The two
+    shapes are far apart — about 1.08x for a single growing buffer against about
+    2.0x for a join — so the threshold sits in open ground between them and does
+    not pin down an allocator detail.
+    """
+
+    #: Large enough that a second copy dwarfs interpreter noise, small enough to
+    #: stay fast. The two shapes differ by roughly this whole amount.
+    PAYLOAD = 4 * 1024 * 1024
+
+    #: A single growing buffer measures about 1.08x payload; a join measures about
+    #: 2.0x. Anything under this is one copy plus amortized slack.
+    MAX_RATIO = 1.5
+
+    @staticmethod
+    def dribbling_source(size: int) -> object:
+        """A forward-only stream of ``size`` zero bytes, served in small reads."""
+
+        class Source:
+            def __init__(self) -> None:
+                self.left = size
+
+            def read(self, want: int = -1) -> bytes:
+                take = min(want, self.left) if want >= 0 else self.left
+                self.left -= take
+                return bytes(take)
+
+        return Source()
+
+    def test_reading_an_accepted_payload_costs_about_one_copy(self, tmp_path: Path) -> None:
+        engine = fakes.write_fake_engine(tmp_path)
+        reader = adapter(engine)
+        stream = cast(BinaryIO, self.dribbling_source(self.PAYLOAD))
+
+        tracemalloc.start()
+        try:
+            tracemalloc.reset_peak()
+            held = reader._read_bounded(stream)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+        assert len(held) == self.PAYLOAD
+        assert peak < self.PAYLOAD * self.MAX_RATIO, (
+            f"reading {self.PAYLOAD} bytes peaked at {peak}, which is more than one copy "
+            f"plus slack — the accepted payload is being held twice"
+        )
+
+    def test_the_engine_still_receives_the_exact_byte_sequence(self, tmp_path: Path) -> None:
+        """Held once, and unchanged: a cheaper buffer that altered bytes is useless.
+
+        Every byte value appears, in a fixed order, and the payload spans several
+        read chunks so that any reordering or dropped chunk shows up.
+        """
+        engine = fakes.write_fake_engine(tmp_path, stdout="ok\n")
+        original = bytes(range(256)) * 700  # 179,200 bytes, several chunks
+
+        recognize(adapter(engine), original)
+
+        assert fakes.recorded_stdin(tmp_path) == original
+
+    def test_a_payload_spanning_many_chunks_arrives_intact(self, tmp_path: Path) -> None:
+        engine = fakes.write_fake_engine(tmp_path, stdout="ok\n")
+        original = bytes((index * 7) % 251 for index in range(300_000))
+
+        recognize(adapter(engine), original)
+
+        assert fakes.recorded_stdin(tmp_path) == original
+
+    def test_the_reader_returns_one_mutable_buffer_rather_than_a_joined_copy(
+        self, tmp_path: Path
+    ) -> None:
+        """Stated as the contract it is, so the join cannot quietly come back.
+
+        ``bytearray`` is what "one buffer, extended in place" looks like; a
+        ``bytes`` result here would mean a full-size copy was taken on the way
+        out, which is the regression this class exists to prevent.
+        """
+        engine = fakes.write_fake_engine(tmp_path)
+        stream = cast(BinaryIO, self.dribbling_source(1024))
+
+        assert isinstance(adapter(engine)._read_bounded(stream), bytearray)
 
 
 class TestWhatReachesTheChild:
@@ -484,12 +581,19 @@ class TestItLoadsNoNativeLibrary:
         assert "unimem_ocr.tesseract" not in self.imported_modules(unimem_ocr.image)
 
     def test_the_shared_runner_imports_only_the_standard_library(self) -> None:
-        """Which is what lets the image adapter use it without pulling in a renderer."""
+        """Which is what lets the image adapter use it without pulling in a renderer.
+
+        Asked as "is every import from the standard library" rather than pinned to
+        a literal list: the property that matters is that nothing third-party and
+        nothing from this project reaches it, and a list would fail the next time
+        someone needs another stdlib name for an honest reason.
+        """
         import unimem_ocr.engine
 
-        imported = self.imported_modules(unimem_ocr.engine)
+        roots = {name.split(".")[0] for name in self.imported_modules(unimem_ocr.engine)}
 
-        assert imported <= {"subprocess", "dataclasses", "typing"}
+        assert roots <= sys.stdlib_module_names
+        assert not any(root in {"core", "unimem_ocr", "unimem_api"} for root in roots)
 
     def test_importing_the_adapter_leaves_the_rasterizer_unloaded(self) -> None:
         """The runtime half, with the right marker chosen deliberately.
