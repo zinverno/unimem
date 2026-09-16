@@ -763,6 +763,174 @@ class TestAnExecutionFailureIsNotASkip:
         assert not isinstance(raised.value, ProcessingInputError)
 
 
+class TestAnAdapterThatReturnsSomethingElseEntirely:
+    """A recognizer whose return value is not a result at all.
+
+    The port's annotation binds a type checker and nothing at run time, so this
+    is a shape a real adapter can produce. What it must *not* produce is a
+    successful capture: an object that never came back cannot be recorded as a
+    recognizer that looked and found nothing.
+    """
+
+    @pytest.mark.parametrize(
+        "answer",
+        [{"text": "words"}, ["words"], "words", 7, object()],
+        ids=["dict", "list", "str", "int", "object"],
+    )
+    def test_it_becomes_an_execution_failure(
+        self, store: InMemoryRawObjectStore, answer: object
+    ) -> None:
+        processor = ImageOcrProcessor(store, FakeImageOcr(returns=answer))
+
+        with pytest.raises(ImageOcrExecutionError):
+            processor.process(image_capture(store))
+
+    def test_no_attribute_error_escapes(self, store: InMemoryRawObjectStore) -> None:
+        processor = ImageOcrProcessor(store, FakeImageOcr(returns={"text": "words"}))
+
+        try:
+            processor.process(image_capture(store))
+        except ImageOcrExecutionError:
+            pass
+        except AttributeError as exc:  # pragma: no cover - the regression itself
+            raise AssertionError(f"an AttributeError escaped: {exc}") from exc
+
+    def test_it_is_not_a_successful_blank_recognition(self, store: InMemoryRawObjectStore) -> None:
+        """The outcome this guard exists to prevent."""
+        processor = ImageOcrProcessor(store, FakeImageOcr(returns={"text": ""}))
+
+        with pytest.raises(ImageOcrExecutionError):
+            processor.process(image_capture(store))
+
+    def test_it_is_not_an_input_verdict(self, store: InMemoryRawObjectStore) -> None:
+        processor = ImageOcrProcessor(store, FakeImageOcr(returns=object()))
+
+        with pytest.raises(ImageOcrExecutionError) as raised:
+            processor.process(image_capture(store))
+
+        assert not isinstance(raised.value, ProcessingInputError)
+
+
+class TestAMalformedLimitSignal:
+    """A refusal this build cannot read is inconsistency, not a resource skip.
+
+    Everything here would previously have been a ``KeyError`` looking up a
+    metadata key, or a stored content object carrying a nonsense limit value.
+    """
+
+    @staticmethod
+    def refusing(reason: object, limit: object) -> FakeImageOcr:
+        return FakeImageOcr(
+            raises=ImageOcrLimitExceeded("refused", reason=reason, limit=limit)  # type: ignore[arg-type]
+        )
+
+    @pytest.mark.parametrize(
+        ("reason", "limit"),
+        [
+            ("encoded_frame_limit", 10),
+            ("", 10),
+            ("ENCODED_PIXEL_LIMIT", 10),
+            (ENCODED_PIXEL_LIMIT, "20000000"),
+            (ENCODED_PIXEL_LIMIT, None),
+            (ENCODED_PIXEL_LIMIT, 1.5),
+            (ENCODED_BYTE_LIMIT, True),
+            (ENCODED_BYTE_LIMIT, -1),
+        ],
+        ids=[
+            "unknown-reason",
+            "empty-reason",
+            "wrong-case-reason",
+            "str-limit",
+            "none-limit",
+            "float-limit",
+            "bool-limit",
+            "negative-limit",
+        ],
+    )
+    def test_it_becomes_an_execution_failure(
+        self, store: InMemoryRawObjectStore, reason: object, limit: object
+    ) -> None:
+        processor = ImageOcrProcessor(store, self.refusing(reason, limit))
+
+        with pytest.raises(ImageOcrExecutionError):
+            processor.process(image_capture(store))
+
+    def test_no_key_error_escapes(self, store: InMemoryRawObjectStore) -> None:
+        """The specific failure an unknown reason used to produce."""
+        processor = ImageOcrProcessor(store, self.refusing("encoded_frame_limit", 10))
+
+        try:
+            processor.process(image_capture(store))
+        except ImageOcrExecutionError:
+            pass
+        except KeyError as exc:  # pragma: no cover - the regression itself
+            raise AssertionError(f"a KeyError escaped: {exc}") from exc
+
+    @pytest.mark.parametrize(
+        ("reason", "limit"),
+        [("encoded_frame_limit", 10), (ENCODED_PIXEL_LIMIT, True)],
+        ids=["unknown-reason", "bool-limit"],
+    )
+    def test_no_content_object_is_returned(
+        self, store: InMemoryRawObjectStore, reason: object, limit: object
+    ) -> None:
+        processor = ImageOcrProcessor(store, self.refusing(reason, limit))
+
+        with pytest.raises(ImageOcrExecutionError):
+            processor.process(image_capture(store))
+
+    def test_it_is_not_treated_as_a_resource_skip(self, store: InMemoryRawObjectStore) -> None:
+        """A valid signal succeeds; a malformed one must not sneak through with it."""
+        processor = ImageOcrProcessor(store, self.refusing("encoded_frame_limit", 10))
+
+        with pytest.raises(ImageOcrExecutionError) as raised:
+            processor.process(image_capture(store))
+
+        assert not isinstance(raised.value, ImageOcrLimitExceeded)
+
+    def test_the_malformed_signal_is_reachable_as_the_cause(
+        self, store: InMemoryRawObjectStore
+    ) -> None:
+        processor = ImageOcrProcessor(store, self.refusing("encoded_frame_limit", 10))
+
+        with pytest.raises(ImageOcrExecutionError) as raised:
+            processor.process(image_capture(store))
+
+        assert isinstance(raised.value.__cause__, ImageOcrLimitExceeded)
+
+    def test_it_is_not_an_input_verdict(self, store: InMemoryRawObjectStore) -> None:
+        processor = ImageOcrProcessor(store, self.refusing(ENCODED_PIXEL_LIMIT, "big"))
+
+        with pytest.raises(ImageOcrExecutionError) as raised:
+            processor.process(image_capture(store))
+
+        assert not isinstance(raised.value, ProcessingInputError)
+
+    @pytest.mark.parametrize(
+        ("reason", "key"),
+        [
+            (ENCODED_PIXEL_LIMIT, MAX_ENCODED_PIXELS_KEY),
+            (ENCODED_BYTE_LIMIT, MAX_ENCODED_BYTES_KEY),
+        ],
+        ids=["pixels", "bytes"],
+    )
+    def test_the_two_valid_reasons_still_produce_the_same_skip(
+        self, store: InMemoryRawObjectStore, reason: str, key: str
+    ) -> None:
+        """The guard tightens nothing that was already honest."""
+        processor = ImageOcrProcessor(store, self.refusing(reason, 4096))
+
+        content = processor.process(image_capture(store))
+
+        assert content.processing[0].status is ProcessingStatus.COMPLETE
+        assert content.segments == []
+        assert image_metadata(content) == {
+            ENGINE_INVOKED_KEY: False,
+            SKIPPED_REASON_KEY: reason,
+            key: 4096,
+        }
+
+
 class TestAMalformedAdapterAnswer:
     def test_a_blank_engine_name_becomes_an_execution_failure(
         self, store: InMemoryRawObjectStore

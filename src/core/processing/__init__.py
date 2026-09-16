@@ -140,10 +140,12 @@ from core.processing.image_ocr import (
 from core.processing.image_recognition import (
     ENCODED_BYTE_LIMIT,
     ENCODED_PIXEL_LIMIT,
+    LIMIT_REASONS,
     ImageOcr,
     ImageOcrExecutionError,
     ImageOcrLimitExceeded,
     ImageOcrResult,
+    validate_image_ocr_limit,
     validate_image_ocr_result,
 )
 from core.processing.ocr import (
@@ -198,6 +200,7 @@ __all__ = [
     "IMAGE_OCR_METADATA_KEY",
     "JPEG_FORMAT",
     "JPEG_MIME_TYPE",
+    "LIMIT_REASONS",
     "MAX_ENCODED_BYTES_KEY",
     "MAX_ENCODED_PIXELS_KEY",
     "MAX_JPEG_MARKER_SEGMENTS",
@@ -253,6 +256,7 @@ __all__ = [
     "read_jpeg_header",
     "read_png_header",
     "utc_now",
+    "validate_image_ocr_limit",
     "validate_image_ocr_result",
     "validate_ocr_result",
 ]

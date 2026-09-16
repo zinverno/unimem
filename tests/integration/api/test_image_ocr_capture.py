@@ -329,6 +329,37 @@ class TestAnExecutionFailureOverHttp:
         assert submit(broken_client).status_code == 409
 
 
+class TestAnInconsistentAdapterOverHttp:
+    """One case, because the lifecycle is what this file owns.
+
+    Every shape of adapter inconsistency is covered by the unit tests; what is
+    only observable here is that an adapter returning something that is not a
+    result at all reaches a client as the *same* fixed 503 a crashed engine does,
+    rather than as an unhandled ``AttributeError`` and a generic 500. The two are
+    the same fact — no trusted recognition result — so they get the same answer.
+    """
+
+    @pytest.fixture
+    def inconsistent_client(self, tmp_path: Path) -> Iterator[TestClient]:
+        yield from client_for(tmp_path, FakeImageOcr(returns={"text": "words"}))
+
+    def test_the_client_gets_the_fixed_503(self, inconsistent_client: TestClient) -> None:
+        response = submit(inconsistent_client)
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "image_ocr_unavailable"
+
+    def test_the_capture_is_left_non_terminal(self, inconsistent_client: TestClient) -> None:
+        submit(inconsistent_client)
+
+        assert record_of(inconsistent_client)["status"] == "processing"
+
+    def test_no_content_object_exists_to_read(self, inconsistent_client: TestClient) -> None:
+        submit(inconsistent_client)
+
+        assert inconsistent_client.get(f"/v1/captures/{CAPTURE_ID}/content").status_code == 404
+
+
 class TestAMalformedImageIsUnchangedFrom4A:
     @pytest.fixture
     def reading_client_for_bad_input(self, tmp_path: Path) -> Iterator[TestClient]:

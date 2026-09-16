@@ -423,10 +423,16 @@ class FakeImageOcr:
     it read, so a test can prove the processor opened the original a second time
     rather than passing on a handle the header parser had already consumed.
 
-    Two answering modes, and only one is used per instance: ``text`` returns a
+    Three answering modes, and only one is used per instance: ``text`` returns a
     prepared result — including an empty one, which is a real answer rather than
-    an omission — and ``raises`` fails instead of answering, with whichever of the
-    two error types the test is interested in.
+    an omission — ``raises`` fails instead of answering, with whichever of the
+    two error types the test is interested in, and ``returns`` hands back whatever
+    it was given.
+
+    ``returns`` exists to be *wrong*. The port's annotation binds a type checker
+    and nothing at run time, so an adapter really can return ``None`` or a
+    ``dict``, and the processor has to answer for that. Typed ``object`` so a test
+    can express it without a cast at every call site.
     """
 
     def __init__(
@@ -434,6 +440,7 @@ class FakeImageOcr:
         *,
         text: str = "",
         raises: Exception | None = None,
+        returns: object = None,
         engine: str = "fake-ocr",
         engine_version: str = "9.9.9",
         settings: Mapping[str, JsonValue] | None = None,
@@ -445,6 +452,7 @@ class FakeImageOcr:
             settings if settings is not None else {"languages": "fake+fake"}
         )
         self._raises = raises
+        self._returns = returns
         #: One entry per call: the declared type, the encoded dimensions, and the
         #: bytes it was handed.
         self.calls: list[tuple[str, int, int, bytes]] = []
@@ -460,6 +468,11 @@ class FakeImageOcr:
         self.calls.append((mime_type, encoded_width, encoded_height, stream.read()))
         if self._raises is not None:
             raise self._raises
+        if self._returns is not None:
+            # Deliberately not an ``ImageOcrResult``, and deliberately typed
+            # away: this is the shape a broken adapter produces, and the point of
+            # the test is that ``core`` survives it.
+            return cast(ImageOcrResult, self._returns)
         return ImageOcrResult(
             text=self.text,
             engine=self.engine,

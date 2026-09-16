@@ -82,6 +82,7 @@ from core.processing.image_recognition import (
     ImageOcrLimitExceeded,
     ImageOcrResult,
     LimitReason,
+    validate_image_ocr_limit,
     validate_image_ocr_result,
 )
 from core.storage import RawObjectStore
@@ -318,6 +319,13 @@ class ImageOcrProcessor:
                     encoded_height=header.height,
                 )
         except ImageOcrLimitExceeded as exc:
+            # Checked before it is believed, for the same reason the result is:
+            # an adapter is third-party code, the signal's attributes are enforced
+            # by nothing at run time, and this one is about to become durable
+            # metadata on a *successful* capture. A signal this build cannot
+            # interpret is adapter inconsistency rather than a resource skip, and
+            # leaves here as an execution failure instead.
+            validate_image_ocr_limit(exc)
             # Kept as the value it is, so the metadata below reads its structured
             # attributes rather than its message. The image is valid, it is still
             # remembered completely, and the only thing that did not happen is

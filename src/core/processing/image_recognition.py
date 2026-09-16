@@ -57,6 +57,14 @@ ENCODED_BYTE_LIMIT: Final = "encoded_byte_limit"
 #: Every reason a recognition may be refused before it begins.
 LimitReason = Literal["encoded_pixel_limit", "encoded_byte_limit"]
 
+#: The same two, as values, for the runtime check that a signal is one of them.
+#:
+#: A ``Literal`` constrains what a type checker will accept at a call site and
+#: nothing at all at run time, so an adapter — which is third-party code by
+#: construction — can raise a signal naming any string it likes. This is what
+#: :func:`validate_image_ocr_limit` compares against.
+LIMIT_REASONS: Final[frozenset[str]] = frozenset({ENCODED_PIXEL_LIMIT, ENCODED_BYTE_LIMIT})
+
 
 class ImageOcrExecutionError(Exception):
     """The OCR execution did not produce a trusted recognition result.
@@ -217,6 +225,50 @@ class ImageOcr(Protocol):
         ...
 
 
+def validate_image_ocr_limit(refusal: ImageOcrLimitExceeded) -> None:
+    """Check that a refusal really is one of the two documented bounds, or raise.
+
+    :class:`ImageOcrLimitExceeded` is a *control signal*: the processor reads its
+    attributes and turns them into a successful capture with a durable record of
+    which bound stopped recognition. That makes its shape as load-bearing as any
+    content, and — like the result type — nothing enforces it at run time. An
+    adapter can raise one naming a reason this build has never heard of, or
+    carrying a limit that is not a number, and the processor would then either
+    fail with a ``KeyError`` looking up a metadata key or write a nonsense value
+    into a stored content object.
+
+    Neither is a resource skip. A signal this build cannot interpret is **adapter
+    inconsistency**, which ADR-020 already resolves as an execution failure: no
+    content, a non-terminal capture, and the fixed 503. So this converts it,
+    rather than inventing a third skip reason or trusting a value it cannot read.
+
+    The rules are the whole of the signal's contract:
+
+    * ``reason`` is one of :data:`LIMIT_REASONS`. Nothing is parsed out of the
+      message to guess at a near-miss.
+    * ``limit`` is a genuine non-negative ``int``. ``bool`` is rejected
+      explicitly: it is a subclass of ``int`` in Python, so ``isinstance`` alone
+      would let ``True`` through and record ``max_encoded_pixels: true`` in
+      durable metadata.
+
+    Raises :class:`ImageOcrExecutionError`, chained from the malformed signal so
+    that whoever reads the server log can see exactly what the adapter raised.
+    """
+    reason = getattr(refusal, "reason", None)
+    if not isinstance(reason, str) or reason not in LIMIT_REASONS:
+        raise ImageOcrExecutionError(
+            "the recognizer refused an image for a resource reason this build does not "
+            "define, so the refusal cannot be recorded as a skip"
+        ) from refusal
+
+    limit = getattr(refusal, "limit", None)
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+        raise ImageOcrExecutionError(
+            f"the recognizer refused an image for {reason!r} without a usable limit, so "
+            f"the refusal cannot be recorded as a skip"
+        ) from refusal
+
+
 def _json_compatible(value: JsonValue) -> bool:
     """Whether a settings value survives a round trip through JSON.
 
@@ -234,8 +286,18 @@ def _json_compatible(value: JsonValue) -> bool:
     return False
 
 
-def validate_image_ocr_result(result: ImageOcrResult) -> None:
+def validate_image_ocr_result(result: object) -> None:
     """Check that a result is something canonical content can be built from, or raise.
+
+    **The parameter is ``object``, and that is the first check rather than a
+    looseness.** The type annotation on
+    :meth:`ImageOcr.recognize_image` binds what a type checker will accept; it
+    binds nothing at run time, and an adapter is third-party code. One that
+    returned ``None``, a ``dict``, or anything else would otherwise reach
+    ``result.text`` and raise ``AttributeError`` — which is not an
+    :class:`ImageOcrExecutionError`, so it would escape the lifecycle this port
+    documents and surface as an unhandled bug and a generic 500 instead of the
+    fixed 503 an inconsistent adapter is supposed to produce.
 
     The check is short, and its shortness is a finding rather than an oversight.
     :func:`~core.processing.ocr.validate_ocr_result` is long because a document
@@ -265,6 +327,14 @@ def validate_image_ocr_result(result: ImageOcrResult) -> None:
     image must not be blamed for it — and specifically must not be recorded as
     having been looked at and found wordless.
     """
+    if not isinstance(result, ImageOcrResult):
+        # The type name only. Nothing of the object's *contents* is repeated —
+        # no ``repr``, no fields — because this came from third-party code and
+        # may hold anything at all, and this message reaches a server log.
+        raise ImageOcrExecutionError(
+            f"the recognizer returned {type(result).__name__} where a recognition "
+            f"result was expected"
+        )
     if not isinstance(result.text, str):
         raise ImageOcrExecutionError(
             f"the recognizer returned {type(result.text).__name__} where recognized text "
