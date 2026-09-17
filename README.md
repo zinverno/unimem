@@ -880,6 +880,11 @@ To check PDF, DOCX and OCR ingestion by hand on your own machine, work through
 runnable owner acceptance guide, in Russian. Nothing in it is claimed to have
 passed automatically.
 
+To check still-image ingestion and image OCR the same way, work through
+[docs/MANUAL_IMAGE_ACCEPTANCE.md](docs/MANUAL_IMAGE_ACCEPTANCE.md) — the same
+kind of guide, for PNG and JPEG. It has not been run yet, and Macro Phase 4 is
+open.
+
 `GET /health` reports process liveness only and checks nothing else.
 
 ## Browser capture
