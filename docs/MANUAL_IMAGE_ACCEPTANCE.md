@@ -200,8 +200,15 @@ tesseract --list-langs 2>/dev/null | grep -qx rus && echo "rus: есть" || ech
 показывает команду для Debian/Ubuntu) и начните прогон заново.
 
 > Если Tesseract, `eng` или `rus` недоступны и вы не хотите их ставить:
-> **IMG-B, IMG-C и IMG-E получают `BLOCKED`**, IMG-A и IMG-D выполнимы, а
-> **Macro Phase 4 закрыта быть не может** — закрытие требует пяти `PASS`.
+>
+> - **IMG-A** выполним сам по себе — ему распознавание не нужно;
+> - **IMG-B, IMG-C и IMG-E** получают `BLOCKED`;
+> - **IMG-D** свою задачу выполнить не может и остаётся `NOT_RUN` или
+>   `BLOCKED`. Он доказывает, что содержимое, созданное сборкой с
+>   распознаванием, читается после перезапуска сборкой без него, — а такого
+>   содержимого без IMG-B и IMG-C просто не появится. Перезапуск с одним лишь
+>   IMG-A проверяет не то и `PASS` за IMG-D не даёт;
+> - **Macro Phase 4 закрыта быть не может** — закрытие требует пяти `PASS`.
 
 ### Необязательный набор `[ocr]` здесь не нужен
 
@@ -585,9 +592,18 @@ Usage: original.py <data_dir> <content-или-record.json> <исходный_ф�
 сервер: раскладка на диске не угадывается по имени файла и путь не собирается
 руками.
 
---quiet печатает РОВНО одну строку -- BYTES IDENTICAL -- и больше ничего. Это
-режим для изображения владельца: дайджест, ref, длины и путь к файлу там сами по
-себе являются приватными. Добавлять в этот режим строки нельзя.
+--quiet печатает РОВНО одну строку и больше ничего:
+
+    BYTES IDENTICAL: True          байты совпали
+    BYTES IDENTICAL: False         байты различаются
+    BYTES IDENTICAL: CHECK_FAILED  сравнение не удалось выполнить
+
+Это режим для изображения владельца: путь, ref, дайджест, длины и текст
+исключения там сами по себе являются приватными. Поэтому в --quiet НИ ОДИН
+отказ не печатает ни значения, ни сообщения исключения, ни трассировки: любая
+ошибка чтения, разбора ссылки или обращения к store становится CHECK_FAILED и
+ненулевым кодом выхода. Что именно сломалось, смотрят локально -- тем же
+скриптом БЕЗ --quiet. Добавлять в этот режим строки нельзя.
 """
 
 import hashlib
@@ -602,23 +618,51 @@ from unimem_api.wiring import RAW_DIRNAME
 quiet = "--quiet" in sys.argv[1:]
 data_dir, body_path, expected_path = (Path(p) for p in sys.argv[1:4])
 
-with body_path.open(encoding="utf-8") as handle:
-    body = json.load(handle)
+
+def fail(message: str) -> None:
+    """Отказ. В тихом режиме -- одна фиксированная строка без подробностей."""
+    if quiet:
+        print("BYTES IDENTICAL: CHECK_FAILED")
+    else:
+        print(message, file=sys.stderr)
+    raise SystemExit(2)
+
+
+def guarded(what: str, action):
+    """Выполнить шаг; в тихом режиме подробности отказа наружу не выпускать.
+
+    SystemExit перехватывается намеренно: raw_handle сообщает о рассогласовании
+    дайджеста именно так, и его текст содержит дайджест. KeyboardInterrupt и
+    прочие BaseException не перехватываются.
+    """
+    try:
+        return action()
+    except SystemExit as exit_request:
+        fail(f"{what}: {exit_request}")
+    except Exception as error:  # noqa: BLE001 - граница приватности, а не логика
+        fail(f"{what}: {type(error).__name__}: {error}")
+
+
+body = guarded("не удалось прочитать сохранённый ответ",
+               lambda: json.loads(body_path.read_text(encoding="utf-8")))
 
 originals = [a for a in body.get("assets") or [] if a["role"] == "original"]
 if originals:
     if len(originals) != 1:
-        raise SystemExit(f"expected exactly one original asset, found {len(originals)}")
+        fail(f"expected exactly one original asset, found {len(originals)}")
     source, label = originals[0], "content object asset (role=original)"
 elif body.get("raw_object"):
     source, label = body["raw_object"], "capture record raw_object"
 else:
-    raise SystemExit("neither an original asset nor a raw_object is present")
+    fail("neither an original asset nor a raw_object is present")
 
-reference, digest, record_id = raw_handle(source)
+reference, digest, record_id = guarded("ссылку на оригинал не удалось разобрать",
+                                       lambda: raw_handle(source))
 store = LocalRawObjectStore(data_dir / RAW_DIRNAME)
-stored = store.read_bytes(reference)
-expected = expected_path.read_bytes()
+stored = guarded("сохранённый оригинал не удалось прочитать",
+                 lambda: store.read_bytes(reference))
+expected = guarded("исходный файл не удалось прочитать",
+                   lambda: expected_path.read_bytes())
 
 if not quiet:
     print("read through   :", label)
@@ -630,6 +674,7 @@ if not quiet:
     print("sha256 stored  :", hashlib.sha256(stored).hexdigest())
     print("bytes stored   :", len(stored), "| bytes submitted:", len(expected))
 print("BYTES IDENTICAL:", stored == expected)
+raise SystemExit(0 if stored == expected else 1)
 PY
 ```
 
@@ -690,7 +735,10 @@ Usage: restart_check.py <data_dir> <snapshots_dir> <capture_id>:<исходны�
 capture -- это FAIL. Таблицу результатов владельца этот скрипт не заполняет.
 
 Ни одного дайджеста и ни одного имени файла в выводе: его можно присылать как
-есть, в том числе для изображения владельца.
+есть, в том числе для изображения владельца. Это верно И ПРИ ОТКАЗЕ: любая
+ошибка разбора ссылки, обращения к raw-store или чтения исходного файла
+превращается в вердикт с фиксированной категорией отказа, а не в трассировку с
+путём, ref или дайджестом внутри.
 """
 
 import hashlib
@@ -706,6 +754,26 @@ data_dir, snapshots = Path(sys.argv[1]), Path(sys.argv[2])
 store = LocalRawObjectStore(data_dir / RAW_DIRNAME)
 
 
+class CheckFailed(Exception):
+    """Шаг проверки не удалось выполнить. Несёт КАТЕГОРИЮ, а не значение."""
+
+
+def guarded(category: str, action):
+    """Выполнить шаг; наружу выпустить только категорию отказа.
+
+    SystemExit перехватывается намеренно: raw_handle сообщает о рассогласовании
+    дайджеста именно так, и его текст содержит дайджест. Ни само значение, ни
+    текст исключения дальше не идут -- вердикт несёт только категорию.
+    KeyboardInterrupt и прочие BaseException не перехватываются.
+    """
+    try:
+        return action()
+    except SystemExit:
+        raise CheckFailed(category) from None
+    except Exception:  # noqa: BLE001 - граница приватности, а не логика
+        raise CheckFailed(category) from None
+
+
 def read(phase: str, capture_id: str, kind: str) -> tuple[int | None, object]:
     """(HTTP-код, разобранный JSON) одного снимка; (None, None) если его нет."""
     status_path = snapshots / f"{phase}_{capture_id}_{kind}.status"
@@ -715,7 +783,7 @@ def read(phase: str, capture_id: str, kind: str) -> tuple[int | None, object]:
     try:
         code = int(status_path.read_text(encoding="utf-8").strip())
         return code, json.loads(body_path.read_text(encoding="utf-8"))
-    except (ValueError, json.JSONDecodeError):
+    except (OSError, ValueError, json.JSONDecodeError):
         return None, None
 
 
@@ -772,11 +840,15 @@ def check(capture_id: str, source_file: Path) -> tuple[str, list[str]]:
     if len(originals) != 1:
         return "FAIL", notes + [f"ожидался ровно один original asset, найдено {len(originals)}"]
 
-    reference, digest, _ = raw_handle(originals[0])
-    if not store.exists(reference):
+    reference, digest, _ = guarded("ссылку на оригинал не удалось разобрать",
+                                   lambda: raw_handle(originals[0]))
+    if not guarded("raw-store не отвечает", lambda: store.exists(reference)):
         return "FAIL", notes + ["оригинал отсутствует в raw-store после перезапуска"]
-    stored = store.read_bytes(reference)
-    if stored != source_file.read_bytes():
+    stored = guarded("сохранённый оригинал не удалось прочитать",
+                     lambda: store.read_bytes(reference))
+    submitted = guarded("исходный файл не удалось прочитать",
+                        lambda: source_file.read_bytes())
+    if stored != submitted:
         return "FAIL", notes + ["байты оригинала после перезапуска отличаются от отправленных"]
     if hashlib.sha256(stored).hexdigest() != digest:
         return "FAIL", notes + ["сохранённые байты не соответствуют своему же дайджесту"]
@@ -787,7 +859,13 @@ def check(capture_id: str, source_file: Path) -> tuple[str, list[str]]:
 worst = "PASS"
 for spec in sys.argv[3:]:
     capture_id, source_file = spec.split(":", 1)
-    verdict, notes = check(capture_id, Path(source_file))
+    try:
+        verdict, notes = check(capture_id, Path(source_file))
+    except CheckFailed as unfinished:
+        # Проверку выполнить не удалось. Это НЕ вывод о продукте, поэтому
+        # BLOCKED, и наружу идёт только категория -- без пути, ref и дайджеста.
+        verdict = "BLOCKED"
+        notes = [f"проверку целостности выполнить не удалось: {unfinished.args[0]}"]
     print(f"{capture_id:22s} {verdict}")
     for note in notes:
         print(f"    - {note}")
@@ -1086,8 +1164,9 @@ curl -sS "$API/v1/captures/img_a2_jpeg/content" \
 Если Tesseract, `eng` или `rus` отсутствуют, сервер **не запустится** и скажет,
 чего не хватает. Это правильное поведение, а не дефект: сборка с `--image-ocr`
 никогда не поднимается с тихо выключенным распознаванием. В этом случае IMG-B,
-IMG-C и IMG-E получают `BLOCKED` — поставьте недостающее сами и начните прогон
-заново.
+IMG-C и IMG-E получают `BLOCKED`, а IMG-D остаётся `NOT_RUN` или `BLOCKED`,
+потому что читать после перезапуска будет нечего сверх IMG-A. Поставьте
+недостающее сами и начните прогон заново.
 
 ```bash
 curl -sS "$API/health"; echo
@@ -1348,9 +1427,48 @@ xdg-open "$MY"
 - `engine_invoked: true`;
 - оригинал не переписан.
 
-**`PASS` — это ваше суждение:** результат приемлем для этого изображения при
-фиксированной политике Phase 4B. `FAIL` — если распознано настолько неверно,
-что вы считаете это неприемлемым.
+### Условия `PASS` для IMG-E
+
+Суждение человека — **последнее** из условий, а не единственное. IMG-E
+существует, чтобы проверить **состоявшееся** распознавание, поэтому `PASS`
+требует, чтобы движок действительно отработал и действительно что-то вернул.
+`PASS` ставится, только если выполнено **всё**:
+
+| | условие |
+| --- | --- |
+| 1 | capture — `201` |
+| 2 | `record.status` — `complete` |
+| 3 | content — `200` |
+| 4 | `image_ocr.engine_invoked` — `true` |
+| 5 | сегментов — ровно **1** |
+| 6 | сегмент: `type` — `ocr` |
+| 7 | сегмент: `source_type` — `ocr` |
+| 8 | сегмент: `position` — `0` |
+| 9 | сегмент: `spatial` — пусто (`None`) |
+| 10 | длина текста сегмента — **больше нуля** |
+| 11 | `BYTES IDENTICAL` — `True` |
+| 12 | вы считаете распознанное приемлемым для этого изображения |
+
+**`FAIL`, если** любое из условий 1–3, 5–11 не выполнено при
+`engine_invoked = true` — или если условие 12 не выполнено. В частности: движок
+отработал (`engine_invoked: true`), а непробельного `ocr`-сегмента нет, **хотя
+текст на изображении вы читаете глазами**, — это `FAIL`, а не «так вышло».
+
+**`BLOCKED`, если `engine_invoked` оказался `false`.** Тогда движок не
+запускался — например, ваше изображение крупнее штатного предела в 20 000 000
+пикселей и было пропущено ресурсной политикой. Продукт при этом сработал
+правильно (`201`, `complete`, `segments: []`, `skipped_reason`), и записывать
+это как `FAIL` было бы неправдой. Но и `PASS` тоже: **IMG-E в таком прогоне не
+проверил распознавание вообще.**
+
+Что делать при `BLOCKED`: возьмите **другое** настоящее изображение PNG или
+JPEG, укладывающееся в отгруженные ресурсные пределы, и выполните **новый
+полный прогон приёмки** с шага 0 — новый каталог прогона, новые capture id.
+Досдавать одну строку в уже выполненный прогон нельзя: таблица результатов
+описывает один прогон целиком.
+
+**Ничего не подкручивайте, чтобы превратить `BLOCKED` или `FAIL` в `PASS`** —
+ни пределов, ни политики распознавания.
 
 > **Ничего не подкручивайте, чтобы добиться `PASS`.** Ни PSM, ни DPI, ни выбор
 > языков, ни deskew, ни ориентацию, ни повторы. Принимается именно та
@@ -1385,7 +1503,14 @@ xdg-open "$MY"
 - по каждому сегменту: `type`, `source_type`, `position`, `spatial` и **длину**
   текста;
 - `image_ocr.engine_invoked` — и `skipped_reason`, если он есть;
-- одну строку `BYTES IDENTICAL`.
+- одну строку `BYTES IDENTICAL`: `True`, `False` или `CHECK_FAILED`.
+
+> `CHECK_FAILED` означает, что сверку не удалось **выполнить** — например,
+> исходный файл больше не по тому пути или ссылку на оригинал не удалось
+> разобрать. Подробностей эта строка не содержит намеренно: они приватны.
+> Посмотрите их локально тем же скриптом **без** `--quiet` и не присылайте
+> этот вывод. `CHECK_FAILED` — это не `PASS`: строка остаётся `BLOCKED`, пока
+> сверка не выполнена.
 
 К этому добавьте от себя:
 
@@ -1407,9 +1532,16 @@ EXIF/XMP/ICC, произвольную `metadata` и описание того, 
 Если дефект нельзя показать без содержимого — скажите об этом словами, и
 решение о том, что раскрывать, останется за вами.
 
-**Провал, если:** capture не `201`; `status` не `complete`; content не `200`;
-`BYTES IDENTICAL: False`; либо вы как человек считаете распознанное
-неприемлемым для этого изображения.
+**Провал, если:** не выполнено любое из условий 1–3 и 5–12 таблицы выше при
+`engine_invoked = true` — то есть capture не `201`; `status` не `complete`;
+content не `200`; сегментов не ровно один; `type` или `source_type` не `ocr`;
+`position` не `0`; `spatial` не пуст; длина текста ноль при видимом глазом
+тексте на изображении; `BYTES IDENTICAL: False`; либо вы как человек считаете
+распознанное неприемлемым для этого изображения.
+
+**Не провал, а `BLOCKED`:** `engine_invoked = false` — распознавание не
+запускалось, и этот прогон IMG-E ничего о нём не сказал. Порядок действий — в
+таблице условий выше.
 
 ---
 
@@ -1433,8 +1565,8 @@ EXIF/XMP/ICC, произвольную `metadata` и описание того, 
 
 ### Д1. Снять состояние до перезапуска
 
-Сервер всё ещё работает с `--image-ocr`. Снимите снимки всех четырёх captures —
-и тела ответов, и HTTP-коды:
+Сервер всё ещё работает с `--image-ocr`. Снимите снимки **всех пяти** capture id
+этого прогона — и тела ответов, и HTTP-коды:
 
 ```bash
 for id in img_a1_png img_a2_jpeg img_b_ocr_text img_c_pixel_skip img_e_own_01; do
@@ -1532,10 +1664,17 @@ diff -u "$ACC/out/b_before.txt" "$ACC/out/b_after.txt" && echo "IMG-B: выво�
 у IMG-B пропал или изменился; `image_ocr` у IMG-C пропал; у IMG-A появился
 `image_ocr`; оригинал отличается от отправленного; `ИТОГ ПРОВЕРКИ` не `PASS`.
 
-**Что прислать:** вывод `restart_check.py` целиком (он компактен, не содержит ни
-дайджестов, ни имён файлов и безопасен для строки с изображением владельца),
-строку `IMG-B: вывод совпал` и одну строку, подтверждающую, что второй сервер
-запущен с **тем же** `--data-dir` и **без** `--image-ocr`.
+**Что прислать:** вывод `restart_check.py` целиком (он компактен и безопасен для
+строки с изображением владельца: ни дайджестов, ни ссылок, ни имён файлов — в
+том числе и когда проверка отказывает), строку `IMG-B: вывод совпал` и одну
+строку, подтверждающую, что второй сервер запущен с **тем же** `--data-dir` и
+**без** `--image-ocr`.
+
+> Вердикт `BLOCKED` с пометкой «проверку целостности выполнить не удалось»
+> означает, что проверка не смогла **состояться** — исходный файл не читается,
+> ссылка на оригинал не разбирается, raw-store не отвечает. Это не вывод о
+> продукте: IMG-D остаётся `BLOCKED`, пока проверка не выполнена. Категория
+> отказа названа без значений намеренно; смотрите подробности локально.
 
 ---
 
