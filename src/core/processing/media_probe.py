@@ -54,7 +54,14 @@ from typing import BinaryIO, Final, Protocol
 #: engine's way of writing ``None`` and must never survive normalization: a
 #: content object recording ``codec: "n/a"`` claims an observation nobody made,
 #: and omission already says the same thing honestly.
-PLACEHOLDER_VALUES: Final[frozenset[str]] = frozenset({"n/a", "na", "unknown", "none", "null"})
+#:
+#: Private, and deliberately so. This is the validator's own vocabulary for
+#: recognizing one kind of malformed answer — not part of the seam. An adapter
+#: is told to *omit* what it did not observe; it is never handed a list of
+#: spellings to avoid, because publishing one would read as a licence to emit
+#: any string that is not on it. The set may therefore grow as engines are met
+#: without that being a change to the public contract.
+_PLACEHOLDER_VALUES: Final[frozenset[str]] = frozenset({"n/a", "na", "unknown", "none", "null"})
 
 #: A canonical positive rational, as ``ffprobe`` reports a frame rate:
 #: ``"30/1"``, ``"30000/1001"``. Both parts are positive and carry no leading
@@ -154,9 +161,20 @@ class MediaProbeResult:
     duration at all, which is a fact rather than a failure.
 
     There are deliberately **no stream-count fields.** ``len(audio_streams)`` and
-    ``len(video_streams)`` are the counts, they cannot disagree with the lists
-    they describe, and a count that could disagree is a second source of truth
-    about the same thing.
+    ``len(video_streams)`` are the counts at this boundary, they cannot disagree
+    with the lists they describe, and a count that could disagree is a second
+    source of truth about the same thing.
+
+    That is a rule about the *port*, not about storage. The canonical
+    ``ContentObject.metadata`` a media processor will build **does** record
+    ``audio_stream_count`` and ``video_stream_count``, because a stored object is
+    read by things that want the shape of a capture without walking its stream
+    lists. Those counts are never an independent observation: a processor
+    computes them as exactly the two ``len()`` calls above and by no other means,
+    so the lists stay the truth and the counts stay a projection of them. An
+    adapter is never asked for a count and has no way to report one. See
+    `ADR-021
+    <../../docs/ADR/ADR-021-original-first-time-based-media-ingestion.md>`_.
 
     There is deliberately **no place for subtitle, data, attachment, or other
     stream types.** Phase 5A ingests time-based media as an immutable original
@@ -230,7 +248,7 @@ def _check_normalized_text(value: object, *, label: str) -> None:
         raise _reject(f"reported {label} {value!r} with surrounding whitespace")
     if value != value.lower():
         raise _reject(f"reported {label} {value!r}, which is not lowercase")
-    if value in PLACEHOLDER_VALUES:
+    if value in _PLACEHOLDER_VALUES:
         raise _reject(f"reported the placeholder {value!r} as {label} instead of omitting it")
 
 

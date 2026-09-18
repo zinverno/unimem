@@ -79,7 +79,10 @@ a verdict about the submitted media. Nothing registers it, nothing calls it, and
 no deployment can ingest an ``AUDIO`` or ``VIDEO`` capture as a result: the
 contracts learned the vocabulary at schema 0.3, and the runtime capability is a
 separate, later decision. ``core`` still imports no media framework, no codec
-library, no ``subprocess``, and no ``tempfile``. See `ADR-021
+library and no ``subprocess``, and this slice adds no ``tempfile`` use to this
+package or to the media boundary — the one ``tempfile`` in ``core`` is
+:mod:`core.storage.local`'s Phase 0B raw staging, which is untouched. No media
+adapter and no temporary-file machinery exists here at all. See `ADR-021
 <../../docs/ADR/ADR-021-original-first-time-based-media-ingestion.md>`_.
 
 Phase 0H adds the step that calls them in order.
@@ -162,7 +165,6 @@ from core.processing.image_recognition import (
     validate_image_ocr_result,
 )
 from core.processing.media_probe import (
-    PLACEHOLDER_VALUES,
     AudioStreamInfo,
     MediaProbe,
     MediaProbeExecutionError,
@@ -233,7 +235,6 @@ __all__ = [
     "PAGE_COUNT_KEY",
     "PARAGRAPH_BLOCK",
     "PDF_MIME_TYPE",
-    "PLACEHOLDER_VALUES",
     "PNG_FORMAT",
     "PNG_HEADER_SIZE",
     "PNG_MAX_DIMENSION",

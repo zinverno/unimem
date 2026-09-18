@@ -560,10 +560,16 @@ audio bytes
   -> ...and there it stops.          no intake branch, no processor, no engine
 ```
 
-The rest of Phase 5A — `ffprobe` behind the port, the opt-in runtime capability,
-intake materialization, the structural metadata, the `503` mapping, and owner
-manual acceptance — is decided in ADR-021 and **not implemented**. Phase 5B,
-transcription, is not designed.
+The rest of Phase 5A is **not implemented** here, and two different things are
+meant by that. ADR-021 fixes the *shapes* the later slices must satisfy — the
+port, the MIME and container allowlists, the structural requirements, and the
+durable metadata — so intake materialization, that metadata and the `503`
+mapping are settled there and simply not built yet. Concrete local `ffprobe`
+execution, and the security, startup, deployment and resource mechanics around
+running an external engine, are a different matter: they are the subject of the
+later slices that implement them and are recorded with that implementation and
+its own ADR, not with ADR-021. Owner manual acceptance belongs to 5A-4. Phase
+5B, transcription, is not designed.
 
 ## Future data flow
 
@@ -2252,9 +2258,13 @@ AudioStreamInfo    index, codec, sample_rate, channels
 VideoStreamInfo    index, codec, width, height, frame_rate
 ```
 
-No stream-count fields — `len(audio_streams)` is the count, and a count that can
-disagree with its own list is a second source of truth. No subtitle, data or
-attachment streams — a container carrying them is fine, they are simply not
+No stream-count fields **on the result** — `len(audio_streams)` is the count at
+this boundary, and a count travelling beside the list it describes is a second
+thing that can be wrong about one fact. The canonical metadata a later slice
+stores *does* carry `audio_stream_count` and `video_stream_count`, computed only
+as those two `len()` calls, so the counts are a projection of the stored lists
+rather than a separate observation; an adapter is never asked for one. No
+subtitle, data or attachment streams — a container carrying them is fine, they are simply not
 described. No raw `ffprobe` JSON, no engine name or version, no temporary path.
 `frame_rate` stays a rational string because `30000/1001` is the fact and
 `29.97` is a lossy rendering of it. Optional facts are **omission-first**:
@@ -2283,9 +2293,12 @@ processors' questions.
 contract vocabulary. Intake still supports exactly four payload types, and
 `AUDIO` is not one of them: a valid audio envelope is refused with the same
 `UnsupportedCapturePayloadError` a `VIDEO` envelope has always been refused with,
-and no processor claims the modality. `core` imports no media framework, no codec
-binding, no `subprocess`, and no `tempfile` — that last one outside
-`core.storage.local`, which has staged raw writes with it since Phase 0B.
+and no processor claims the modality. `core` imports no media framework, no
+codec binding and no `subprocess`, and Phase 5A-1 adds no `subprocess` or
+`tempfile` use to the media or `core.processing` boundary — no media adapter and
+no temporary-file machinery exists in this slice. `core` is not `tempfile`-free
+overall and this does not claim it is: `core.storage.local` has used it for
+immutable raw staging since Phase 0B, and that is unchanged.
 
 **One producer had to move.** Intake stamps every record with the *current*
 schema version, and completed-capture replay requires the resubmitted envelope's

@@ -66,6 +66,39 @@ def result(**overrides: Any) -> MediaProbeResult:
 class TestThePortSurface:
     """What crosses the seam, and — more importantly — what does not."""
 
+    def test_the_public_surface_is_exactly_six_names(self) -> None:
+        """The seam is the six names below, and nothing else escapes with them.
+
+        ``_PLACEHOLDER_VALUES`` is the validator's own vocabulary for one kind of
+        malformed answer, not part of the contract. Exporting it would read as a
+        list of spellings for an adapter to avoid — and therefore as a licence to
+        emit anything not on it — when the actual instruction is to *omit* what
+        was not observed. Keeping it private also lets the set grow as engines
+        are met without that being a public change.
+        """
+        import core.processing as processing
+        import core.processing.media_probe as media_probe
+
+        exported = {
+            name
+            for name in vars(media_probe)
+            if not name.startswith("_")
+            and name not in {"math", "re", "dataclass", "BinaryIO", "Final", "Protocol"}
+        }
+
+        assert exported == {
+            "MediaProbe",
+            "MediaProbeResult",
+            "AudioStreamInfo",
+            "VideoStreamInfo",
+            "MediaProbeExecutionError",
+            "validate_media_probe_result",
+        }
+        assert exported <= set(processing.__all__)
+        assert not hasattr(processing, "PLACEHOLDER_VALUES")
+        assert "PLACEHOLDER_VALUES" not in processing.__all__
+        assert not hasattr(media_probe, "PLACEHOLDER_VALUES")
+
     def test_probe_takes_the_stream_and_nothing_else(self) -> None:
         """The narrowness is the contract, so it is asserted rather than trusted.
 

@@ -1,12 +1,29 @@
 # ADR-021: Original-first ingestion of time-based media, and standalone audio as a first-class modality
 
 Status: **accepted (Macro Phase 5A); being delivered in slices.** This document
-records the whole of the accepted Phase 5A architecture. **Phase 5A PR 1 — the
-contract and typed boundary — is implemented**; every runtime capability below
-is future work, and the section
+records the **domain, schema and contract foundation** of Macro Phase 5A — the
+original-first ingestion model, the `AUDIO` modality, schema `0.3`, and the
+`MediaProbe` seam — and the canonical shapes those fix for the slices that
+follow. **Phase 5A PR 1 is implemented**; the section
 [What this PR implements, and what it does not](#what-this-pr-implements-and-what-it-does-not)
-says exactly which is which. Macro Phase 4 is
-[closed](ADR-020-opt-in-local-image-ocr.md). Macro Phase 3 remains
+says exactly which parts.
+
+**Scope boundary.** Concrete local `ffprobe` execution, and the security,
+startup, deployment and resource mechanics that go with running an external
+engine, are **not** this document's subject. They belong to the later 5A slices
+that implement them and are recorded with that implementation and its own ADR.
+This document constrains them — it fixes the port they must satisfy, the
+allowlists they must honour, and the metadata shape they must produce — but it
+does not specify them, and nothing here should be read as saying those concerns
+are still open questions.
+
+Macro Phase 4 is closed; the closure record is the *Macro Phase 4 — Image
+Ingestion* section of
+[`docs/ARCHITECTURE.md`](../ARCHITECTURE.md#macro-phase-4--image-ingestion),
+together with [`docs/MANUAL_IMAGE_ACCEPTANCE.md`](../MANUAL_IMAGE_ACCEPTANCE.md).
+[ADR-020](ADR-020-opt-in-local-image-ocr.md) is deliberately **not** cited as
+that evidence: it records Macro Phase 4 as still *open* at the time it was
+accepted, which was true then and stays as written. Macro Phase 3 remains
 [closed](ADR-019-still-image-ingestion.md#macro-phase-3-is-closed). Macro Phase 2
 remains [closed](ADR-016-pdf-document-ingestion.md#macro-phase-2-is-closed).
 Macro Phase 1 remains
@@ -135,8 +152,21 @@ image *before* decoding. A probe has nothing to pre-authorize, and telling it
 what the submitter declared would invite it to agree.
 
 **The future concrete implementation is `ffprobe`, outside `core`.** `core`
-imports no media framework, no codec binding, no `subprocess`, and no
-`tempfile`. Which engine reads the container is an adapter's business.
+imports no media framework, no codec binding, and no `subprocess`, and the media
+side of `core.processing` neither uses nor reaches for `tempfile`. Which engine
+reads the container is an adapter's business.
+
+`core` is **not** free of `tempfile` overall, and this document does not claim it
+is: `core.storage.local` has used `tempfile.mkstemp` since Phase 0B to stage an
+in-flight raw write beside the finalized objects, on the same filesystem, under
+a name no caller chose. That is the raw object store's own business and is
+untouched here. The narrower guarantee Phase 5A-1 makes is the one that matters
+for this port: **no `subprocess` or `tempfile` use is added to the media or
+`core.processing` boundary, and no media adapter or temporary-file machinery
+exists in this PR at all.** It is worth stating rather than assuming, because a
+probe adapter is the one thing in this system that will plausibly want to spill
+a stream to a path so an engine can be pointed at it — which is exactly why
+`probe` takes a stream and cannot express a path.
 
 ### The normalized result
 
@@ -151,9 +181,13 @@ AudioStreamInfo   index, codec, sample_rate, channels
 VideoStreamInfo   index, codec, width, height, frame_rate
 ```
 
-- **Counts are derived** from the normalized lists — `len(audio_streams)`,
-  `len(video_streams)`. There are no count fields, because a count that can
-  disagree with the list it describes is a second source of truth.
+- **The result carries no stream-count fields.** A count that travels beside the
+  list it describes is a second thing that can be wrong about one fact, and the
+  wrong one is the one people read. `len(audio_streams)` and
+  `len(video_streams)` are the counts at this boundary. This is a rule about the
+  *port*, not about storage: the canonical metadata below does record counts,
+  and records them only as those two `len()` calls — see
+  [The durable media metadata shape](#the-durable-media-metadata-shape).
 - **No subtitle, data, attachment, or other stream type is modelled.** A
   container carrying them is perfectly acceptable; they are simply not
   described, and 5A ignores them.
@@ -230,24 +264,84 @@ is the same rule ADR-019 fixed for images, and it only works because the two
 facts are observed independently — which is why the port is not handed the
 declared type.
 
-**The durable metadata shape, when structural facts are recorded, is exactly:**
+#### The durable media metadata shape
 
-```
-media
-  audio_streams
-  video_streams
+**The canonical `ContentObject.metadata` a media capture carries is exactly
+this, and a later slice implements it:**
+
+```python
+metadata = {
+    "media": {
+        "container": "<mp3|wav|ogg|mp4|webm>",
+        "duration_seconds": <finite non-negative number>,   # only if observed
+        "audio_stream_count": len(result.audio_streams),
+        "video_stream_count": len(result.video_streams),
+    },
+    "audio_streams": [
+        {
+            "index": ...,
+            "codec": ...,          # only if observed
+            "sample_rate": ...,    # only if observed
+            "channels": ...,       # only if observed
+        },
+        ...
+    ],
+    "video_streams": [
+        {
+            "index": ...,
+            "codec": ...,          # only if observed
+            "width": ...,          # only if observed
+            "height": ...,         # only if observed
+            "frame_rate": ...,     # only if observed
+        },
+        ...
+    ],
+}
 ```
 
-with counts derived from the normalized stream lists rather than stored.
+**Counts are stored here, and that is not a contradiction of the port rule
+above.** The two statements are about different things, and conflating them was
+the error this section exists to correct:
+
+- `MediaProbeResult` has **no** count fields. An adapter is never asked for a
+  count and can never report one that disagrees with the streams it reported.
+- The canonical metadata **does** carry `audio_stream_count` and
+  `video_stream_count`, because a stored object is read by things that want the
+  shape of a capture without walking its stream lists.
+- The counts are therefore **never an independent observation**. A processor
+  computes them as exactly `len(result.audio_streams)` and
+  `len(result.video_streams)` and by no other means. They are a projection of
+  the lists stored beside them, and the lists remain the truth.
+
+What is **always present**:
+
+- `media.container` — always, because it is only written after the declared MIME
+  type and the probed container have been verified against each other, and a
+  capture that fails that check never produces a content object at all;
+- `media.audio_stream_count` and `media.video_stream_count` — always, including
+  as `0`;
+- `audio_streams` and `video_streams` — always, including as `[]`.
+
+**An empty list is a real observation**, not a gap: it says this stream type was
+looked for and was absent. That is why it is written rather than omitted, and it
+is the one place in this shape where a present-but-empty value is the honest
+answer. Correspondingly a count of `0` is a fact, not a placeholder.
+
+What is **optional**:
+
+- `media.duration_seconds` — omitted entirely when the container declares none;
+- every per-stream technical field — `codec`, `sample_rate`, `channels`,
+  `width`, `height`, `frame_rate` — omitted entirely when not observed.
+
+**Optional means omitted, not filled in.** No `null`, no `0`, no `"unknown"`,
+no `"N/A"`, and no guess is ever written for a fact the container did not
+declare. `index` is the only per-stream field that is always present, because a
+stream without one is not a stream the probe may report.
 
 **Explicitly out of scope for the whole of Phase 5A:** transcription; segments
 for media; extracted audio assets; keyframes; thumbnails; embedded tag or title
 extraction; primary-stream selection; raw `ffprobe` JSON; full frame, packet, or
 decode validation; and recording the probing engine's identity.
-
-`ffprobe` execution, prerequisite checking, local deployment, the opt-in runtime
-flag and the security details of running an external engine belong to **later
-5A slices** and are not decided by this document beyond the boundaries above.
 
 ### Schema support and deployment capability are separate
 
@@ -274,7 +368,9 @@ are separate from the contracts' knowledge of OCR segments.
 
 **Not implemented, and not to be inferred from anything above:**
 `AudioProcessor`; `VideoProcessor`; `FfprobeMediaProbe`; a `unimem_media`
-package; any `subprocess` or `tempfile` use; a `--media` flag; prerequisite
+package; any `subprocess` use, or any `tempfile` use added to `core.processing`
+(`core.storage.local`'s pre-existing Phase 0B staging is untouched); a `--media`
+flag; prerequisite
 checks or a startup self-test; a `media_enabled` intake flag; `AUDIO` or `VIDEO`
 intake materialization; media MIME allowlists in intake; media replay; the
 `503` HTTP mapping; real media fixtures; FFmpeg in CI; transcription; segments
