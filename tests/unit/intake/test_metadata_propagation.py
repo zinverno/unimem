@@ -9,6 +9,7 @@ byte is written, copied rather than shared, and never in the raw bytes.
 import pytest
 
 from core.contracts import (
+    SCHEMA_VERSION,
     CaptureEnvelope,
     CaptureSourceType,
     CaptureStatus,
@@ -119,18 +120,19 @@ def test_captured_at_never_becomes_received_at(
 def test_the_record_is_at_the_current_schema_version(
     intake: CaptureIntake, envelope: CaptureEnvelope
 ) -> None:
-    assert intake.accept(envelope).schema_version == "0.2"
+    assert intake.accept(envelope).schema_version == SCHEMA_VERSION
 
 
-def test_a_legacy_envelope_produces_a_current_record(intake: CaptureIntake) -> None:
-    """A 0.1 envelope is still accepted, and its metadata still becomes durable."""
+@pytest.mark.parametrize("version", ["0.1", "0.2"])
+def test_a_legacy_envelope_produces_a_current_record(intake: CaptureIntake, version: str) -> None:
+    """An older envelope is still accepted, and its metadata still becomes durable."""
     data = make_envelope().model_dump(mode="json")
-    legacy = CaptureEnvelope.model_validate(data | {"schema_version": "0.1"})
+    legacy = CaptureEnvelope.model_validate(data | {"schema_version": version})
 
     accepted = intake.accept(legacy)
 
-    assert legacy.schema_version == "0.1"
-    assert accepted.schema_version == "0.2"
+    assert legacy.schema_version == version
+    assert accepted.schema_version == SCHEMA_VERSION
     assert accepted.context == legacy.context
     assert accepted.intent == legacy.intent
     assert accepted.title == legacy.payload.title

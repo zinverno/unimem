@@ -5,6 +5,12 @@ facts a submitter supplied — when, where, why, and under what title — and th
 the version bump those fields arrived with is honest in both directions: a 0.2
 record must carry ``context``, and a 0.1 record must neither claim the new
 fields nor grow them on the way back out.
+
+Schema 0.3 changed none of that, and these tests now say so version by version
+rather than by asking what happens to be current. That distinction is the
+mechanism, not pedantry: "the previous version" would have re-classified 0.2 the
+moment 0.3 arrived, and 0.2 documents would have quietly started meaning
+something else.
 """
 
 import json
@@ -15,6 +21,8 @@ import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from core.contracts import (
+    CAPTURE_METADATA_SCHEMA_VERSION,
+    CAPTURE_METADATA_SCHEMA_VERSIONS,
     SCHEMA_VERSION,
     CaptureContext,
     CaptureIntent,
@@ -25,6 +33,7 @@ from core.contracts import (
     CaptureStatus,
     IntentAction,
     RawObjectRef,
+    SchemaVersion,
 )
 
 CAPTURED_AT = datetime(2026, 4, 5, 6, 7, 8, 90000, tzinfo=UTC)
@@ -32,6 +41,15 @@ RECEIVED_AT = CAPTURED_AT + timedelta(minutes=30)
 
 #: The three fields schema version 0.2 introduced.
 METADATA_FIELDS = ("context", "intent", "title")
+
+#: Every version that carries them, written out so the parameters are typed as
+#: the contract's own ``SchemaVersion`` rather than as bare strings.
+VERSIONS_WITH_METADATA: list[SchemaVersion] = ["0.2", "0.3"]
+
+
+def test_the_parametrized_versions_are_the_ones_the_contracts_name() -> None:
+    """The list above is a literal; this is what stops it going stale."""
+    assert frozenset(VERSIONS_WITH_METADATA) == CAPTURE_METADATA_SCHEMA_VERSIONS
 
 
 class LegacyCaptureRecordV01(BaseModel):
@@ -100,6 +118,63 @@ def test_context_is_required_at_the_current_version() -> None:
     """A capture that cannot say when it was taken is not worth much later."""
     with pytest.raises(ValidationError, match="context is required"):
         CaptureRecord(**record_fields())
+
+
+@pytest.mark.parametrize("version", VERSIONS_WITH_METADATA)
+def test_context_is_required_at_every_version_that_has_it(version: SchemaVersion) -> None:
+    """0.3 inherited the requirement unchanged; it did not soften for 0.2."""
+    with pytest.raises(ValidationError, match="context is required"):
+        CaptureRecord(**record_fields(), schema_version=version)
+
+
+@pytest.mark.parametrize("version", VERSIONS_WITH_METADATA)
+def test_intent_and_title_stay_optional_at_every_version_that_has_them(
+    version: SchemaVersion,
+) -> None:
+    record = CaptureRecord(**record_fields(), schema_version=version, context=make_context())
+
+    assert record.schema_version == version
+    assert record.intent is None
+    assert record.title is None
+
+
+@pytest.mark.parametrize("version", VERSIONS_WITH_METADATA)
+def test_the_metadata_keys_are_serialized_at_every_version_that_has_them(
+    version: SchemaVersion,
+) -> None:
+    record = CaptureRecord(**record_fields(), schema_version=version, context=make_context())
+
+    dumped = record.model_dump(mode="json")
+
+    assert dumped["schema_version"] == version
+    for field in METADATA_FIELDS:
+        assert field in dumped
+
+
+def test_an_existing_0_2_record_keeps_its_version_when_read_back() -> None:
+    """Advancing the current version does not rewrite a stored document."""
+    stored = CaptureRecord(
+        **record_fields(), schema_version="0.2", context=make_context(), title="A note"
+    ).model_dump(mode="json")
+
+    reread = CaptureRecord.model_validate(stored)
+
+    assert reread.schema_version == "0.2"
+    assert reread.model_dump(mode="json") == stored
+
+
+def test_advancing_a_0_2_record_through_its_lifecycle_keeps_its_version() -> None:
+    """A status change is not a migration, at either older version."""
+    received = CaptureRecord(**record_fields(), schema_version="0.2", context=make_context())
+
+    stored = CaptureRecord(
+        **(record_fields() | {"status": CaptureStatus.STORED}),
+        schema_version=received.schema_version,
+        updated_at=RECEIVED_AT + timedelta(seconds=1),
+        context=received.context,
+    )
+
+    assert stored.schema_version == "0.2"
 
 
 def test_intent_and_title_stay_optional() -> None:
@@ -258,7 +333,13 @@ def test_an_unknown_version_is_still_rejected() -> None:
     data = CaptureRecord(**record_fields(), context=make_context()).model_dump(mode="json")
 
     with pytest.raises(ValidationError, match="schema_version"):
-        CaptureRecord.model_validate(data | {"schema_version": "0.3"})
+        CaptureRecord.model_validate(data | {"schema_version": "0.4"})
+
+
+def test_the_rejection_names_the_version_that_introduced_the_fields() -> None:
+    """Not the current one. They arrived in 0.2 and stayed there when 0.3 came."""
+    with pytest.raises(ValidationError, match=f"it was added in {CAPTURE_METADATA_SCHEMA_VERSION}"):
+        CaptureRecord(**record_fields(), schema_version="0.1", title="A note")
 
 
 def test_the_record_never_holds_the_captured_content() -> None:

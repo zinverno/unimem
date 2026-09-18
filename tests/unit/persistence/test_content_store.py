@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from core.contracts import ContentObject, ContentSource
+from core.contracts import SCHEMA_VERSION, ContentObject, ContentSource
 from core.persistence import (
     ContentObjectAlreadyExistsError,
     ContentObjectNotFoundError,
@@ -75,7 +75,7 @@ def test_every_field_survives_the_round_trip(
 
     restored = store.get(content.id)
 
-    assert restored.schema_version == "0.2"
+    assert restored.schema_version == SCHEMA_VERSION
     assert restored.title == content.title
     assert restored.metadata == content.metadata
     assert restored.segments[0].text == content.segments[0].text
@@ -281,7 +281,7 @@ def test_a_current_content_object_stays_current(
 ) -> None:
     store.create(content)
 
-    assert store.get(content.id).schema_version == "0.2"
+    assert store.get(content.id).schema_version == SCHEMA_VERSION
 
 
 def test_content_without_a_provider_or_url_round_trips(

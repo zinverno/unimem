@@ -71,11 +71,11 @@ describe("what the extension says it is", () => {
   });
 
   it("does not confuse its own version with the canonical schema version", () => {
-    // The extension is at 0.2.0; the contract it emits is schema 0.2. They are
-    // unrelated numbers that happen to look alike, and this test exists so that
-    // nobody "fixes" one to match the other.
+    // The extension is at 0.2.0; the contract it emits is schema 0.3. They
+    // moved on different schedules for different reasons, and this test exists
+    // so that nobody "fixes" one to match the other.
     assert.notEqual(manifest.version, SCHEMA_VERSION);
-    assert.equal(SCHEMA_VERSION, "0.2");
+    assert.equal(SCHEMA_VERSION, "0.3");
   });
 });
 

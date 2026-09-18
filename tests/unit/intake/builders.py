@@ -176,8 +176,14 @@ def make_unsupported_envelope(
     reason in Phase 3 PR 1, and ``IMAGE`` in Phase 4 PR 1; their shapes are
     asked about in ``test_document_materialization.py`` and
     ``test_image_materialization.py``.
+
+    ``AUDIO`` arrived here in Phase 5A PR 1 and is the first member to be added
+    to this list rather than removed from it. Schema 0.3 gave the contracts the
+    word; it gave this build no way to act on it, and the two are separate
+    decisions on purpose.
     """
     payloads: dict[CapturePayloadType, dict[str, Any]] = {
+        CapturePayloadType.AUDIO: {"file_ref": "blob://audio"},
         CapturePayloadType.VIDEO: {"file_ref": "blob://video"},
         CapturePayloadType.FILE: {"file_ref": "blob://file"},
         CapturePayloadType.URL: {},

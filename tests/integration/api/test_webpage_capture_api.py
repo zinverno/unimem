@@ -191,9 +191,10 @@ class TestTheRealSmokeTest:
         assert record.intent is not None
         assert record.intent.tags == ["architecture", "http"]
 
-    def test_the_schema_is_still_0_2(self, client: TestClient) -> None:
+    def test_both_documents_carry_the_current_canonical_schema(self, client: TestClient) -> None:
+        """Webpage ingestion added no contract of its own, and still adds none."""
         assert record_of(client).schema_version == SCHEMA_VERSION
-        assert content_of(client).schema_version == "0.2"
+        assert content_of(client).schema_version == SCHEMA_VERSION
 
 
 class TestSurvivingARestart:

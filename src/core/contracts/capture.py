@@ -17,13 +17,15 @@ from pydantic import (
 )
 
 from core.contracts.base import (
-    LEGACY_SCHEMA_VERSION,
+    CAPTURE_METADATA_SCHEMA_VERSION,
     SCHEMA_VERSION,
+    SCHEMA_VERSIONS_BEFORE_CAPTURE_METADATA,
     DomainModel,
     Identifier,
     NonBlankStr,
     SchemaVersion,
     Sha256,
+    check_audio_within_schema_version,
 )
 from core.contracts.enums import (
     CapturePayloadType,
@@ -46,6 +48,13 @@ class CapturePayload(DomainModel):
 
     ``file_ref`` is an opaque handle to bytes held outside this contract; it is
     not required to be a filesystem path.
+
+    An ``AUDIO`` payload is staged like an ``IMAGE``, ``VIDEO``, or ``FILE``
+    one: time-based media is never inline, so ``file_ref`` is the only shape it
+    has. This model carries no ``schema_version`` of its own — a nested contract
+    participates in the version of the document containing it — so the rule that
+    ``audio`` needs schema version 0.3 lives on :class:`CaptureEnvelope`, which
+    is the versioned document a payload arrives inside.
     """
 
     type: CapturePayloadType
@@ -67,7 +76,12 @@ class CapturePayload(DomainModel):
             case CapturePayloadType.DOCUMENT:
                 if self.file_ref is None and self.text is None:
                     raise ValueError("document payload requires file_ref or text")
-            case CapturePayloadType.IMAGE | CapturePayloadType.VIDEO | CapturePayloadType.FILE:
+            case (
+                CapturePayloadType.IMAGE
+                | CapturePayloadType.AUDIO
+                | CapturePayloadType.VIDEO
+                | CapturePayloadType.FILE
+            ):
                 if self.file_ref is None:
                     raise ValueError(f"{self.type.value} payload requires file_ref")
             case CapturePayloadType.URL:
@@ -105,6 +119,18 @@ class CaptureEnvelope(DomainModel):
     def _check_url_payload(self) -> Self:
         if self.payload.type is CapturePayloadType.URL and self.source.url is None:
             raise ValueError("url payload requires source.url")
+        return self
+
+    @model_validator(mode="after")
+    def _check_payload_type_matches_schema_version(self) -> Self:
+        """Tie ``audio`` to the version that introduced it.
+
+        ``video`` gets no such check and must not grow one: it has been in the
+        vocabulary since 0.1, so a historical 0.1 or 0.2 ``VIDEO`` envelope is a
+        valid document and stays one.
+        """
+        if self.payload.type is CapturePayloadType.AUDIO:
+            check_audio_within_schema_version(self.schema_version, subject="payload type")
         return self
 
 
@@ -175,15 +201,24 @@ class CaptureRecord(DomainModel):
         and reading it as 0.1 would then lose data on the way back out. A 0.2
         record, conversely, must carry ``context``.
         """
-        if self.schema_version == LEGACY_SCHEMA_VERSION:
+        if self.schema_version in SCHEMA_VERSIONS_BEFORE_CAPTURE_METADATA:
             claimed = [name for name in CAPTURE_METADATA_FIELDS if getattr(self, name) is not None]
             if claimed:
                 raise ValueError(
-                    f"schema version {LEGACY_SCHEMA_VERSION} has no "
-                    f"{', '.join(claimed)}; it was added in {SCHEMA_VERSION}"
+                    f"schema version {self.schema_version} has no "
+                    f"{', '.join(claimed)}; it was added in {CAPTURE_METADATA_SCHEMA_VERSION}"
                 )
         elif self.context is None:
-            raise ValueError(f"context is required from schema version {SCHEMA_VERSION}")
+            raise ValueError(
+                f"context is required from schema version {CAPTURE_METADATA_SCHEMA_VERSION}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_payload_type_matches_schema_version(self) -> Self:
+        """Tie ``audio`` to the version that introduced it, as on the envelope."""
+        if self.payload_type is CapturePayloadType.AUDIO:
+            check_audio_within_schema_version(self.schema_version, subject="payload type")
         return self
 
     @model_serializer(mode="wrap")
@@ -199,7 +234,7 @@ class CaptureRecord(DomainModel):
         that wrote it.
         """
         data: dict[str, Any] = handler(self)
-        if self.schema_version == LEGACY_SCHEMA_VERSION:
+        if self.schema_version in SCHEMA_VERSIONS_BEFORE_CAPTURE_METADATA:
             for name in CAPTURE_METADATA_FIELDS:
                 data.pop(name, None)
         return data

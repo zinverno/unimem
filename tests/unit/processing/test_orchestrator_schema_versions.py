@@ -142,4 +142,4 @@ def test_the_content_object_uses_the_current_schema_version(
     ).process(CAPTURE_ID)
 
     assert content.schema_version == SCHEMA_VERSION
-    assert content.schema_version == "0.2"
+    assert content.schema_version == "0.3"

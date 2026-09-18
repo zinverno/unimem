@@ -229,6 +229,13 @@ class TestCoreKnowsNothingAboutHttp:
         library, a subprocess, or the concrete adapter package appearing anywhere
         in here would mean the kernel had acquired system prerequisites and that
         the policy could no longer be tested on a machine without them.
+
+        Phase 5A PR 1 adds the media half of the same rule, before there is any
+        media machinery to keep out. ``core`` gained a
+        :class:`~core.processing.media_probe.MediaProbe` port and no way to run
+        one: no media framework and no codec binding. ``tempfile`` is handled by
+        the test below rather than here, because one module in ``core`` has a
+        legitimate use for it.
         """
         forbidden = {
             "mammoth",
@@ -242,6 +249,58 @@ class TestCoreKnowsNothingAboutHttp:
             "pypdfium2_raw",
             "tesserocr",
             "unimem_ocr",
+        }
+
+        offenders = {
+            name: sorted(top_level(names) & forbidden)
+            for name, names in imported_modules(core).items()
+            if top_level(names) & forbidden
+        }
+
+        assert offenders == {}
+
+    def test_tempfile_reaches_no_further_than_the_raw_object_store(self) -> None:
+        """One module stages bytes on disk, and it is the one that owns the disk.
+
+        :mod:`core.storage.local` has used ``tempfile.mkstemp`` since Phase 0B to
+        stage an in-flight write beside the finalized objects, on the same
+        filesystem, under a name no caller chose. That is the store's own job and
+        it stays.
+
+        Nothing else may acquire it, and Phase 5A PR 1 is why the rule is written
+        down now. A media probe adapter is the one thing in this system that will
+        plausibly want to spill a stream to a path so an engine can be pointed at
+        it — which is exactly why
+        :meth:`~core.processing.media_probe.MediaProbe.probe` takes a stream and
+        cannot express a path. Should that convenience ever be reached for inside
+        the kernel, this test is what notices.
+        """
+        importers = {
+            name for name, names in imported_modules(core).items() if "tempfile" in top_level(names)
+        }
+
+        assert importers == {"core.storage.local"}
+
+    def test_no_media_machinery_is_imported_anywhere_in_core(self) -> None:
+        """The engines Phase 5A will reach through a port, named before they exist.
+
+        ``core`` owns the media *policy* — which declared types route where, what
+        a probed container verifies, what lands in durable metadata — and will
+        reach a real engine through
+        :class:`~core.processing.media_probe.MediaProbe`. A media framework or a
+        codec binding appearing in here would mean the kernel had acquired a
+        system prerequisite, and that the policy could no longer be tested on a
+        machine with no media tooling installed.
+        """
+        forbidden = {
+            "av",
+            "ffmpeg",
+            "ffmpeg_python",
+            "imageio_ffmpeg",
+            "moviepy",
+            "mutagen",
+            "soundfile",
+            "unimem_media",
         }
 
         offenders = {

@@ -10,6 +10,8 @@ was never a Python object.
 
 from typing import Any
 
+from core.contracts import SCHEMA_VERSION
+
 #: When the user captured, as a client would write it: an RFC 3339 string with
 #: an offset. Deliberately not "now", so a test can tell it apart from the
 #: server's own clock.
@@ -30,7 +32,7 @@ TITLE = "A note posted over HTTP"
 def text_envelope(**overrides: Any) -> dict[str, Any]:
     """A valid inline-text envelope as a JSON-ready dictionary."""
     body: dict[str, Any] = {
-        "schema_version": "0.2",
+        "schema_version": SCHEMA_VERSION,
         "id": CAPTURE_ID,
         "source": {
             "type": "api",

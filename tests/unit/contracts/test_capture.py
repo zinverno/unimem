@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from core.contracts import (
+    SCHEMA_VERSION,
     CaptureContext,
     CaptureEnvelope,
     CapturePayload,
@@ -23,7 +24,7 @@ from tests.unit.contracts.builders import CAPTURED_AT
 
 
 def test_valid_envelope_carries_what_was_captured(envelope: CaptureEnvelope) -> None:
-    assert envelope.schema_version == "0.2"
+    assert envelope.schema_version == SCHEMA_VERSION
     assert envelope.source.type is CaptureSourceType.BROWSER
     assert envelope.payload.type is CapturePayloadType.WEBPAGE
     assert envelope.context.captured_at == CAPTURED_AT

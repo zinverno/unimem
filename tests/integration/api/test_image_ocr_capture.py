@@ -19,6 +19,7 @@ from typing import Any, Final
 import pytest
 from fastapi.testclient import TestClient
 
+from core.contracts import SCHEMA_VERSION
 from core.processing import (
     ENCODED_BYTE_LIMIT,
     ENCODED_PIXEL_LIMIT,
@@ -68,7 +69,7 @@ def submit(client: TestClient, data: bytes = PNG, **overrides: Any) -> Any:
     upload = client.post("/v1/uploads", files={"file": ("photo.png", data, PNG_MIME)})
     assert upload.status_code == 200, upload.text
     envelope: dict[str, Any] = {
-        "schema_version": "0.2",
+        "schema_version": SCHEMA_VERSION,
         "id": CAPTURE_ID,
         "source": {"type": "upload", "provider": "curl"},
         "payload": {

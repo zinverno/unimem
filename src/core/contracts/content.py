@@ -19,6 +19,7 @@ from core.contracts.base import (
     NonBlankStr,
     SchemaVersion,
     Sha256,
+    check_audio_within_schema_version,
 )
 from core.contracts.enums import ContentType
 from core.contracts.processing import ProcessingRecord
@@ -86,6 +87,19 @@ class ContentObject(DomainModel):
     assets: list[Asset] = Field(default_factory=list)
     derived: DerivedContent = Field(default_factory=DerivedContent)
     processing: list[ProcessingRecord] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_type_matches_schema_version(self) -> Self:
+        """Tie ``audio`` to the version that introduced it.
+
+        ``video`` is deliberately not checked. It has been a ``ContentType``
+        since 0.1, so a 0.1 or 0.2 ``VIDEO`` content object is historically
+        valid and gating it now would retroactively invalidate stored documents
+        this build promises to keep reading.
+        """
+        if self.type is ContentType.AUDIO:
+            check_audio_within_schema_version(self.schema_version, subject="content type")
+        return self
 
     @model_validator(mode="after")
     def _check_internal_consistency(self) -> Self:

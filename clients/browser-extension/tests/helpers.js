@@ -58,7 +58,7 @@ export const SUBMITTED_ID = "3f1b2c7e-9a4d-4e51-8b6f-0c2d7a1e5b93";
 
 export function testEnvelope(overrides = {}) {
   return {
-    schema_version: "0.2",
+    schema_version: "0.3",
     id: SUBMITTED_ID,
     source: { type: "browser", provider: "unimem-browser-extension", url: "https://example.com/a" },
     payload: { type: "text", mime_type: "text/plain", text: "  selected  ", title: "A page" },
@@ -81,7 +81,7 @@ export const PAGE_HTML =
 
 export function webpageTestEnvelope(overrides = {}) {
   return {
-    schema_version: "0.2",
+    schema_version: "0.3",
     id: SUBMITTED_ID,
     source: { type: "browser", provider: "unimem-browser-extension", url: "https://example.com/a" },
     payload: { type: "webpage", mime_type: "text/html", html: PAGE_HTML, title: "A page" },

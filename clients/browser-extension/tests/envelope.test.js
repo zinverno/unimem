@@ -37,9 +37,9 @@ function build(overrides = {}) {
 }
 
 describe("canonical shape", () => {
-  it("declares schema version 0.2 exactly", () => {
-    assert.equal(build().schema_version, "0.2");
-    assert.equal(SCHEMA_VERSION, "0.2");
+  it("declares schema version 0.3 exactly", () => {
+    assert.equal(build().schema_version, "0.3");
+    assert.equal(SCHEMA_VERSION, "0.3");
   });
 
   it("names browser as the source type", () => {

@@ -47,7 +47,7 @@ from typing import Any
 
 import pytest
 
-from core.contracts import CapturePayloadType, CaptureStatus, ContentType
+from core.contracts import SCHEMA_VERSION, CapturePayloadType, CaptureStatus, ContentType
 from tests.integration.api.connector_support import (
     CONNECTOR_PORT,
     REPO_ROOT,
@@ -206,7 +206,7 @@ class TestWholePageThroughTheConnector(WholePageAcceptance):
     ) -> None:
         submitted = self.submitted(driven)
 
-        assert submitted["schema_version"] == "0.2"
+        assert submitted["schema_version"] == SCHEMA_VERSION
         assert submitted["source"]["type"] == "browser"
         assert submitted["source"]["provider"] == "unimem-browser-extension"
         assert submitted["intent"] == {"action": "save"}
