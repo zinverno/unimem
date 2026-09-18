@@ -882,8 +882,8 @@ passed automatically.
 
 To check still-image ingestion and image OCR the same way, work through
 [docs/MANUAL_IMAGE_ACCEPTANCE.md](docs/MANUAL_IMAGE_ACCEPTANCE.md) — the same
-kind of guide, for PNG and JPEG. It has not been run yet, and Macro Phase 4 is
-open.
+kind of guide, for PNG and JPEG. An initial owner run has happened; no
+closure-eligible result has been recorded yet, and Macro Phase 4 is open.
 
 `GET /health` reports process liveness only and checks nothing else.
 
