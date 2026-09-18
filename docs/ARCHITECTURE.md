@@ -355,9 +355,10 @@ resource semantics of an OCR-enabled image processor when the underlying image i
 `src/unimem_ocr/engine.py`, one flag, and one row in the delivery error table.
 **The schema stays `0.2`, no contract, enum, lifecycle state, route, replay or
 persistence rule changes, `core` gains no runtime dependency, and no new
-architectural invariant is added — invariant 19 already governs this.** **Macro
-Phase 4 remains open**; Phase 4C is owner manual acceptance and closure, and is
-still not designed. See [ADR-020](ADR/ADR-020-opt-in-local-image-ocr.md).
+architectural invariant is added — invariant 19 already governs this.** Phase 4C
+is owner manual acceptance and closure — see *Macro Phase 4 is closed*, below.
+See also [ADR-020](ADR/ADR-020-opt-in-local-image-ocr.md), which was written
+while the phase was still open and is not edited by that closure.
 
 **Recognition is a deployment capability.** A second flag, `--image-ocr`,
 independent of `--pdf-ocr`, giving four valid combinations: neither, PDF OCR
@@ -475,6 +476,58 @@ rather than scaled-up bitmap blocks, and its token uses only letters with no
 Cyrillic lookalike: the obvious blocky fixture was read by the real engine as
 Cyrillic, because `eng+rus` makes square Latin capitals genuinely ambiguous. The
 fixture was corrected rather than the policy.
+
+**Macro Phase 4 is closed.** The still-image ingestion and opt-in local image OCR
+implementation described above is exactly what PRs 1 and 2 shipped and is
+unchanged by this closure. PR 1 delivered `ImageProcessor` at `image@0.1`; PR 2
+delivered `ImageOcrProcessor` at `image-ocr@0.1` behind `--image-ocr`. What
+closure needed was validation, not another slice.
+
+Getting there took three documentation-only steps, and the history is recorded
+as it happened rather than tidied. The manual acceptance guide,
+[docs/MANUAL_IMAGE_ACCEPTANCE.md](MANUAL_IMAGE_ACCEPTANCE.md), was merged in
+PR #23. The owner ran it by hand on 2026-09-17 against merged `main`
+`a4c911c3691ba418e84a087e586fed79fc9333f7` and got **four of five** — IMG-A
+through IMG-D passed and IMG-E failed — so **the phase did not close**. That was
+a real acceptance run under the guide then in force, and it stays recorded as
+one. What it exposed was the acceptance contract, not the product: the original
+IMG-E wording made acceptable recognition quality on essentially any
+human-readable owner image a condition of closing the phase, which is broader
+than what can honestly be required of a fixed `eng+rus` / OEM 1 / PSM 3 policy
+with no orientation correction, deskew, retries, handwriting mode, scene-text
+model, vision model or typography classifier. PR #24 therefore narrowed **only
+the OCR-quality surface closure must demonstrate**, to one real owner-supplied
+image carrying ordinary printed text. It narrowed nothing about the product:
+PNG and JPEG remain supported, such images are accepted and stored normally, and
+a build with `--image-ocr` still runs the engine on any supported in-budget
+image. Handwriting, decorative lettering, warped or perspective-heavy scene
+text, severe occlusion, very low contrast and vision understanding remain known
+recognition-quality limitations, never unsupported inputs.
+
+The owner then ran the full corrected checklist by hand on 2026-09-18 against
+merged `main` `f436492ce59cecbbce4ebed321ad7e4cf6326be8`, on a local Manjaro
+Linux machine with Python 3.13.13 and a system Tesseract 5.5.3 carrying both
+`eng` and `rus`, and **all five acceptance rows passed** — IMG-A through IMG-E,
+in one run, with nothing carried over from the earlier one.
+
+That is a *human* result and is recorded as one. CI covers the flows, the
+contracts, the refusals, the resource policy and the real OCR engine; it
+deliberately does not submit or judge the owner's own image, and nothing here
+claims CI drove that run. The dependency boundary — that image OCR needs neither
+`pypdfium2` nor `Pillow` — likewise stays CI's evidence from the `Local image
+OCR` job: the checklist neither required nor installed the `[ocr]` extra, but
+both packages happened to be present on the owner's machine, so the manual run
+does not prove that boundary and does not claim to.
+
+**Closure adds no capability.** No format, route, request field, contract field,
+enum, lifecycle state, processor, fallback, OCR policy, dependency, schema
+version or semantic changed; `image@0.1`, `image-ocr@0.1`, the 20,000,000
+encoded-pixel and 64 MiB encoded-byte limits, the fixed `eng+rus` / OEM 1 /
+PSM 3 / no-`--dpi` policy and the fixed `503 image_ocr_unavailable` are exactly
+as shipped, and the schema stays `0.2`. The only artifacts are the acceptance
+guide and this status note. It is a checkpoint, not a fifth modality feature;
+**there is no Phase 4D**, and it does not reopen Phases 0, 1, 2 or 3 — those are
+closed and stay closed.
 
 ## Future data flow
 
