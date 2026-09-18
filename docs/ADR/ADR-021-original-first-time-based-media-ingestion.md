@@ -135,8 +135,7 @@ written a second time.
 
 ```python
 class MediaProbe(Protocol):
-    def probe(self, stream: BinaryIO) -> MediaProbeResult:
-        ...
+    def probe(self, stream: BinaryIO) -> MediaProbeResult: ...
 ```
 
 One method, one parameter. The implementation is **not** told the declared MIME

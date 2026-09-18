@@ -2182,8 +2182,8 @@ what follows is the shape.
 **`audio` is first-class, and distinct from `video`.**
 
 ```python
-CapturePayloadType.AUDIO   # new
-ContentType.AUDIO          # new
+CapturePayloadType.AUDIO  # new
+ContentType.AUDIO  # new
 ```
 
 A podcast, a voice memo and a recorded meeting are not videos with no picture,
@@ -2219,7 +2219,7 @@ ADR-008 capture metadata and which carry `audio` are explicit named sets:
 
 ```python
 CAPTURE_METADATA_SCHEMA_VERSIONS == {"0.2", "0.3"}
-AUDIO_SCHEMA_VERSIONS            == {"0.3"}
+AUDIO_SCHEMA_VERSIONS == {"0.3"}
 ```
 
 with their complements *derived* from `SUPPORTED_SCHEMA_VERSIONS` so the two
