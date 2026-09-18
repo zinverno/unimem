@@ -9,7 +9,7 @@
  * payload type depends on which field happened to be populated is exactly the
  * ambiguity `CaptureIntake` refuses on the other side.
  *
- * The shape here is schema `0.2` of UniMem's own contract, not a browser
+ * The shape here is schema `0.3` of UniMem's own contract, not a browser
  * dialect of it: `browser` is already a `CaptureSourceType`, `text` and
  * `webpage` are already `CapturePayloadType` members, `html` already belongs on
  * the payload, `captured_at` is already required, `title` already belongs on
@@ -28,7 +28,7 @@
  */
 
 /** The canonical contract version this connector emits. */
-export const SCHEMA_VERSION = "0.2";
+export const SCHEMA_VERSION = "0.3";
 
 /** Identifies this connector as the producer, on both `source` and `context`. */
 export const CONNECTOR_NAME = "unimem-browser-extension";

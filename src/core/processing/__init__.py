@@ -69,6 +69,22 @@ refused without refusing the capture. ``core`` still imports no imaging library,
 no decoder, and no ``subprocess``. See
 `ADR-020 <../../docs/ADR/ADR-020-opt-in-local-image-ocr.md>`_.
 
+Phase 5A PR 1 adds **no processor at all** — the first slice in this package
+that does not. :mod:`core.processing.media_probe` is the typed seam a future
+audio or video processor will read container structure through: one method
+taking one binary stream, a normalized frozen result, and a validator that
+turns an inconsistent adapter answer into
+:class:`~core.processing.media_probe.MediaProbeExecutionError` rather than into
+a verdict about the submitted media. Nothing registers it, nothing calls it, and
+no deployment can ingest an ``AUDIO`` or ``VIDEO`` capture as a result: the
+contracts learned the vocabulary at schema 0.3, and the runtime capability is a
+separate, later decision. ``core`` still imports no media framework, no codec
+library and no ``subprocess``, and this slice adds no ``tempfile`` use to this
+package or to the media boundary — the one ``tempfile`` in ``core`` is
+:mod:`core.storage.local`'s Phase 0B raw staging, which is untouched. No media
+adapter and no temporary-file machinery exists here at all. See `ADR-021
+<../../docs/ADR/ADR-021-original-first-time-based-media-ingestion.md>`_.
+
 Phase 0H adds the step that calls them in order.
 :class:`ProcessingOrchestrator` takes a capture id, loads the authoritative
 record, insists it is ``stored``, routes it, marks it ``processing`` durably,
@@ -148,6 +164,14 @@ from core.processing.image_recognition import (
     validate_image_ocr_limit,
     validate_image_ocr_result,
 )
+from core.processing.media_probe import (
+    AudioStreamInfo,
+    MediaProbe,
+    MediaProbeExecutionError,
+    MediaProbeResult,
+    VideoStreamInfo,
+    validate_media_probe_result,
+)
 from core.processing.ocr import (
     PdfOcrExecutionError,
     PdfOcrResult,
@@ -221,6 +245,7 @@ __all__ = [
     "TABLE_ROW_BLOCK",
     "TEXT_ENCODING",
     "AmbiguousProcessorError",
+    "AudioStreamInfo",
     "DocxBlock",
     "DocxProcessor",
     "HtmlTextExtractor",
@@ -232,6 +257,9 @@ __all__ = [
     "ImageOcrResult",
     "ImageProcessor",
     "InvalidCaptureProcessingStateError",
+    "MediaProbe",
+    "MediaProbeExecutionError",
+    "MediaProbeResult",
     "NoProcessorError",
     "PdfOcrExecutionError",
     "PdfOcrProcessor",
@@ -248,6 +276,7 @@ __all__ = [
     "RecognizedPage",
     "TextDecodingError",
     "TextProcessor",
+    "VideoStreamInfo",
     "WebpageProcessor",
     "extract",
     "extract_blocks",
@@ -258,5 +287,6 @@ __all__ = [
     "utc_now",
     "validate_image_ocr_limit",
     "validate_image_ocr_result",
+    "validate_media_probe_result",
     "validate_ocr_result",
 ]

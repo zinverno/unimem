@@ -40,7 +40,15 @@ from tests.unit.intake.doubles import FakeCaptureRecordStore, FakeClock, FakeRaw
 #: supported is asked in ``test_webpage_materialization.py``,
 #: ``test_document_materialization.py`` and ``test_image_materialization.py``
 #: instead.
+#:
+#: ``AUDIO`` **joined** it in Phase 5A PR 1, which is the direction nothing else
+#: on this list has ever moved. Schema 0.3 made the modality contract-valid and
+#: gave this build no capability whatsoever to ingest one: a schema-valid audio
+#: envelope is refused here exactly as a ``VIDEO`` envelope always has been, and
+#: that is what keeps "the contracts have the word" from being read as "the
+#: deployment can do it".
 UNSUPPORTED = [
+    CapturePayloadType.AUDIO,
     CapturePayloadType.VIDEO,
     CapturePayloadType.FILE,
     CapturePayloadType.URL,

@@ -17,6 +17,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 
 from core.contracts import (
+    SCHEMA_VERSION,
     CaptureContext,
     CaptureIntent,
     CapturePayloadType,
@@ -192,7 +193,7 @@ def test_legacy_and_current_records_coexist(
     store.create(current)
 
     assert store.get("cap_legacy_01").schema_version == "0.1"
-    assert store.get(current.id).schema_version == "0.2"
+    assert store.get(current.id).schema_version == SCHEMA_VERSION
 
 
 def test_a_legacy_payload_claiming_new_fields_is_corruption(
@@ -225,9 +226,30 @@ def test_a_current_payload_without_context_is_corruption(
 def test_an_unsupported_future_version_is_still_corruption(
     store: SqliteCaptureRecordStore, database: Path
 ) -> None:
-    """0.2 exists now; 0.3 does not, and is refused rather than guessed at."""
+    """0.3 exists now; 0.4 does not, and is refused rather than guessed at."""
     payload = json.loads(make_current(id="cap_future").model_dump_json())
-    plant(database, "cap_future", json.dumps(payload | {"schema_version": "0.3"}))
+    plant(database, "cap_future", json.dumps(payload | {"schema_version": "0.4"}))
 
     with pytest.raises(CaptureRecordCorruptError):
         store.get("cap_future")
+
+
+def test_a_0_2_record_planted_before_the_bump_still_loads_and_rewrites(
+    store: SqliteCaptureRecordStore, database: Path
+) -> None:
+    """The version that was current until 0.3, read and written back unchanged.
+
+    ``0.1`` has had this proof since Phase 0G. ``0.2`` needs its own now, for
+    the same reason and about a different kind of document: a 0.2 record *does*
+    carry the capture metadata, so what has to survive is not the absence of
+    three keys but the record keeping its own version instead of being silently
+    promoted to the current one.
+    """
+    planted = json.loads(make_current(id="cap_0_2", schema_version="0.2").model_dump_json())
+    plant(database, "cap_0_2", json.dumps(planted))
+
+    loaded = store.get("cap_0_2")
+    store.replace(loaded)
+
+    assert loaded.schema_version == "0.2"
+    assert json.loads(raw_payload(database, "cap_0_2")) == planted

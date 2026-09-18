@@ -529,6 +529,48 @@ guide and this status note. It is a checkpoint, not a fifth modality feature;
 **there is no Phase 4D**, and it does not reopen Phases 0, 1, 2 or 3 — those are
 closed and stay closed.
 
+### Macro Phase 5 — Time-Based Media Ingestion
+
+**Macro Phase 4 is closed and stays closed.** Phase 5 does not reopen still-image
+ingestion, the PNG or JPEG header parsers, image OCR semantics or its recognition
+port, the resource budgets, the upload and staging architecture, the raw store's
+identity or layout, document or webpage semantics, replay, persistence, or the
+lifecycle. **The behaviour and semantics of every processor Phases 0–4 shipped
+are unchanged**, and no existing ADR is rewritten.
+
+Phase 5 asks the next question about modality, and it is the first one where the
+material is not all present at once: **every kind of material UniMem ingests
+today is a thing you take in at a single instant. What does it take to ingest
+something that has a *duration*?**
+
+**Phase 5A, PR 1 — media contract foundation.** Answers "what vocabulary and what
+typed boundary does time-based media need, before anything can process one?"
+Schema `0.3` with `AUDIO` as a first-class modality, and
+`src/core/processing/media_probe.py`: a `MediaProbe` port, three frozen
+normalized value types, one execution failure, and a runtime validator. **No
+processor, no intake capability, no route, no engine, no flag, no new `core`
+runtime dependency and no new Python dependency of any kind.** See *Media
+contract foundation (Phase 5A)*, below, and
+[ADR-021](ADR/ADR-021-original-first-time-based-media-ingestion.md).
+
+```
+audio bytes
+  -> CapturePayloadType.AUDIO        new at schema 0.3, file_ref-backed
+  -> ContentType.AUDIO               new at schema 0.3
+  -> ...and there it stops.          no intake branch, no processor, no engine
+```
+
+The rest of Phase 5A is **not implemented** here, and two different things are
+meant by that. ADR-021 fixes the *shapes* the later slices must satisfy — the
+port, the MIME and container allowlists, the structural requirements, and the
+durable metadata — so intake materialization, that metadata and the `503`
+mapping are settled there and simply not built yet. Concrete local `ffprobe`
+execution, and the security, startup, deployment and resource mechanics around
+running an external engine, are a different matter: they are the subject of the
+later slices that implement them and are recorded with that implementation and
+its own ADR, not with ADR-021. Owner manual acceptance belongs to 5A-4. Phase
+5B, transcription, is not designed.
+
 ## Future data flow
 
 ```
@@ -1565,7 +1607,7 @@ exact selected text              window.getSelection(), submitted untouched
    |
 MV3 service worker               the privileged extension origin
    |
-CaptureEnvelope                  canonical, schema 0.2, built client-side
+CaptureEnvelope                  canonical, current schema, built client-side
    |
 localhost HTTP API               http://127.0.0.1:8765 — a fixed constant
    |
@@ -1764,7 +1806,7 @@ right-click the toolbar icon  ->  "Save whole page to UniMem"
   -> the menu activation is the explicit user gesture that grants activeTab
   -> chrome.scripting.executeScript, once, into the top-level document
   -> document.documentElement.outerHTML
-  -> schema-0.2 WEBPAGE CaptureEnvelope (payload.html, no text, no file_ref)
+  -> canonical WEBPAGE CaptureEnvelope (payload.html, no text, no file_ref)
   -> POST http://127.0.0.1:8765/v1/captures    the existing route
   -> WebpageProcessor                          the existing processor
   -> ContentObject(type = web)                 durable, COMPLETE
@@ -2131,6 +2173,142 @@ sharing the raw object and sharing no canonical identity.
 See [ADR-018](ADR/ADR-018-opt-in-local-pdf-ocr.md).
 
 
+## Media contract foundation (Phase 5A)
+
+Phase 5A PR 1 delivers vocabulary and a seam, and deliberately no capability.
+The whole decision is [ADR-021](ADR/ADR-021-original-first-time-based-media-ingestion.md);
+what follows is the shape.
+
+**`audio` is first-class, and distinct from `video`.**
+
+```python
+CapturePayloadType.AUDIO  # new
+ContentType.AUDIO  # new
+```
+
+A podcast, a voice memo and a recorded meeting are not videos with no picture,
+and they are not `FILE` — which means "bytes this build has no modality for",
+the opposite of a first-class decision. `AssetRole.AUDIO`, which has existed
+since `0.1`, is a **different concept**: it names an audio track extracted *from*
+some other content object, and Phase 5A extracts nothing.
+
+An `AUDIO` payload is staged, like `IMAGE`, `VIDEO` and `FILE`: `file_ref` is its
+only shape, because time-based media is never inline.
+
+**The canonical contract set advances to `0.3`.**
+
+```python
+SCHEMA_VERSION = "0.3"
+SchemaVersion = Literal["0.1", "0.2", "0.3"]
+SUPPORTED_SCHEMA_VERSIONS == {"0.1", "0.2", "0.3"}
+```
+
+Two rules, and the asymmetry between them is the point:
+
+- **`audio` is valid only from `0.3`.** A `0.1` or `0.2` `CaptureEnvelope`,
+  `CaptureRecord` or `ContentObject` naming it is refused, for the same reason a
+  `0.1` record carrying a `title` is refused — the document is wrong about its
+  own shape, and a reader built against that version would reject the value.
+- **`video` is not gated, and must never be.** It has been in the closed sets
+  since Phase 0A at schema `0.1`. A stored `0.1` `VIDEO` document is
+  historically valid and stays valid at every supported version. Gating it for
+  symmetry would break invariant 14 to make a table look tidy.
+
+**The version rules are written down, not computed.** Which versions carry the
+ADR-008 capture metadata and which carry `audio` are explicit named sets:
+
+```python
+CAPTURE_METADATA_SCHEMA_VERSIONS == {"0.2", "0.3"}
+AUDIO_SCHEMA_VERSIONS == {"0.3"}
+```
+
+with their complements *derived* from `SUPPORTED_SCHEMA_VERSIONS` so the two
+cannot disagree. Nothing orders version strings, and no rule is phrased as "the
+previous version" — either would have silently re-classified `0.2` the moment
+`0.3` arrived. `CAPTURE_METADATA_SCHEMA_VERSION` stays `"0.2"` as its own
+constant, so the error a `0.1` record raises still says the fields arrived in
+`0.2` rather than reaching for whatever is current.
+
+A record read at `0.1` or `0.2` keeps that version through reading, rewriting
+and lifecycle advancement. Nothing stored is rewritten because the current
+version moved.
+
+**The `MediaProbe` port is one method with one parameter.**
+
+```python
+class MediaProbe(Protocol):
+    def probe(self, stream: BinaryIO) -> MediaProbeResult: ...
+```
+
+No MIME type, no capture modality, no capture id, no filename, no
+`RawObjectRef`, no filesystem path, no execution detail. The adapter is asked
+*what structural facts were observed in these bytes?* and given no way to answer
+a different question. This is narrower than `ImageOcr`, which takes the declared
+type and validated dimensions so a recognizer can refuse an oversized image
+before decoding; a probe has nothing to pre-authorize, and telling it what the
+submitter declared would invite it to agree. ADR-021 fixes that the **declared
+MIME type routes and the probed container verifies**, which only works if the
+two are observed independently.
+
+**The result is normalized values, never engine output.**
+
+```
+MediaProbeResult   container_names, duration_seconds, audio_streams, video_streams
+AudioStreamInfo    index, codec, sample_rate, channels
+VideoStreamInfo    index, codec, width, height, frame_rate
+```
+
+No stream-count fields **on the result** — `len(audio_streams)` is the count at
+this boundary, and a count travelling beside the list it describes is a second
+thing that can be wrong about one fact. The canonical metadata a later slice
+stores *does* carry `audio_stream_count` and `video_stream_count`, computed only
+as those two `len()` calls, so the counts are a projection of the stored lists
+rather than a separate observation; an adapter is never asked for one. No
+subtitle, data or attachment streams — a container carrying them is fine, they are simply not
+described. No raw `ffprobe` JSON, no engine name or version, no temporary path.
+`frame_rate` stays a rational string because `30000/1001` is the fact and
+`29.97` is a lossy rendering of it. Optional facts are **omission-first**:
+absent, never `0`, never `"N/A"`.
+
+**`MediaProbeExecutionError` is not a `ProcessingError`**, and the distinction is
+the same one `PdfOcrExecutionError` and `ImageOcrExecutionError` draw: it says
+nothing came back that `core` can trust, not that the media is bad. It will leave
+the capture `PROCESSING` and map to a fixed `503` once the processors exist.
+`MediaProbePrerequisiteError` is deliberately absent from `core` — whether an
+engine is installed is an adapter's deployment fact.
+
+**`validate_media_probe_result` re-checks at run time what the hints only assert
+statically**, because an adapter is third-party code. Non-empty, sorted, unique,
+lowercase, placeholder-free container names; a finite non-negative `float`
+duration or nothing; real non-negative `int` stream indexes, unique across audio
+*and* video together and ascending within each list; positive `int` optional
+numbers; normalized codec text; a canonical reduced positive rational
+`frame_rate`. Nothing is trimmed, sorted or repaired — normalizing here would
+make the validator a second normalizer and hide the inconsistency it exists to
+catch. It reaches **no policy verdict**: whether an `AUDIO` capture must carry an
+audio stream, and which containers this build accepts, are the future
+processors' questions.
+
+**Schema support is not deployment capability.** A schema-valid `AUDIO` object is
+contract vocabulary. Intake still supports exactly four payload types, and
+`AUDIO` is not one of them: a valid audio envelope is refused with the same
+`UnsupportedCapturePayloadError` a `VIDEO` envelope has always been refused with,
+and no processor claims the modality. `core` imports no media framework, no
+codec binding and no `subprocess`, and Phase 5A-1 adds no `subprocess` or
+`tempfile` use to the media or `core.processing` boundary — no media adapter and
+no temporary-file machinery exists in this slice. `core` is not `tempfile`-free
+overall and this does not claim it is: `core.storage.local` has used it for
+immutable raw staging since Phase 0B, and that is unchanged.
+
+**One producer had to move.** Intake stamps every record with the *current*
+schema version, and completed-capture replay requires the resubmitted envelope's
+version to match the stored record's. A connector left at `0.2` would keep
+capturing correctly and lose its lost-response recovery, turning every replay
+into a `409`. The browser connector therefore emits `0.3`. Its own extension
+version (`0.2.0`) is an unrelated number and did not move. This is the cost
+ADR-002 named — "adding a version means touching every producer; that is the
+point, but it is friction" — being paid a second time.
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
@@ -2173,7 +2351,11 @@ See [ADR-018](ADR/ADR-018-opt-in-local-pdf-ocr.md).
 14. A document written by an older supported version stays readable *and*
     rewritable by this build. Implemented in Phase 0G: a `0.1` `CaptureRecord`
     loads, may not claim `0.2` fields, and serializes back out with no `0.2`
-    keys — not even null ones, which `extra="forbid"` would reject.
+    keys — not even null ones, which `extra="forbid"` would reject. Re-exercised
+    in Phase 5A PR 1, which advanced the set to `0.3` and left both older
+    versions readable, rewritable, and meaning exactly what they meant before:
+    a `0.2` document is not promoted, and `video` — valid since `0.1` — is not
+    retroactively gated to make the new `audio` modality symmetrical.
 
 15. Lifecycle state is written only by orchestration, and only a status the
     system has evidence for. Implemented in Phase 0H: processors write no
@@ -2235,7 +2417,11 @@ orchestration, the delivery adapter and the connector, and covered by tests.
 - `metadata` fields are `dict[str, JsonValue]`, so contracts cannot hold
   values that do not survive JSON.
 - Enum values are lowercase, stable, and part of the wire format.
-- `schema_version` is `0.2` today, and `0.1` remains readable. One version
+- `schema_version` is `0.3` today; `0.1` and `0.2` remain readable, and a
+  document keeps its own version rather than being promoted when the current
+  one advances. Which versions carry which rules — the ADR-008 capture metadata,
+  the `audio` modality — are explicit named sets rather than string comparisons,
+  so adding a version cannot silently reinterpret an older one. One version
   names the whole canonical contract set, not one model.
 - Serialization uses plain Pydantic: `model_dump(mode="json")` and
   `model_validate`. There is no custom serialization framework.
@@ -2330,6 +2516,9 @@ src/core/processing/
   ocr.py          the PdfPageOcr port, its value types, and its execution error
   docx.py         DocxProcessor, body-ordered text from a DOCX original
   image.py        ImageProcessor and the bounded PNG/JPEG header readers
+  image_ocr.py    ImageOcrProcessor, the opt-in direct-image recognition policy
+  image_recognition.py  the ImageOcr port, its value types, and its two failures
+  media_probe.py  the MediaProbe port, its normalized value types, its validator
   service.py      ProcessingOrchestrator, the stored-to-complete lifecycle
   errors.py       typed processing, routing and lifecycle errors
 src/core/rendering/
@@ -2387,3 +2576,7 @@ docs/
 
 Schema versions live in `src/core/contracts/base.py`: `SCHEMA_VERSION` is the
 current one, and `SUPPORTED_SCHEMA_VERSIONS` every version this build can read.
+The rules that depend on a version live beside them as explicit named sets —
+`CAPTURE_METADATA_SCHEMA_VERSIONS`, `AUDIO_SCHEMA_VERSIONS` — with their
+complements derived, so adding a version is a deliberate reviewed act and cannot
+silently reinterpret an older one.

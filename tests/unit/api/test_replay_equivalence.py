@@ -24,6 +24,7 @@ import pytest
 from pydantic import ValidationError
 
 from core.contracts import (
+    SCHEMA_VERSION,
     CaptureContext,
     CaptureEnvelope,
     CaptureIntent,
@@ -53,7 +54,7 @@ def digest_of(text: str) -> str:
 
 def envelope(**overrides: Any) -> CaptureEnvelope:
     fields: dict[str, Any] = {
-        "schema_version": "0.2",
+        "schema_version": SCHEMA_VERSION,
         "id": CAPTURE_ID,
         "source": CaptureSource(
             type=CaptureSourceType.BROWSER,
@@ -207,10 +208,12 @@ class TestTheRequestMetadata:
     def test_a_different_capture_id_refuses_replay(self) -> None:
         assert not is_equivalent_text_replay(envelope(id="cap_other"), record_for(envelope()))
 
-    def test_a_different_schema_version_refuses_replay(self) -> None:
+    @pytest.mark.parametrize("version", ["0.1", "0.2"])
+    def test_a_different_schema_version_refuses_replay(self, version: str) -> None:
+        """Every supported version other than the record's own, not just the oldest."""
         stored = record_for(envelope())
 
-        assert not is_equivalent_text_replay(envelope(schema_version="0.1"), stored)
+        assert not is_equivalent_text_replay(envelope(schema_version=version), stored)
 
     @pytest.mark.parametrize(
         ("label", "source"),

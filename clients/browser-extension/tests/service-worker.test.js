@@ -429,11 +429,11 @@ describe("choosing 'Save whole page to UniMem'", () => {
     assert.equal(calls.fetch[0].options.method, "POST");
   });
 
-  it("posts a schema-0.2 WEBPAGE envelope carrying the exact snapshot", async () => {
+  it("posts a schema-0.3 WEBPAGE envelope carrying the exact snapshot", async () => {
     await chooseMenuItem(TAB);
 
     const submitted = JSON.parse(calls.fetch[0].options.body);
-    assert.equal(submitted.schema_version, "0.2");
+    assert.equal(submitted.schema_version, "0.3");
     assert.equal(submitted.source.type, "browser");
     assert.equal(submitted.source.url, "https://example.com/a");
     assert.equal(submitted.payload.type, "webpage");

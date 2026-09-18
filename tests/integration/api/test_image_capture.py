@@ -202,9 +202,16 @@ class TestTheRealVerticalSlice:
         assert (processing[0].processor, processing[0].processor_version) == ("image", "0.1")
         assert processing[0].status.value == "complete"
 
-    def test_the_schema_version_is_still_0_2(self, client: TestClient) -> None:
-        assert content_of(client).schema_version == "0.2"
-        assert record_of(client).schema_version == "0.2"
+    def test_the_documents_carry_the_current_canonical_schema(self, client: TestClient) -> None:
+        """Image ingestion needed no contract change of its own.
+
+        It asserted ``0.2`` when Phase 4 shipped and asserts the current version
+        now: the canonical set advanced in Phase 5A for audio, which is not a
+        fact about images, and pinning the literal here would have turned an
+        unrelated version bump into an image-ingestion failure.
+        """
+        assert content_of(client).schema_version == SCHEMA_VERSION
+        assert record_of(client).schema_version == SCHEMA_VERSION
 
     def test_the_stored_original_is_the_uploaded_image_byte_for_byte(self, data_dir: Path) -> None:
         assert raw_path(data_dir, IMAGE_DIGEST).read_bytes() == IMAGE

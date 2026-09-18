@@ -23,6 +23,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.contracts import SCHEMA_VERSION
 from core.processing import (
     ENGINE_INVOKED_KEY,
     IMAGE_OCR_METADATA_KEY,
@@ -199,7 +200,7 @@ class TestTheFourDeployments:
 def capture_image(client: TestClient, data: bytes, capture_id: str = CAPTURE_ID) -> Any:
     upload = client.post("/v1/uploads", files={"file": ("photo.png", data, "image/png")})
     envelope = {
-        "schema_version": "0.2",
+        "schema_version": SCHEMA_VERSION,
         "id": capture_id,
         "source": {"type": "upload", "provider": "curl"},
         "payload": {
@@ -288,7 +289,7 @@ class TestNoRequestCanSwitchTheEngine:
         response = default_client.post(
             "/v1/captures",
             json={
-                "schema_version": "0.2",
+                "schema_version": SCHEMA_VERSION,
                 "id": CAPTURE_ID,
                 "source": {"type": "upload", "provider": "curl"},
                 "payload": {
@@ -310,7 +311,7 @@ class TestNoRequestCanSwitchTheEngine:
         default_client.post(
             "/v1/captures",
             json={
-                "schema_version": "0.2",
+                "schema_version": SCHEMA_VERSION,
                 "id": CAPTURE_ID,
                 "source": {"type": "upload", "provider": "curl"},
                 "payload": {
@@ -480,6 +481,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from core.contracts import SCHEMA_VERSION
 from core.processing.image_recognition import ImageOcrResult
 from unimem_api import build_local_app
 
@@ -500,7 +502,7 @@ with TestClient(app) as client:
     data = Path("photo.png").read_bytes()
     upload = client.post("/v1/uploads", files={"file": ("photo.png", data, "image/png")})
     envelope = {
-        "schema_version": "0.2",
+        "schema_version": SCHEMA_VERSION,
         "id": "cap_blocked",
         "source": {"type": "upload", "provider": "curl"},
         "payload": {

@@ -99,10 +99,11 @@ class TestTheEnvelopeIsCanonical:
 
         assert envelope.id == case["inputs"]["id"]
 
-    def test_it_is_schema_0_2(self, case: dict[str, Any]) -> None:
-        """Whole-page capture bumped the *extension* to 0.2.0. The contract did
-        not move, and these two numbers have nothing to do with each other."""
-        assert case["envelope"]["schema_version"] == SCHEMA_VERSION == "0.2"
+    def test_it_declares_the_current_canonical_schema(self, case: dict[str, Any]) -> None:
+        """Whole-page capture bumped the *extension* to 0.2.0; the contract is at
+        0.3. These two numbers have nothing to do with each other, and they moved
+        on different schedules for different reasons."""
+        assert case["envelope"]["schema_version"] == SCHEMA_VERSION == "0.3"
 
     def test_the_source_type_is_an_existing_enum_member(self, case: dict[str, Any]) -> None:
         envelope = CaptureEnvelope.model_validate(case["envelope"])

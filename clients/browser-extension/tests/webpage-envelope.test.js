@@ -42,8 +42,8 @@ function inputs(overrides = {}) {
 describe("the webpage envelope's shape", () => {
   const envelope = buildWebpageCaptureEnvelope(inputs());
 
-  it("declares canonical schema 0.2, not the extension's own version", () => {
-    assert.equal(envelope.schema_version, "0.2");
+  it("declares canonical schema 0.3, not the extension's own version", () => {
+    assert.equal(envelope.schema_version, "0.3");
   });
 
   it("carries the supplied id, opaquely", () => {

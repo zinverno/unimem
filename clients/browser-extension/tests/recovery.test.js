@@ -42,7 +42,7 @@ import {
 const PROBE_URL = `${CAPTURES_ENDPOINT}/${SUBMITTED_ID}`;
 
 function record(status) {
-  return { schema_version: "0.2", id: SUBMITTED_ID, status };
+  return { schema_version: "0.3", id: SUBMITTED_ID, status };
 }
 
 /** The server's refusal when a capture id is taken and not replayable. */

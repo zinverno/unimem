@@ -332,17 +332,20 @@ class TestVersionsAreUnchanged:
     def test_the_text_processor_is_still_0_2(self) -> None:
         assert (TextProcessor.name, TextProcessor.version) == ("text", "0.2")
 
-    def test_the_canonical_schema_is_still_0_2(self) -> None:
-        assert SCHEMA_VERSION == "0.2"
+    def test_emitted_documents_carry_the_current_canonical_schema(self, client: TestClient) -> None:
+        """Both documents agree with the contracts, whatever the current version.
 
-    def test_emitted_documents_carry_0_2(self, client: TestClient) -> None:
+        Phase 1 added no schema version of its own and still adds none. The
+        constant moved to 0.3 in Phase 5A, for audio, and the assertion follows
+        it rather than pinning a literal the delivery surface never chose.
+        """
         client.post("/v1/captures", json=text_envelope())
 
         record = client.get(f"/v1/captures/{CAPTURE_ID}").json()
         content = client.get(f"/v1/captures/{CAPTURE_ID}/content").json()
 
-        assert record["schema_version"] == "0.2"
-        assert content["schema_version"] == "0.2"
+        assert record["schema_version"] == SCHEMA_VERSION
+        assert content["schema_version"] == SCHEMA_VERSION
 
     def test_the_processing_record_names_the_processor_version(self, client: TestClient) -> None:
         client.post("/v1/captures", json=text_envelope())

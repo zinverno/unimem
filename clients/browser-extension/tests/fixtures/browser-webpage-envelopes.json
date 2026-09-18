@@ -21,7 +21,7 @@
       "dataset.seen"
     ],
     "envelope": {
-      "schema_version": "0.2",
+      "schema_version": "0.3",
       "id": "b41d6f2a-3c58-4e77-9a10-5d8e2f6c0741",
       "source": {
         "type": "browser",
@@ -57,7 +57,7 @@
     ],
     "never_in_visible_text": [],
     "envelope": {
-      "schema_version": "0.2",
+      "schema_version": "0.3",
       "id": "d7c9e103-2b64-4a8f-8e35-1f0a9b7c6d24",
       "source": {
         "type": "browser",

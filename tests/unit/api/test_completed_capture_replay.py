@@ -243,7 +243,8 @@ CONFLICTING: dict[str, dict[str, Any]] = {
             "title": TITLE,
         }
     },
-    "an older schema version": {"schema_version": "0.1"},
+    "the oldest supported schema version": {"schema_version": "0.1"},
+    "the previous schema version": {"schema_version": "0.2"},
 }
 
 
@@ -294,16 +295,22 @@ class TestSameIdIsNotSameRequest:
         assert seeded.raw_store.writes == writes
         assert len(seeded.content_store.stored_content_ids()) == 1
 
-    def test_a_legacy_envelope_is_not_replayable(self, seeded: Stack) -> None:
-        """0.1 is refused for lack of proof, not by a version rule invented here.
+    @pytest.mark.parametrize("version", ["0.1", "0.2"])
+    def test_a_legacy_envelope_is_not_replayable(self, seeded: Stack, version: str) -> None:
+        """An older version is refused for lack of proof, not by a rule invented here.
 
-        Intake writes every record at the current schema version, so a 0.1
-        submission produces a 0.2 record that cannot vouch for a 0.1 request's
-        metadata. Rather than build migration machinery to bridge that, the
-        duplicate keeps the conflict it would have received anyway — which is
-        not a regression, because a duplicate was always a conflict.
+        Intake writes every record at the *current* schema version, so a
+        submission at any older one produces a record that cannot vouch for that
+        request's metadata. Rather than build migration machinery to bridge
+        that, the duplicate keeps the conflict it would have received anyway —
+        which is not a regression, because a duplicate was always a conflict.
+
+        Both listed older versions are covered rather than only the oldest,
+        because which versions are "older" moves every time the canonical set
+        advances: 0.2 was the current version until schema 0.3, and it lands
+        here now for exactly the same reason 0.1 always did.
         """
-        legacy = text_envelope(schema_version="0.1")
+        legacy = text_envelope(schema_version=version)
 
         assert seeded.client.post("/v1/captures", json=legacy).status_code == 409
 

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from core.contracts import CaptureRecord, CaptureStatus, IntentAction, RawObjectRef
+from core.contracts import SCHEMA_VERSION, CaptureRecord, CaptureStatus, IntentAction, RawObjectRef
 from core.intake import CaptureIntake
 from core.persistence import (
     CaptureRecordAlreadyExistsError,
@@ -182,7 +182,7 @@ def test_capture_metadata_survives_the_whole_stack(intake: CaptureIntake, databa
 
     persisted = SqliteCaptureRecordStore(database).get(accepted.id)
     assert persisted == accepted
-    assert persisted.schema_version == "0.2"
+    assert persisted.schema_version == SCHEMA_VERSION
     assert persisted.context is not None
     assert persisted.context.captured_at == CAPTURED_AT
     assert persisted.context.device == "laptop"

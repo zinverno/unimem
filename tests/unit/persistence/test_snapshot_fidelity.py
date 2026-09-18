@@ -7,6 +7,7 @@ reaches the database, and nothing done to a retrieved object reaches it either.
 """
 
 from core.contracts import (
+    SCHEMA_VERSION,
     CapturePayloadType,
     CaptureRecord,
     CaptureSourceType,
@@ -28,7 +29,7 @@ def test_every_field_survives_the_round_trip(store: SqliteCaptureRecordStore) ->
 
     restored = store.get(record.id)
 
-    assert restored.schema_version == "0.2"
+    assert restored.schema_version == SCHEMA_VERSION
     assert restored.id == record.id
     assert restored.status is CaptureStatus.STORED
     assert restored.received_at == RECEIVED_AT

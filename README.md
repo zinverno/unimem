@@ -4,7 +4,8 @@ Core domain contracts, immutable raw-object storage, capture-record
 persistence, capture intake for text, HTML, PDF, DOCX and still images — with
 optional local OCR for scanned PDF pages and for images — and a local HTTP capture API
 for a universal multimodal capture and ingestion layer. Canonical contracts are at schema
-version **0.2**; `0.1` documents remain readable and are rewritten as `0.1`.
+version **0.3**; `0.1` and `0.2` documents remain readable, and each keeps its own version
+when read back or advanced through the lifecycle.
 
 Implemented so far:
 
@@ -138,6 +139,24 @@ material that is not a string:
   enrichment over content that is already canonical. Without the flag the build
   is byte-for-byte the one above. No new route, no new request field, no contract
   change, and the schema stays `0.2`. See *Images: opt-in local OCR*, below.
+
+Phase 5 asks what it takes to ingest material that has a *duration*:
+
+- **Phase 5A, PR 1 — media contract foundation.** Vocabulary and a typed
+  boundary, and deliberately no capability. `audio` becomes a first-class
+  capture and content modality, distinct from `video` — a podcast is not a
+  video with no picture — and the canonical contract set advances to schema
+  `0.3` for that one reason. `0.1` and `0.2` documents remain readable, keep
+  their own version, and mean exactly what they meant before; `video`, valid
+  since `0.1`, is **not** retroactively gated. `core` gains a narrow
+  `MediaProbe` port — one method, taking one binary stream and nothing else —
+  with normalized frozen value types and a runtime validator that turns an
+  inconsistent adapter answer into an execution failure rather than a verdict
+  about the submitted file. **No processor, no intake capability, no engine, no
+  flag, and no new dependency**: a schema-valid `audio` capture is still refused
+  by this build, exactly as a `video` one always has been. Schema support and
+  deployment capability are separate things. See
+  [ADR-021](docs/ADR/ADR-021-original-first-time-based-media-ingestion.md).
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 

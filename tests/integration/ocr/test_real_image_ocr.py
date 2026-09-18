@@ -24,7 +24,13 @@ from typing import Any, Final
 
 import pytest
 
-from core.contracts import CapturePayloadType, CaptureRecord, ContentType, SegmentType
+from core.contracts import (
+    SCHEMA_VERSION,
+    CapturePayloadType,
+    CaptureRecord,
+    ContentType,
+    SegmentType,
+)
 from core.processing import ImageOcrProcessor, read_png_header
 from core.processing.image_recognition import validate_image_ocr_result
 from core.storage import LocalRawObjectStore
@@ -246,7 +252,7 @@ def _submit(base: str, file_ref: str) -> int:
     import urllib.request
 
     envelope = {
-        "schema_version": "0.2",
+        "schema_version": SCHEMA_VERSION,
         "id": CAPTURE_ID,
         "source": {"type": "upload", "provider": "curl"},
         "payload": {"type": "image", "mime_type": PNG_MIME, "file_ref": file_ref},

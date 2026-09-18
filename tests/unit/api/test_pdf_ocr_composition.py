@@ -28,8 +28,7 @@ from fastapi.testclient import TestClient
 
 import unimem_api.__main__ as cli
 import unimem_ocr
-from core.contracts import ContentObject
-from core.contracts.base import SCHEMA_VERSION
+from core.contracts import SCHEMA_VERSION, ContentObject
 from core.processing import OCR_METADATA_KEY
 from tests import pdfs
 from tests.unit.processing.doubles import FakePdfPageOcr
@@ -428,6 +427,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from core.contracts import SCHEMA_VERSION
 from unimem_api import build_local_app
 
 app = build_local_app(Path("data"))
@@ -439,7 +439,7 @@ with TestClient(app) as client:
             "/v1/uploads", files={"file": (path, data, "application/pdf")}
         )
         envelope = {
-            "schema_version": "0.2",
+            "schema_version": SCHEMA_VERSION,
             "id": f"cap_{name}",
             "source": {"type": "upload", "provider": "curl"},
             "payload": {

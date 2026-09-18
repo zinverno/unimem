@@ -156,16 +156,17 @@ class TestMalformedBodies:
 class TestUnknownSchemaVersion:
     """``SchemaVersion`` is a closed ``Literal``; a newer version is not guessed at."""
 
-    @pytest.mark.parametrize("version", ["0.3", "1.0", "", "latest"])
+    @pytest.mark.parametrize("version", ["0.4", "1.0", "", "latest"])
     def test_unknown_schema_version_is_422(self, stack: Stack, version: str) -> None:
         response = stack.client.post("/v1/captures", json=text_envelope(schema_version=version))
 
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "invalid_request"
 
-    def test_a_supported_older_version_is_still_accepted(self, stack: Stack) -> None:
-        """0.1 is readable, so a 0.1 envelope is a valid submission."""
-        response = stack.client.post("/v1/captures", json=text_envelope(schema_version="0.1"))
+    @pytest.mark.parametrize("version", ["0.1", "0.2"])
+    def test_a_supported_older_version_is_still_accepted(self, stack: Stack, version: str) -> None:
+        """Every listed older version is readable, so submitting one is valid."""
+        response = stack.client.post("/v1/captures", json=text_envelope(schema_version=version))
 
         assert response.status_code == 201
 

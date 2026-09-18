@@ -17,7 +17,16 @@ class CaptureSourceType(StrEnum):
 
 
 class CapturePayloadType(StrEnum):
-    """What kind of thing was captured."""
+    """What kind of thing was captured.
+
+    Members are listed in the order they entered the vocabulary, so the tail of
+    the list reads as its history. ``AUDIO`` arrived last, in schema version
+    0.3, and is the only member a supported version can lack — see
+    :data:`~core.contracts.base.AUDIO_SCHEMA_VERSIONS`. ``VIDEO`` has been here
+    since 0.1 and is valid at every supported version, which is why standalone
+    audio needed its own member rather than being folded into it: an audio file
+    is not a video with no pictures.
+    """
 
     TEXT = "text"
     WEBPAGE = "webpage"
@@ -26,6 +35,7 @@ class CapturePayloadType(StrEnum):
     VIDEO = "video"
     FILE = "file"
     URL = "url"
+    AUDIO = "audio"
 
 
 class CaptureStatus(StrEnum):
@@ -41,13 +51,19 @@ class CaptureStatus(StrEnum):
 
 
 class ContentType(StrEnum):
-    """Kind of a canonical :class:`~core.contracts.content.ContentObject`."""
+    """Kind of a canonical :class:`~core.contracts.content.ContentObject`.
+
+    Listed in the order they entered the vocabulary, like
+    :class:`CapturePayloadType`. ``AUDIO`` arrived in schema version 0.3;
+    ``VIDEO`` has been here since 0.1.
+    """
 
     TEXT = "text"
     WEB = "web"
     IMAGE = "image"
     DOCUMENT = "document"
     VIDEO = "video"
+    AUDIO = "audio"
 
 
 class SegmentType(StrEnum):

@@ -7,7 +7,13 @@ providers.
 
 from core.contracts.asset import Asset
 from core.contracts.base import (
+    AUDIO_SCHEMA_VERSION,
+    AUDIO_SCHEMA_VERSIONS,
+    CAPTURE_METADATA_SCHEMA_VERSION,
+    CAPTURE_METADATA_SCHEMA_VERSIONS,
     SCHEMA_VERSION,
+    SCHEMA_VERSIONS_BEFORE_AUDIO,
+    SCHEMA_VERSIONS_BEFORE_CAPTURE_METADATA,
     SUPPORTED_SCHEMA_VERSIONS,
     DomainModel,
     Identifier,
@@ -48,7 +54,13 @@ from core.contracts.provenance import Provenance
 from core.contracts.segment import Segment, SpatialLocation, TemporalLocation
 
 __all__ = [
+    "AUDIO_SCHEMA_VERSION",
+    "AUDIO_SCHEMA_VERSIONS",
+    "CAPTURE_METADATA_SCHEMA_VERSION",
+    "CAPTURE_METADATA_SCHEMA_VERSIONS",
     "SCHEMA_VERSION",
+    "SCHEMA_VERSIONS_BEFORE_AUDIO",
+    "SCHEMA_VERSIONS_BEFORE_CAPTURE_METADATA",
     "SUPPORTED_SCHEMA_VERSIONS",
     "Asset",
     "AssetRole",

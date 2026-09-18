@@ -7,7 +7,13 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from core.contracts import (
+    AUDIO_SCHEMA_VERSION,
+    AUDIO_SCHEMA_VERSIONS,
+    CAPTURE_METADATA_SCHEMA_VERSION,
+    CAPTURE_METADATA_SCHEMA_VERSIONS,
     SCHEMA_VERSION,
+    SCHEMA_VERSIONS_BEFORE_AUDIO,
+    SCHEMA_VERSIONS_BEFORE_CAPTURE_METADATA,
     SUPPORTED_SCHEMA_VERSIONS,
     AssetRole,
     CaptureContext,
@@ -43,13 +49,60 @@ VERSIONED_MODELS: list[type[BaseModel]] = [CaptureEnvelope, CaptureRecord, Conte
 
 
 def test_current_schema_version_is_supported() -> None:
-    assert SCHEMA_VERSION == "0.2"
+    assert SCHEMA_VERSION == "0.3"
     assert SCHEMA_VERSION in SUPPORTED_SCHEMA_VERSIONS
 
 
 def test_every_readable_version_is_listed() -> None:
-    """0.1 stays supported for exactly as long as this build can read it."""
-    assert frozenset({"0.1", "0.2"}) == SUPPORTED_SCHEMA_VERSIONS
+    """Each older version stays listed for as long as this build can read it."""
+    assert frozenset({"0.1", "0.2", "0.3"}) == SUPPORTED_SCHEMA_VERSIONS
+
+
+class TestTheVersionRulesAreExplicit:
+    """Adding a third version must not silently reinterpret the second.
+
+    The rules that depend on a version are named sets rather than string
+    comparisons, so a version is classified by being written down once —
+    deliberately, in a diff someone reviews — and never by sorting or by being
+    "the one before the current one". These tests are what keeps the sets
+    honest as the list grows.
+    """
+
+    def test_every_supported_version_is_classified_for_capture_metadata(self) -> None:
+        assert CAPTURE_METADATA_SCHEMA_VERSIONS <= SUPPORTED_SCHEMA_VERSIONS
+        assert (
+            CAPTURE_METADATA_SCHEMA_VERSIONS | SCHEMA_VERSIONS_BEFORE_CAPTURE_METADATA
+            == SUPPORTED_SCHEMA_VERSIONS
+        )
+        assert not CAPTURE_METADATA_SCHEMA_VERSIONS & SCHEMA_VERSIONS_BEFORE_CAPTURE_METADATA
+
+    def test_every_supported_version_is_classified_for_audio(self) -> None:
+        assert AUDIO_SCHEMA_VERSIONS <= SUPPORTED_SCHEMA_VERSIONS
+        assert AUDIO_SCHEMA_VERSIONS | SCHEMA_VERSIONS_BEFORE_AUDIO == SUPPORTED_SCHEMA_VERSIONS
+        assert not AUDIO_SCHEMA_VERSIONS & SCHEMA_VERSIONS_BEFORE_AUDIO
+
+    def test_0_2_did_not_change_meaning_when_0_3_arrived(self) -> None:
+        """The whole point of the exercise, stated as one assertion per rule."""
+        assert "0.2" in CAPTURE_METADATA_SCHEMA_VERSIONS
+        assert "0.2" in SCHEMA_VERSIONS_BEFORE_AUDIO
+        assert "0.1" in SCHEMA_VERSIONS_BEFORE_CAPTURE_METADATA
+        assert "0.1" in SCHEMA_VERSIONS_BEFORE_AUDIO
+
+    def test_the_current_version_has_every_feature(self) -> None:
+        assert SCHEMA_VERSION in CAPTURE_METADATA_SCHEMA_VERSIONS
+        assert SCHEMA_VERSION in AUDIO_SCHEMA_VERSIONS
+
+    def test_the_feature_versions_name_when_each_arrived(self) -> None:
+        """Named separately from the current version, so a message stays true.
+
+        ``CAPTURE_METADATA_SCHEMA_VERSION`` is 0.2 and the current version is
+        0.3: the error a 0.1 record raises must still say the fields arrived in
+        0.2, which is why the constant exists instead of the message reaching
+        for ``SCHEMA_VERSION``.
+        """
+        assert CAPTURE_METADATA_SCHEMA_VERSION == "0.2"
+        assert AUDIO_SCHEMA_VERSION == "0.3"
+        assert AUDIO_SCHEMA_VERSION == SCHEMA_VERSION
 
 
 @pytest.mark.parametrize("model", VERSIONED_MODELS)
@@ -64,7 +117,7 @@ def test_schema_version_is_always_serialized() -> None:
         assert instance.model_dump(mode="json")["schema_version"] == SCHEMA_VERSION
 
 
-@pytest.mark.parametrize("version", ["0.3", "1.0", "0.1.0", "", "latest", "0.2.0"])
+@pytest.mark.parametrize("version", ["0.4", "1.0", "0.1.0", "", "latest", "0.2.0", "0.3.0"])
 def test_unknown_schema_version_is_rejected(version: str) -> None:
     data = make_content_object().model_dump(mode="json")
     with pytest.raises(ValidationError, match="schema_version"):
@@ -74,39 +127,44 @@ def test_unknown_schema_version_is_rejected(version: str) -> None:
 def test_unknown_schema_version_is_rejected_on_envelopes() -> None:
     data = make_envelope().model_dump(mode="json")
     with pytest.raises(ValidationError, match="schema_version"):
-        CaptureEnvelope.model_validate(data | {"schema_version": "0.3"})
+        CaptureEnvelope.model_validate(data | {"schema_version": "0.4"})
 
 
-def test_a_legacy_envelope_is_still_readable() -> None:
-    """0.2 changed no envelope field, so a 0.1 envelope validates unchanged."""
+@pytest.mark.parametrize("version", ["0.1", "0.2"])
+def test_a_legacy_envelope_is_still_readable(version: str) -> None:
+    """Neither 0.2 nor 0.3 changed a webpage envelope field."""
     data = make_envelope().model_dump(mode="json")
 
-    legacy = CaptureEnvelope.model_validate(data | {"schema_version": "0.1"})
+    legacy = CaptureEnvelope.model_validate(data | {"schema_version": version})
 
-    assert legacy.schema_version == "0.1"
-    assert legacy.model_dump(mode="json") == data | {"schema_version": "0.1"}
+    assert legacy.schema_version == version
+    assert legacy.model_dump(mode="json") == data | {"schema_version": version}
 
 
-def test_a_legacy_content_object_is_still_readable() -> None:
-    """0.2 changed no content-object field either."""
+@pytest.mark.parametrize("version", ["0.1", "0.2"])
+def test_a_legacy_content_object_is_still_readable(version: str) -> None:
+    """Neither version changed a ``web`` content-object field either."""
     data = make_content_object().model_dump(mode="json")
 
-    legacy = ContentObject.model_validate(data | {"schema_version": "0.1"})
+    legacy = ContentObject.model_validate(data | {"schema_version": version})
 
-    assert legacy.schema_version == "0.1"
-    assert legacy.model_dump(mode="json") == data | {"schema_version": "0.1"}
+    assert legacy.schema_version == version
+    assert legacy.model_dump(mode="json") == data | {"schema_version": version}
 
 
 #: The exact wire values of every closed set in the domain. These are part of
 #: the serialized format: changing one is a schema change, not a refactor.
 ENUM_VALUES: list[tuple[type[StrEnum], list[str]]] = [
     (CaptureSourceType, ["browser", "filesystem", "upload", "api"]),
-    (CapturePayloadType, ["text", "webpage", "image", "document", "video", "file", "url"]),
+    (
+        CapturePayloadType,
+        ["text", "webpage", "image", "document", "video", "file", "url", "audio"],
+    ),
     (
         CaptureStatus,
         ["received", "stored", "queued", "processing", "complete", "partial", "failed"],
     ),
-    (ContentType, ["text", "web", "image", "document", "video"]),
+    (ContentType, ["text", "web", "image", "document", "video", "audio"]),
     (SegmentType, ["text", "section", "transcript", "ocr", "visual"]),
     (ProvenanceSourceType, ["original", "html", "ocr", "transcript", "vision", "processor"]),
     (AssetRole, ["original", "image", "keyframe", "thumbnail", "audio", "attachment"]),
