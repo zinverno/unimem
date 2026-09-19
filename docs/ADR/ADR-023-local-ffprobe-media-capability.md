@@ -217,10 +217,28 @@ content object. The adapter translates:
   `codec_name`, `sample_rate` and `channels` are recorded when declared.
 - **Video streams** — `codec_type == "video"` only, on the same terms, plus
   `width`, `height` and the frame rate above.
-- **Everything else is ignored.** Subtitle, data, attachment, and any
-  `codec_type` this build does not recognize are simply not described. A gap in
-  the index numbering is therefore normal, and a container carrying a subtitle
-  track is perfectly ordinary rather than a refusal.
+- **Every other *named* kind is ignored.** Subtitle, data, attachment, and any
+  other genuinely-named `codec_type` this build does not model are simply not
+  described. A gap in the index numbering is therefore normal, and a container
+  carrying a subtitle track is perfectly ordinary rather than a refusal.
+- **A `codec_type` that is missing or malformed is a failure, not an ignored
+  stream**, and the distinction is the sharpest example of the rule above.
+  Missing, non-string, blank, or one of the engine's placeholders (`"N/A"`,
+  `"unknown"`) means the adapter cannot tell what kind of stream it is looking
+  at. Treating that as "some kind we do not model" would delete the stream from
+  the result — and the deletion would land somewhere specific:
+
+  ```
+  malformed stream -> silently dropped -> a result with no audio stream
+  -> core's ProcessingInputError -> 422 -> capture durably FAILED
+  ```
+
+  which converts infrastructure corruption into a verdict about somebody's file.
+  That is precisely the boundary this phase exists to hold, so it is a
+  `MediaProbeExecutionError` instead: a 503 with the capture left `PROCESSING`
+  and nothing recorded. The policy stays here, in the adapter — `core` is not
+  taught about `codec_type` — and no unmodeled stream type is added to
+  `MediaProbeResult`.
 - **Both collections are sorted by the container's own stream index**, because
   the order is part of the value.
 
@@ -250,8 +268,14 @@ Every way this adapter can fail to obtain a trustworthy result leaves as
 
 ffprobe cannot be launched; it timed out; it exited nonzero; a temporary file
 could not be written, rewound or read; the output was not valid UTF-8; it was not
-JSON; the top-level shape was wrong; a required structural field was missing; a
-value could not be safely normalized; the output exceeded the adapter's budget.
+JSON; the top-level shape was wrong; a required structural field was missing —
+including a stream's `codec_type`, which decides whether the stream is described
+at all; a value could not be safely normalized; the output exceeded the adapter's
+budget.
+
+**A stream that cannot be classified is in that list on purpose.** The general
+rule is that malformed engine output is never quietly absorbed into a smaller
+result, because a smaller result is one `core` would reach a verdict about.
 
 It is never `ProcessingInputError`. The adapter has no name for that type at all,
 so it cannot raise one. A verdict about the submitted media is not this layer's
@@ -497,6 +521,15 @@ Negative / costs:
   reach.
 - **Truncate over-budget output and parse what fits.** Rejected: it either fails
   to parse or parses into a smaller truth, and the second is worse.
+- **Treat a missing or malformed `codec_type` as an unmodeled stream type and
+  ignore it.** Rejected, and it is the same mistake as the previous entry wearing
+  different clothes: the stream would vanish, the result would be smaller but
+  well-formed, and `core` would durably fail a capture on the strength of an
+  answer this build had already decided it could not read.
+- **Add `subtitle`, `data` and `attachment` to `MediaProbeResult` so nothing has
+  to be ignored.** Rejected: ADR-021 fixed that Phase 5A describes what it can
+  use, and modelling a track nothing reads would be vocabulary ahead of a
+  decision. Ignoring a *named* kind is honest; ignoring an unreadable one is not.
 - **Add a `[media]` Python extra for symmetry with `[ocr]`.** Rejected: there is
   nothing for it to install, and its existence would imply `pip` could provide
   ffprobe.

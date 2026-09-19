@@ -80,6 +80,27 @@ class TestEveryAdapterFailureIsAnExecutionFailure:
                 "stream that is not an object",
                 failing(output=b'{"format": {"format_name": "wav"}, "streams": ["audio"]}'),
             ),
+            (
+                "stream with no codec type",
+                failing(
+                    output=b'{"format": {"format_name": "wav"}, '
+                    b'"streams": [{"index": 0, "codec_name": "pcm_s16le"}]}'
+                ),
+            ),
+            (
+                "stream with a placeholder codec type",
+                failing(
+                    output=b'{"format": {"format_name": "wav"}, '
+                    b'"streams": [{"index": 0, "codec_type": "N/A"}]}'
+                ),
+            ),
+            (
+                "stream with a non-string codec type",
+                failing(
+                    output=b'{"format": {"format_name": "wav"}, '
+                    b'"streams": [{"index": 0, "codec_type": 4}]}'
+                ),
+            ),
         ],
     )
     def test_it_becomes_a_media_probe_execution_error(
@@ -133,6 +154,50 @@ class TestItNeverReachesAVerdict:
 
         assert not isinstance(caught.value, ProcessingInputError)
         assert not isinstance(caught.value, ProcessingError)
+
+    def test_a_malformed_codec_type_is_not_a_verdict_about_the_media(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The specific hole this closes, stated as the lifecycle it protects.
+
+        Silently ignoring an unreadable ``codec_type`` would delete the stream,
+        leave a result with no audio in it, and reach ``core`` as a
+        ``ProcessingInputError`` — a 422 and a durably ``FAILED`` capture, on the
+        strength of an engine answer this build had already decided it could not
+        read. It must stay an execution failure, which is a 503 with the capture
+        left ``PROCESSING``.
+        """
+        monkeypatch.setattr(
+            RUN,
+            failing(
+                output=b'{"format": {"format_name": "wav", "duration": "12.0"}, '
+                b'"streams": [{"index": 0, "codec_name": "pcm_s16le"}]}'
+            ),
+        )
+
+        with pytest.raises(MediaProbeExecutionError) as caught:
+            FfprobeMediaProbe().probe(RecordingStream())  # type: ignore[arg-type]
+
+        assert not isinstance(caught.value, ProcessingInputError)
+        assert not isinstance(caught.value, ProcessingError)
+
+    def test_an_unmodeled_stream_type_is_still_not_a_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other half of the same distinction, so neither drifts alone."""
+        monkeypatch.setattr(
+            RUN,
+            failing(
+                output=b'{"format": {"format_name": "wav", "duration": "12.0"}, '
+                b'"streams": [{"index": 0, "codec_type": "audio"}, '
+                b'{"index": 1, "codec_type": "subtitle"}]}'
+            ),
+        )
+
+        result = FfprobeMediaProbe().probe(RecordingStream())  # type: ignore[arg-type]
+
+        assert len(result.audio_streams) == 1
+        assert result.video_streams == ()
 
     def test_the_adapter_does_not_import_the_verdict_type_at_all(self) -> None:
         """It cannot raise what it has no name for."""

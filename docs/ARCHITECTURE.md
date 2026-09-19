@@ -2517,6 +2517,17 @@ never a zero or a guess; and a value that is *present* and cannot be normalized 
 a failure, never quietly turned into an omission. `validate_media_probe_result`
 stays in `core` and remains the final authority — the adapter does not re-run it.
 
+The sharpest case is `codec_type`. A stream named as a kind this build does not
+model — subtitle, data, attachment, or one it has never met — is **ignored**, and
+that is an observation about the media. A `codec_type` that is missing,
+non-string, blank or a placeholder is **refused**, because dropping an
+unclassifiable stream would leave a smaller but well-formed result, and a result
+with no audio stream in it reaches `core` as a verdict: a 422 and a durably
+`FAILED` capture, on the strength of an engine answer the adapter had already
+decided it could not read. It is a `MediaProbeExecutionError` instead. The policy
+stays in the adapter; `core` is not taught about `codec_type`, and no unmodeled
+stream type is added to `MediaProbeResult`.
+
 **Every runtime failure is `MediaProbeExecutionError`**, and the adapter has no
 name for `ProcessingInputError` at all, so it cannot raise one. ffprobe's standard
 error is **discarded unread**: it is another program's prose, not evidence, and

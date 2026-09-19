@@ -318,8 +318,12 @@ class TestStreamsIgnoredAndOrdered:
         assert len(result.video_streams) == 1
         assert result.audio_streams == ()
 
-    @pytest.mark.parametrize("kind", ["subtitle", "data", "attachment", "nb", "unknown"])
-    def test_every_other_stream_type_is_ignored(self, kind: str) -> None:
+    @pytest.mark.parametrize(
+        "kind",
+        ["subtitle", "data", "attachment", "timecode", "haptic"],
+    )
+    def test_every_other_named_stream_type_is_ignored(self, kind: str) -> None:
+        """A kind this build does not model, including one it has never met."""
         payload = {
             "format": {"format_name": "mov,mp4,m4a,3gp,3g2,mj2"},
             "streams": [
@@ -332,13 +336,18 @@ class TestStreamsIgnoredAndOrdered:
         assert len(result.audio_streams) == 1
         assert result.video_streams == ()
 
-    def test_a_stream_with_no_codec_type_is_ignored(self) -> None:
+    @pytest.mark.parametrize("kind", ["subtitle", "data", "attachment"])
+    def test_an_ignored_stream_needs_nothing_else_to_be_well_formed(self, kind: str) -> None:
+        """Its index and codec are never read, so they cannot fail this build."""
         payload = {
             "format": {"format_name": "wav"},
-            "streams": [{"index": 0}, {"index": 1, "codec_type": "audio"}],
+            "streams": [
+                {"index": 0, "codec_type": "audio"},
+                {"codec_type": kind, "index": "nonsense", "codec_name": 4},
+            ],
         }
 
-        assert [stream.index for stream in probe(payload).audio_streams] == [1]
+        assert len(probe(payload).audio_streams) == 1
 
     def test_ignoring_a_stream_leaves_a_gap_in_the_numbering(self) -> None:
         """Container indexes number one sequence; a gap is normal, not an error."""
@@ -424,6 +433,103 @@ class TestStreamsIgnoredAndOrdered:
         }
 
         assert probe(payload).audio_streams[0].index == 2
+
+
+class TestAMalformedCodecTypeIsNeverJustIgnored:
+    """The one place where "ignore it" would have been quietly dangerous.
+
+    A stream this build does not model is ignored, and that is an observation
+    about the media. A stream whose ``codec_type`` cannot be read is an answer
+    about the structure that cannot be believed, and dropping it would delete a
+    stream from the result — which, if it was the required one, would reach
+    ``core`` as "this file has no audio" and durably fail somebody's capture on
+    the strength of a broken engine answer.
+    """
+
+    def test_a_missing_codec_type_is_an_execution_failure(self) -> None:
+        payload = {
+            "format": {"format_name": "wav"},
+            "streams": [{"index": 0}],
+        }
+
+        with pytest.raises(MediaProbeExecutionError, match="no codec type"):
+            probe(payload)
+
+    @pytest.mark.parametrize("value", [4, 1.5, True, [], {}, ["audio"], {"kind": "audio"}])
+    def test_a_non_string_codec_type_is_an_execution_failure(self, value: Any) -> None:
+        payload = {
+            "format": {"format_name": "wav"},
+            "streams": [{"index": 0, "codec_type": value}],
+        }
+
+        with pytest.raises(MediaProbeExecutionError, match="where text was expected"):
+            probe(payload)
+
+    @pytest.mark.parametrize("value", ["", " ", "\t", "\n  "])
+    def test_a_blank_codec_type_is_an_execution_failure(self, value: str) -> None:
+        payload = {
+            "format": {"format_name": "wav"},
+            "streams": [{"index": 0, "codec_type": value}],
+        }
+
+        with pytest.raises(MediaProbeExecutionError, match="names no kind"):
+            probe(payload)
+
+    @pytest.mark.parametrize("value", ["N/A", "n/a", "unknown", "none", "null", "NA"])
+    def test_a_placeholder_codec_type_is_an_execution_failure(self, value: str) -> None:
+        """The engine's way of writing "I do not know" is not a kind of stream."""
+        payload = {
+            "format": {"format_name": "wav"},
+            "streams": [{"index": 0, "codec_type": value}],
+        }
+
+        with pytest.raises(MediaProbeExecutionError, match="names no kind"):
+            probe(payload)
+
+    def test_it_fails_even_when_a_good_stream_is_present(self) -> None:
+        """Otherwise the malformed one would vanish behind a plausible result."""
+        payload = {
+            "format": {"format_name": "mov,mp4,m4a,3gp,3g2,mj2"},
+            "streams": [
+                {"index": 0, "codec_type": "video", "avg_frame_rate": "25/1"},
+                {"index": 1, "codec_type": None},
+            ],
+        }
+
+        with pytest.raises(MediaProbeExecutionError):
+            probe(payload)
+
+    def test_a_malformed_stream_never_normalizes_into_an_empty_result(self) -> None:
+        """The exact shape that would otherwise become a 422 and a FAILED capture."""
+        payload = {
+            "format": {"format_name": "wav", "duration": "12.0"},
+            "streams": [{"index": 0, "codec_name": "pcm_s16le", "sample_rate": "44100"}],
+        }
+
+        with pytest.raises(MediaProbeExecutionError):
+            probe(payload)
+
+    def test_the_message_names_the_position_and_not_a_container_index(self) -> None:
+        """The index is a field of the entry, and nothing in it is trusted yet."""
+        payload = {
+            "format": {"format_name": "wav"},
+            "streams": [
+                {"index": 7, "codec_type": "audio"},
+                {"index": 9},
+            ],
+        }
+
+        with pytest.raises(MediaProbeExecutionError, match="position 1"):
+            probe(payload)
+
+    def test_codec_type_is_normalized_before_it_is_matched(self) -> None:
+        """`"AUDIO"` and `" audio "` are the same kind, spelled carelessly."""
+        payload = {
+            "format": {"format_name": "wav"},
+            "streams": [{"index": 0, "codec_type": " AUDIO "}],
+        }
+
+        assert len(probe(payload).audio_streams) == 1
 
 
 class TestMalformedEngineOutput:

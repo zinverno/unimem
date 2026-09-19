@@ -288,18 +288,71 @@ def _video_stream(stream: dict[str, Any]) -> VideoStreamInfo:
     )
 
 
+def _codec_type(stream: dict[str, Any], *, position: int) -> str:
+    """What kind of stream this is, as normalized text, or an execution failure.
+
+    **The distinction this function exists to hold is between a stream this
+    build does not model and an answer it cannot trust**, and collapsing them is
+    unsafe in one specific direction.
+
+    A container carrying a subtitle, data or attachment track is perfectly
+    ordinary. :class:`~core.processing.media_probe.MediaProbeResult` has nowhere
+    to put one and inventing somewhere would be vocabulary ahead of a decision,
+    so such a stream is *ignored* — and so is any other genuinely-named kind a
+    future container brings. That is a normal observation about the media.
+
+    A ``codec_type`` that is **missing, not a string, blank, or one of the
+    engine's placeholders** is none of those things. It is an answer about the
+    structure that cannot be believed, and treating it as "some kind we do not
+    model" would quietly delete a stream from the result. That matters because
+    of where the deletion would land:
+
+        malformed stream -> silently dropped -> a result with no audio stream
+        -> core's ``ProcessingInputError`` -> 422 -> capture durably FAILED
+
+    which turns infrastructure corruption into a verdict about somebody's file —
+    exactly the boundary Phase 5A exists to hold. So it is a
+    :class:`~core.processing.media_probe.MediaProbeExecutionError` instead, and
+    the capture stays ``PROCESSING`` behind a 503 with nothing recorded.
+
+    ``position`` is the stream's place in the printed list, not a container
+    index: the index is a field of the entry and this function is deliberately
+    reached before anything in the entry has been trusted.
+    """
+    value = stream.get("codec_type")
+    if value is None:
+        raise _fail(f"reported the stream at position {position} with no codec type")
+    if not isinstance(value, str):
+        raise _fail(
+            f"reported {type(value).__name__} as the codec type of the stream at position "
+            f"{position}, where text was expected"
+        )
+    normalized = _text(value)
+    if normalized is None:
+        raise _fail(
+            f"reported {value!r} as the codec type of the stream at position {position}, "
+            f"which names no kind of stream"
+        )
+    return normalized
+
+
 def _streams(
     payload: dict[str, Any],
 ) -> tuple[tuple[AudioStreamInfo, ...], tuple[VideoStreamInfo, ...]]:
     """Both stream collections, ordered by the container's own stream index.
 
-    Only ``audio`` and ``video`` are described. A subtitle, data, or attachment
-    stream — or one whose ``codec_type`` this build does not recognize — is
+    Only ``audio`` and ``video`` are described. A subtitle, data or attachment
+    stream — or any other genuinely-named kind this build does not model — is
     ignored rather than refused: a container carrying one is perfectly ordinary,
     :class:`~core.processing.media_probe.MediaProbeResult` has nowhere to put it,
     and inventing somewhere would be vocabulary ahead of a decision. Their
     indexes are simply absent from both tuples, which is why a gap in the
     numbering is normal.
+
+    **A stream whose ``codec_type`` is missing or malformed is not one of
+    those.** It is refused, for the reason :func:`_codec_type` sets out: silently
+    dropping an untrustworthy stream could turn a broken engine answer into a
+    durable verdict about the submitted file.
 
     Sorted by index because the order is part of the value: a probe that returned
     streams in the order a hash map happened to iterate would make two probes of
@@ -315,10 +368,10 @@ def _streams(
         raise _fail(f"reported {type(listed).__name__} where a list of streams was expected")
     audio: list[AudioStreamInfo] = []
     video: list[VideoStreamInfo] = []
-    for entry in listed:
+    for position, entry in enumerate(listed):
         if not isinstance(entry, dict):
             raise _fail(f"reported {type(entry).__name__} where a stream was expected")
-        codec_type = _text(entry.get("codec_type"))
+        codec_type = _codec_type(entry, position=position)
         if codec_type == AUDIO_CODEC_TYPE:
             audio.append(_audio_stream(entry))
         elif codec_type == VIDEO_CODEC_TYPE:
