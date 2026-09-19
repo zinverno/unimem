@@ -580,11 +580,29 @@ staged audio/video  (a deployment handed a MediaProbe)
   -> COMPLETE
 ```
 
-The rest of Phase 5A is **not implemented** here. Concrete local `ffprobe`
-execution, and the security, startup, deployment and resource mechanics around
-running an external engine, are the subject of the later slices that implement
-them and are recorded with that implementation and its own ADR. Owner manual
-acceptance belongs to 5A-4. Phase 5B, transcription, is not designed.
+**Phase 5A, PR 3 — the local ffprobe media capability.** Answers "how does this
+build actually read a container, given that `core` may not import a media
+framework or `subprocess`?" `src/unimem_media/`, an adapter package outside
+`core` that runs a system `ffprobe` behind the `MediaProbe` port, plus a startup
+prerequisite gate and a `--media` flag. **No `core` change of any kind, no
+contract change, no route change, no new Python dependency and deliberately no
+`[media]` extra.** See *The local ffprobe media capability (Phase 5A)*, below, and
+[ADR-023](ADR/ADR-023-local-ffprobe-media-capability.md).
+
+```
+python -m unimem_api --data-dir ./data --media
+  -> build_ffprobe_media_probe()   version + fd-protocol gate, or SystemExit
+  -> FfprobeMediaProbe             stateless, reentrant, one instance
+  -> build_local_app(media_probe=) intake gate + both processors, from one argument
+  -> Audio/VideoProcessor          unchanged policy, now with an engine behind it
+  -> COMPLETE canonical media content
+```
+
+The rest of Phase 5A is **not implemented** here. Owner manual acceptance belongs
+to 5A-4, and **Macro Phase 5A stays open until that record exists**: this
+repository closes a macro phase with an owner acceptance run against a named
+merged `main`, and CI evidence is not one. Phase 5B, transcription, is not
+designed.
 
 ## Future data flow
 
@@ -2434,6 +2452,117 @@ stays read-only and **never re-probes**. `TEXT` replay is unchanged, and
 **`POST /v1/uploads` is untouched** and still format-blind: staging media bytes is
 valid whatever the capability, and only the later capture is refused.
 
+## The local ffprobe media capability (Phase 5A)
+
+PR 2 left the media path complete except for one thing: nothing could produce a
+`MediaProbeResult`. PR 3 supplies the engine, and **changes nothing in `core`**.
+The whole decision is
+[ADR-023](ADR/ADR-023-local-ffprobe-media-capability.md); what follows is the
+shape.
+
+**A new adapter package, outside `core`.**
+
+```
+src/unimem_media/     implements core.processing.media_probe.MediaProbe
+```
+
+It may depend on `core`; `core` may never depend on it, and a test walks every
+module under `src/core/` to prove no such import exists. It is **standard library
+plus `core`** — no media framework, no codec binding, no native wheel — so there
+is deliberately **no `[media]` extra**: an extra would imply `pip` could supply
+the prerequisite, and the prerequisite is a system `ffprobe`. The package ships
+in the wheel unconditionally, for the reason `unimem_ocr` does.
+
+**The port still takes a stream; the adapter stages it privately.** ADR-021 fixed
+that `probe` receives a `BinaryIO` and nothing else — above all no path, because
+a path is a filesystem instruction the seam must not be able to express. ffprobe
+needs to *seek*, so the adapter copies the stream, in fixed-size chunks, into a
+`tempfile.TemporaryFile` that is unlinked at creation and has no name in the
+filesystem at all. The caller cannot supply, influence or observe it, because
+there is nothing to supply.
+
+**The command line is frozen and carries nothing from a request.**
+
+```
+ffprobe -hide_banner -loglevel error -protocol_whitelist fd
+        -print_format json -show_entries <fixed structural query> -i fd:
+```
+
+`shell=False` and a list, so no shell string is constructed. The input is named
+`fd:` — the descriptor the child already inherited — so **no filename, capture
+id, source URL, raw-store path, `file_ref`, digest or declared MIME type can
+reach argv**, because the input is not named. The one-protocol whitelist is
+load-bearing rather than defensive: some containers can name an external
+resource, and without it an uploaded file could make the probe open an HTTP URL
+or a path on this machine.
+
+The structural query asks for exactly what fills a `MediaProbeResult` — container
+`format_name` and `duration`, and per stream `index`, `codec_type`, `codec_name`,
+`sample_rate`, `channels`, `width`, `height`, `avg_frame_rate`. Tags, chapters,
+packets, frames, bit rates, languages, dispositions and titles are **not
+requested**, so they cannot arrive. `avg_frame_rate` rather than `r_frame_rate`:
+the average is the container's declaration and the other is ffprobe's derived
+guess, and it is kept as an exact rational reduced to lowest terms, never a float.
+
+**Normalization happens at the adapter boundary, and manufactures nothing.**
+Container aliases are split, lowercased, de-duplicated and sorted; the *whole*
+family is kept, because an ISO base media file genuinely is six things. Duration
+is read at format level only. Numbers ffprobe writes as strings become integers.
+Placeholders become omission. `0/0` becomes `None`. Subtitle, data, attachment
+and unrecognized stream types are ignored, so a gap in the index numbering is
+normal. Both collections are sorted by container index.
+
+Two edges pull the same way: a value the container did not declare is `None`,
+never a zero or a guess; and a value that is *present* and cannot be normalized is
+a failure, never quietly turned into an omission. `validate_media_probe_result`
+stays in `core` and remains the final authority — the adapter does not re-run it.
+
+**Every runtime failure is `MediaProbeExecutionError`**, and the adapter has no
+name for `ProcessingInputError` at all, so it cannot raise one. ffprobe's standard
+error is **discarded unread**: it is another program's prose, not evidence, and
+parsing it to decide whether somebody's file is valid is precisely the verdict
+this layer must not reach. A nonzero exit is likewise not a verdict. The two
+lifecycles PR 2 fixed are therefore unchanged.
+
+**Bounds, and what they are not.** One invocation gets 30 seconds of wall clock
+and a 1 MiB output budget, read back as budget-plus-one so "over" is
+distinguishable from "exactly at"; over-budget output is refused rather than
+truncated and parsed. Input staging is chunked, and the child's output goes to a
+second temporary file rather than an unbounded pipe. **These are bounds, not a
+sandbox**: there is no rlimit, cgroup, CPU quota beyond the timeout, filesystem
+namespace, seccomp filter or user change, and the staged copy occupies disk equal
+to a file this build already stored.
+
+**Startup proves two things**, in `build_ffprobe_media_probe()`: that the
+configured `ffprobe` runs and reports a version, and that *that build* lists `fd`
+among the input protocols it can open. The second matters because a build without
+it would accept the command line and fail on the first capture. Failure is
+`MediaPrerequisiteError` — an adapter-layer type, deliberately not in `core`, and
+deliberately not a `MediaProbeExecutionError`: one says "do not start", the other
+says "one capture could not be probed". The version obtained is **discarded**, not
+carried onto content: ADR-021 fixed that a demuxer's identity is not part of what
+a container says.
+
+**One instance, shared, reentrant.** `FfprobeMediaProbe` holds two frozen values
+and nothing else — no per-run attribute, no global process state, no shared
+temporary name, no shared buffer, no lock. Every call owns its own subprocess and
+its own temporary files, which is what makes the single instance the composition
+root hands to *both* media processors correct rather than merely convenient.
+There is no lock where `unimem_ocr.tesseract` has one because there is no native
+library in this process — only a child the operating system already isolates.
+
+**`--media` is the whole deployment surface.** One boolean, no value, no knob for
+the executable, the timeout, the budget or the containers. Without it,
+`media_probe=None` reaches the unchanged `build_local_app`, intake refuses audio
+and video at the door, `unimem_media` is never imported and no subprocess runs.
+With it, the adapter is imported lazily, the gate runs *before* the data
+directory is created, and a missing prerequisite is a `SystemExit` rather than a
+server that starts and then 503s everything it just agreed to accept.
+`--media`, `--pdf-ocr` and `--image-ocr` are independent, and no request field can
+reach the decision.
+
+**`wiring.py` is unchanged**, and so is every byte of `src/core/`.
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
@@ -2606,6 +2735,14 @@ then serialized.
   `subprocess`, or the adapter package, and that importing the application loads
   no rasterizer even where the extra is installed. Tesseract and its `eng`/`rus`
   language data are **system** prerequisites this project never installs.
+- **No extra at all for media.** `src/unimem_media/` is standard library plus
+  `core` — a test walks the package to prove it imports no third-party name — so
+  there is nothing for a `[media]` extra to install and none exists. Its one
+  prerequisite is a **system** `ffprobe`, from the machine's FFmpeg package, which
+  this project never installs, downloads, or vendors. `ffmpeg` itself is a *test*
+  dependency used to build fixtures; nothing under `src/` invokes it. The same
+  test that forbids `core` importing `unimem_ocr` forbids it importing
+  `unimem_media`.
 - **mypy** in `strict` mode is the type checker (chosen over pyright because
   Pydantic ships a first-party mypy plugin, and one tool configured in
   `pyproject.toml` is enough for a package this size).
@@ -2665,7 +2802,7 @@ src/unimem_api/   the HTTP delivery adapter — outside core (Phase 1)
   models.py       the HTTP response DTOs (there is no request DTO)
   errors.py       the core-failure-to-status translation table
   wiring.py       build_local_app, the local composition root
-  __main__.py     python -m unimem_api, and the --pdf-ocr composition
+  __main__.py     python -m unimem_api, and the --pdf-ocr/--image-ocr/--media composition
   replay.py       completed-capture replay: text and staged media equivalence
 src/unimem_ocr/   the optional local recognizer — outside core (Phase 3, PR 3)
   __init__.py     build_tesseract_ocr, the startup gate and the only entry point
@@ -2673,6 +2810,14 @@ src/unimem_ocr/   the optional local recognizer — outside core (Phase 3, PR 3)
   prerequisites.py the engine and language probes, and what must be installed
   tesseract.py    TesseractPdfPageOcr: PDFium for pixels, Tesseract for words
   errors.py       OcrPrerequisiteError, raised only while composing an app
+  image.py        TesseractImageOcr: the submitted bytes, straight to the engine
+src/unimem_media/ the optional local media probe — outside core (Phase 5A, PR 3)
+  __init__.py     build_ffprobe_media_probe, the startup gate and only entry point
+  policy.py       the fixed structural query, the argv constants, MediaProbeLimits
+  prerequisites.py the version and input-protocol probes, and what must be installed
+  engine.py       one bounded ffprobe invocation: staging, argv, timeout, budget
+  ffprobe.py      FfprobeMediaProbe and the normalization into core's value types
+  errors.py       MediaPrerequisiteError, raised only while composing an app
 clients/browser-extension/   Chromium MV3 selection connector (Phase 1, PR 2)
   manifest.json     MV3 manifest: activeTab, scripting, loopback host only
   service-worker.js the extension origin: chrome wiring, and where fetch happens
@@ -2695,8 +2840,10 @@ tests/integration/persistence/
 tests/integration/intake/
 tests/unit/api/
 tests/unit/ocr/
+tests/unit/media/
 tests/integration/api/
 tests/integration/ocr/
+tests/integration/media/
 clients/browser-extension/tests/
 docs/
 ```
