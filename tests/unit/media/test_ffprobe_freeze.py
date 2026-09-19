@@ -233,6 +233,17 @@ class TestTheOutputBudgetIsFrozen:
     def test_it_is_one_mebibyte(self) -> None:
         assert DEFAULT_LIMITS.max_output_bytes == 1024 * 1024
 
+    def test_the_probe_reports_the_limits_it_will_run_under(self) -> None:
+        """Read-only, for diagnostics: nothing consults it to make a decision."""
+        tightened = MediaProbeLimits(timeout_seconds=1.0)
+        probe = FfprobeMediaProbe(limits=tightened)
+
+        assert probe.limits is tightened
+        assert probe.limits.timeout_seconds == 1.0
+
+    def test_a_default_probe_reports_the_default_limits(self) -> None:
+        assert FfprobeMediaProbe().limits is DEFAULT_LIMITS
+
     def test_the_copy_chunk_is_bounded_and_positive(self) -> None:
         assert 0 < DEFAULT_LIMITS.copy_chunk_size <= DEFAULT_LIMITS.max_output_bytes
 
