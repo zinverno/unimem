@@ -157,6 +157,25 @@ Phase 5 asks what it takes to ingest material that has a *duration*:
   by this build, exactly as a `video` one always has been. Schema support and
   deployment capability are separate things. See
   [ADR-021](docs/ADR/ADR-021-original-first-time-based-media-ingestion.md).
+- **Phase 5A, PR 2 — engine-independent media processing.** The policy that makes
+  the vocabulary run, and an opt-in capability that decides whether a deployment
+  has media at all. `AudioProcessor` (`audio@0.1`) and `VideoProcessor`
+  (`video@0.1`) read the immutable original through a `MediaProbe`, verify the
+  probed container against the declared MIME type — the declaration routes, the
+  observation verifies, and a disagreement is refused rather than corrected —
+  require at least one audio stream for audio and one video stream for video, and
+  produce a **complete content object with no segments**, the original as its one
+  asset, and structural metadata describing what the container declares.
+  `CaptureIntake` gains `media_enabled`, default `False`, and a build without the
+  capability refuses a media capture before touching storage or the clock. A
+  container mismatch or a missing required stream is a deterministic `422` with
+  the capture `failed`; a probe that produced no trusted structural result is a
+  fixed `503` with the capture left `processing`, because no verdict about the
+  media is possible. **Still no
+  engine**: there is no ffprobe adapter, no `--media` flag and no new dependency,
+  and the only way to turn media on is to hand `build_local_app` a probe
+  programmatically. `POST /v1/uploads` is untouched and still format-blind. See
+  [ADR-022](docs/ADR/ADR-022-engine-independent-media-processing.md).
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 

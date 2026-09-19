@@ -26,19 +26,28 @@ There is no settings framework, environment lookup, config file, profile, or DI
 container. The set of processors this application runs with is a list written
 here, exactly as :class:`~core.processing.ProcessorRouter` intends.
 
-**Two optional capabilities now reach this function, and both arrive as
-parameters.** Phase 3 PR 3 added local OCR for scanned PDF pages and Phase 4 PR 2
-adds it for staged images; a deployment turns either on by handing
-:func:`build_local_app` the corresponding port —
-:class:`~core.processing.ocr.PdfPageOcr` or
-:class:`~core.processing.image_recognition.ImageOcr`. They are independent: all
-four combinations are valid, and neither enables, requires, or configures the
-other.
+**Three optional capabilities now reach this function, and all arrive as
+parameters.** Phase 3 PR 3 added local OCR for scanned PDF pages, Phase 4 PR 2
+added it for staged images, and Phase 5A-2 adds media structure probing; a
+deployment turns any on by handing :func:`build_local_app` the corresponding
+port — :class:`~core.processing.ocr.PdfPageOcr`,
+:class:`~core.processing.image_recognition.ImageOcr`, or
+:class:`~core.processing.media_probe.MediaProbe`. They are independent: every
+combination is valid, and none enables, requires, or configures another.
+
+``media_probe`` differs from the other two in one way worth naming. Those choose
+*which* processor handles a capture this build already accepts; this one decides
+whether a whole modality is accepted at all. So it reaches two places rather than
+one — intake's ``media_enabled`` and the router's processor list — and both are
+derived from the single argument, because a build that accepted audio at the door
+and had no processor behind it would strand every such capture.
 
 What arrives is the *port*, already constructed: the concrete adapters are built
 one layer out, in :mod:`unimem_api.__main__`, so this module still imports no
-native library, no imaging package, and no ``subprocess``, and a default
-deployment with none of them installed still loads it. That keeps the optional
+native library, no imaging package, no media framework, no codec binding, and no
+``subprocess``, and a default deployment with none of them installed still loads
+it. There is no concrete media adapter to build yet — Phase 5A-2 ships the policy
+and the seam, and the only way to exercise media here is to pass a probe in. That keeps the optional
 dependencies genuinely optional rather than optional-until-something-imports-it,
 and it keeps this function what it has always been: a list of constructor calls
 with nothing to look anything up in. No container, no registry, no module-level
@@ -62,6 +71,7 @@ from fastapi import FastAPI
 from core.intake import CaptureIntake
 from core.persistence import SqliteCaptureRecordStore, SqliteContentObjectStore
 from core.processing import (
+    AudioProcessor,
     DocxProcessor,
     ImageOcrProcessor,
     ImageProcessor,
@@ -71,9 +81,11 @@ from core.processing import (
     Processor,
     ProcessorRouter,
     TextProcessor,
+    VideoProcessor,
     WebpageProcessor,
 )
 from core.processing.image_recognition import ImageOcr
+from core.processing.media_probe import MediaProbe
 from core.processing.ocr import PdfPageOcr
 from core.storage import LocalRawObjectStore
 from unimem_api.app import create_app
@@ -121,11 +133,44 @@ def _image_processor(raw_store: LocalRawObjectStore, image_ocr: ImageOcr | None)
     return ImageOcrProcessor(raw_store, image_ocr)
 
 
+def _media_processors(
+    raw_store: LocalRawObjectStore, media_probe: MediaProbe | None
+) -> tuple[Processor, ...]:
+    """Both media processors, or neither. Never one.
+
+    Unlike :func:`_pdf_processor` and :func:`_image_processor`, this is not a
+    choice between two implementations of one claim — ``AudioProcessor`` and
+    ``VideoProcessor`` claim disjoint payload types and never compete. It is a
+    choice about whether the capability exists at all, so the return is a tuple
+    that is either empty or holds both.
+
+    **The pairing is deliberate and load-bearing.** Registering one without the
+    other would leave the matching intake acceptance with no processor behind it,
+    and every capture of that modality would strand mid-lifecycle at a router that
+    has nothing for it. The caller derives intake's ``media_enabled`` from the
+    same ``media_probe`` argument, so acceptance and processing cannot disagree.
+
+    One :class:`~core.processing.media_probe.MediaProbe` instance serves both.
+    The port is a single synchronous method over a stream and holds nothing on
+    the caller's behalf, so two processors sharing one is the ordinary case
+    rather than a shortcut.
+
+    The probe arrives already constructed, exactly as the two recognizers do.
+    Nothing here builds an engine, and this module still imports no media
+    framework, no codec binding, no ``subprocess`` and no concrete adapter — which
+    is what lets a default deployment with no media tooling installed import it.
+    """
+    if media_probe is None:
+        return ()
+    return (AudioProcessor(raw_store, media_probe), VideoProcessor(raw_store, media_probe))
+
+
 def build_local_app(
     data_dir: Path,
     *,
     pdf_ocr: PdfPageOcr | None = None,
     image_ocr: ImageOcr | None = None,
+    media_probe: MediaProbe | None = None,
 ) -> FastAPI:
     """Wire the real stack against ``data_dir`` and return the API over it.
 
@@ -142,6 +187,8 @@ def build_local_app(
         DocxProcessor              stored docx document -> canonical content
         ImageProcessor             stored png/jpeg image -> canonical content
           or ImageOcrProcessor       ...recognizing any text in the pixels
+        AudioProcessor             stored audio -> canonical content   (media only)
+        VideoProcessor             stored video -> canonical content   (media only)
         ProcessorRouter            exactly one processor per capture
         ProcessingOrchestrator     stored -> complete, or a truthful failure
 
@@ -167,17 +214,26 @@ def build_local_app(
     Order here is not precedence, there is no fallback processor, and an overlap
     would be an error rather than an accident of ordering.
 
-    **The two capabilities are independent, and the code says so by having two
-    parameters and two helpers rather than one flag consulted twice.** All four
-    combinations are valid deployments: neither, PDF OCR only, image OCR only, and
-    both. ``pdf_ocr`` never reaches an image processor and ``image_ocr`` never
-    reaches a PDF one, so enabling either cannot change what the other does, and
-    their prerequisites differ — PDF recognition needs a rasterizer and an imaging
-    library, image recognition needs neither.
+    **The capabilities are independent, and the code says so by having three
+    parameters and three helpers rather than one flag consulted repeatedly.**
+    Every combination is a valid deployment. ``pdf_ocr`` never reaches an image
+    processor, ``image_ocr`` never reaches a PDF one, and ``media_probe`` reaches
+    neither, so enabling any cannot change what the others do, and their
+    prerequisites differ.
 
-    Both are keyword-only ports defaulting to ``None``, which together are the
-    default deployment: identical registrations, identical behaviour, and no OCR
-    dependency imported, probed, or executed anywhere.
+    **``media_probe`` is the one that changes what intake accepts**, and that is
+    the whole reason it is a single argument feeding two places. With it absent,
+    ``CaptureIntake`` is built with ``media_enabled=False`` and no media processor
+    is registered — which is today's deployment, byte for byte. With it present,
+    intake accepts ``AUDIO`` and ``VIDEO`` and *both* processors are registered
+    together. There is deliberately no way to express the two broken states: media
+    accepted with nothing to process it, or media processors registered behind an
+    intake that refuses every such capture.
+
+    All three are keyword-only ports defaulting to ``None``, which together are
+    the default deployment: identical registrations, identical behaviour, no OCR
+    or media dependency imported, probed, or executed anywhere, and audio and
+    video captures refused at the door exactly as they always have been.
 
     Two apps built against one directory are interchangeable: neither store keeps
     a connection, a cache, or in-process state between calls, which is what makes
@@ -194,7 +250,10 @@ def build_local_app(
     record_store = SqliteCaptureRecordStore(database)
     content_store = SqliteContentObjectStore(database)
 
-    intake = CaptureIntake(raw_store, record_store)
+    # One boolean, one source. Intake accepting media and the router holding
+    # media processors are two halves of one capability, and deriving both from
+    # the same ``media_probe is None`` test is what stops them drifting apart.
+    intake = CaptureIntake(raw_store, record_store, media_enabled=media_probe is not None)
     router = ProcessorRouter(
         [
             TextProcessor(raw_store),
@@ -202,6 +261,7 @@ def build_local_app(
             _pdf_processor(raw_store, pdf_ocr),
             DocxProcessor(raw_store),
             _image_processor(raw_store, image_ocr),
+            *_media_processors(raw_store, media_probe),
         ]
     )
     orchestrator = ProcessingOrchestrator(router, record_store, content_store)

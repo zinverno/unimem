@@ -560,16 +560,31 @@ audio bytes
   -> ...and there it stops.          no intake branch, no processor, no engine
 ```
 
-The rest of Phase 5A is **not implemented** here, and two different things are
-meant by that. ADR-021 fixes the *shapes* the later slices must satisfy — the
-port, the MIME and container allowlists, the structural requirements, and the
-durable metadata — so intake materialization, that metadata and the `503`
-mapping are settled there and simply not built yet. Concrete local `ffprobe`
+**Phase 5A, PR 2 — engine-independent media processing.** Answers "what turns a
+probe result into canonical content, and who decides whether a deployment has
+media at all?" `AudioProcessor` and `VideoProcessor` in
+`src/core/processing/media.py`, an opt-in `media_enabled` gate on
+`CaptureIntake`, one `media_probe` parameter on the composition root, and a fixed
+`503` for a probe that could not answer. **Still no engine, no `--media` flag, no
+route change, no new `core` runtime dependency and no new Python dependency.** See
+*Engine-independent media processing (Phase 5A)*, below, and
+[ADR-022](ADR/ADR-022-engine-independent-media-processing.md).
+
+```
+staged audio/video  (a deployment handed a MediaProbe)
+  -> CaptureIntake                 media_enabled, file_ref-backed, no second write
+  -> Audio/VideoProcessor          declared MIME routes
+  -> MediaProbe.probe()            once, then validated
+  -> container + stream policy     observation verifies; no sniff-and-rewrite
+  -> ContentObject                 segments = [], one ORIGINAL asset, 0.3
+  -> COMPLETE
+```
+
+The rest of Phase 5A is **not implemented** here. Concrete local `ffprobe`
 execution, and the security, startup, deployment and resource mechanics around
-running an external engine, are a different matter: they are the subject of the
-later slices that implement them and are recorded with that implementation and
-its own ADR, not with ADR-021. Owner manual acceptance belongs to 5A-4. Phase
-5B, transcription, is not designed.
+running an external engine, are the subject of the later slices that implement
+them and are recorded with that implementation and its own ADR. Owner manual
+acceptance belongs to 5A-4. Phase 5B, transcription, is not designed.
 
 ## Future data flow
 
@@ -2309,6 +2324,116 @@ version (`0.2.0`) is an unrelated number and did not move. This is the cost
 ADR-002 named — "adding a version means touching every producer; that is the
 point, but it is friction" — being paid a second time.
 
+## Engine-independent media processing (Phase 5A)
+
+Phase 5A PR 1 gave `core` the vocabulary and the seam. PR 2 supplies the policy
+that uses them, and the capability that decides whether a deployment has media at
+all. The whole decision is
+[ADR-022](ADR/ADR-022-engine-independent-media-processing.md); what follows is
+the shape.
+
+**Two processors, because they require different things.**
+
+```
+AudioProcessor   audio@0.1   AUDIO + audio/mpeg | audio/wav | audio/ogg
+VideoProcessor   video@0.1   VIDEO + video/mp4  | video/webm
+```
+
+`AUDIO` needs at least one audio stream — a file declaring itself audio with none
+is not a recording of anything. `VIDEO` needs at least one video stream and
+**audio is optional**, because a silent clip is ordinary video — a video that
+does carry one or several audio streams is equally valid, and its audio is
+described rather than refused. Extra streams of the other kind are described
+rather than refused either way, several of either kind are valid, and **no
+primary stream is selected**. Both take exactly two ports,
+`RawObjectStore` and `MediaProbe`, and `supports()` stays pure — probing to route
+would mean reading storage to answer a routing question.
+
+**The declaration routes; the observation verifies.**
+
+| declared | required alias | canonical family |
+|---|---|---|
+| `audio/mpeg` | `mp3` | `mp3` |
+| `audio/wav` | `wav` | `wav` |
+| `audio/ogg` | `ogg` | `ogg` |
+| `video/mp4` | `mp4` | `mp4` |
+| `video/webm` | `webm` | `webm` |
+
+Only the required alias is checked, because a probe legitimately reports a family
+— an ISO base media file is `mov`, `mp4`, `m4a`, `3gp`, `3g2` and `mj2` at once.
+**There is no sniff-and-rewrite**: a disagreement is refused, never corrected,
+which only works because the two facts are observed independently. That is why
+ADR-021 kept the declared type out of `probe()`.
+
+A mismatch and a missing required stream both raise `ProcessingInputError` with a
+**fixed generic sentence** that names nothing the probe saw — no observed alias,
+no declared type, no `file_ref`, no digest. A message that varied with the
+observation would be a read oracle over staged bytes.
+
+**A successful media capture is `COMPLETE` with `segments = []`**, the immutable
+original as its one asset at `AssetRole.ORIGINAL`, and structural metadata. No
+transcript, no placeholder segment, no extracted track, no keyframe, no
+thumbnail: **streams are metadata, not assets**. The title is the submitted one
+or nothing — no embedded tag is read. A new content object carries schema `0.3`
+whatever the capture carries, so a historical `0.1` or `0.2` `VIDEO` record keeps
+its own version while the content this run writes is a new `0.3` document.
+
+The durable metadata is exactly the shape ADR-021 fixed, with `media.container`,
+both counts and both stream lists always present — an empty list is an observed
+absence — and every optional fact **omitted** rather than filled with `null`, `0`
+or `"unknown"`. The counts are `len(result.audio_streams)` and
+`len(result.video_streams)` and are computed by no other means.
+
+**The intake capability gate is one boolean.**
+
+```python
+CaptureIntake(..., media_enabled: bool = False)
+```
+
+Default `False`, which is the accurate default rather than a cautious one: a
+build that was not handed a probe cannot honour a media capture. **Capability
+refusal has priority over every media-specific check** — before the MIME type is
+inspected, before the `file_ref` is parsed, before the store is asked anything,
+before the clock is read — and holds even when the reference names nothing or the
+format would be unsupported anyway. A refusal that varied with what happens to be
+staged would let a client probe durable storage through the shape of an error.
+
+With the capability on, media is the staged-original path documents and images
+already use, with no second write, and intake still opens nothing, sniffs
+nothing and probes nothing.
+
+**Wiring derives both halves from one argument.** `media_probe is None` decides
+`media_enabled` *and* whether both processors are registered — both or neither,
+never one. The two broken states are unreachable by construction: media accepted
+with nothing to process it, or processors behind an intake that refuses every
+such capture. The probe arrives already constructed; nothing here builds an
+engine, and there is no engine in this repository to build.
+
+**Two failures, and keeping them apart is the point.**
+
+| failure | meaning | HTTP | capture |
+|---|---|---|---|
+| `ProcessingInputError` | a verdict about the bytes | 422 `processing_failed` | `FAILED` |
+| `MediaProbeExecutionError` | no trusted structural result | 503 `media_probe_unavailable` | stays `PROCESSING` |
+
+Neither persists content. The 503 row claims only that *no trusted structural
+result was produced*, so no verdict about the media is possible: it does not
+claim the bytes went unexamined, that the failure is transient, or that a retry
+would succeed. Collapsing the rows would either record a verdict this build has
+no evidence for, or hide a real refusal behind an unavailability answer.
+
+**Completed replay extends to media, at schema `0.3` only.** Intake records every
+capture at the current version and nothing durably retains the version a request
+arrived with, so a legacy `0.1`/`0.2` `VIDEO` resubmission cannot be proven
+equivalent. It keeps the conflict it always had, and **no `ingress_schema_version`
+is added to persistence**. Equivalence is proven from durable facts alone —
+including the `file_ref`'s digest against the stored `RawObjectRef` — so the path
+stays read-only and **never re-probes**. `TEXT` replay is unchanged, and
+`DOCUMENT` and `IMAGE` remain non-replayable.
+
+**`POST /v1/uploads` is untouched** and still format-blind: staging media bytes is
+valid whatever the capability, and only the later capture is refused.
+
 ## Architectural invariants
 
 1. `ContentObject` is the canonical normalized representation.
@@ -2519,6 +2644,7 @@ src/core/processing/
   image_ocr.py    ImageOcrProcessor, the opt-in direct-image recognition policy
   image_recognition.py  the ImageOcr port, its value types, and its two failures
   media_probe.py  the MediaProbe port, its normalized value types, its validator
+  media.py        AudioProcessor, VideoProcessor, and the media container policy
   service.py      ProcessingOrchestrator, the stored-to-complete lifecycle
   errors.py       typed processing, routing and lifecycle errors
 src/core/rendering/
@@ -2540,6 +2666,7 @@ src/unimem_api/   the HTTP delivery adapter — outside core (Phase 1)
   errors.py       the core-failure-to-status translation table
   wiring.py       build_local_app, the local composition root
   __main__.py     python -m unimem_api, and the --pdf-ocr composition
+  replay.py       completed-capture replay: text and staged media equivalence
 src/unimem_ocr/   the optional local recognizer — outside core (Phase 3, PR 3)
   __init__.py     build_tesseract_ocr, the startup gate and the only entry point
   policy.py       the fixed recognition policy and OcrLimits

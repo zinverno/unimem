@@ -14,10 +14,12 @@ valid, and a build that stopped reading it would be breaking the compatibility
 promise ADR-002 makes, in order to tidy up a modality it is not even about.
 
 **Schema support is not deployment capability.** Everything below says the
-contracts have the words. Nothing below says this build can ingest audio — it
-cannot, there is no processor and no intake branch, and
-``test_no_deployment_can_ingest_audio_yet`` is the assertion that keeps those
-two facts from being confused.
+contracts have the words. Nothing below says a deployment can ingest audio.
+Phase 5A-2 added the processors and an opt-in intake gate, so a build *handed a*
+:class:`~core.processing.media_probe.MediaProbe` now can — and the default build
+still cannot, refusing every media capture at the door. The two facts stay
+separate, and ``test_the_modality_has_processors_but_no_engine`` is what keeps
+them from being confused.
 """
 
 from datetime import UTC, datetime
@@ -288,16 +290,27 @@ class TestAudioAndVideoAreDistinct:
         assert "AUDIO" in ContentType.__members__
 
 
-def test_no_processor_claims_the_new_modality() -> None:
-    """Contract vocabulary, and nothing else, is what this slice delivered.
+def test_the_modality_has_processors_but_no_engine() -> None:
+    """What Phase 5A-2 changed here, and what it deliberately did not.
 
-    That a schema-valid audio *envelope* is still refused by intake is asserted
-    where intake's refusals live, in ``tests/unit/intake/test_failures.py``,
-    which lists ``AUDIO`` alongside ``VIDEO``, ``FILE`` and ``URL``. What is
-    checked here is the other half: nothing normalizes one either.
+    Phase 5A-1 asserted that *nothing* normalized audio or video: the contracts
+    had the vocabulary and the system had no use for it. Phase 5A-2 supplies the
+    policy, so ``AudioProcessor`` and ``VideoProcessor`` now exist — and the half
+    that has not moved is the one still worth pinning. There is no engine, no
+    concrete adapter, and no ``unimem_media`` package; a deployment reaches media
+    only by being handed a
+    :class:`~core.processing.media_probe.MediaProbe` explicitly, and the default
+    one still refuses every media capture at intake.
+
+    That intake refusal is asserted where intake's refusals live, in
+    ``tests/unit/intake/test_failures.py``.
     """
+    import importlib.util
+
     import core.processing as processing
 
-    assert not hasattr(processing, "AudioProcessor")
-    assert not hasattr(processing, "VideoProcessor")
+    assert hasattr(processing, "AudioProcessor")
+    assert hasattr(processing, "VideoProcessor")
+
     assert not hasattr(processing, "FfprobeMediaProbe")
+    assert importlib.util.find_spec("unimem_media") is None

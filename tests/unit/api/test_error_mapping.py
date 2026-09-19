@@ -34,6 +34,7 @@ from core.processing import (
     AmbiguousProcessorError,
     ImageOcrExecutionError,
     InvalidCaptureProcessingStateError,
+    MediaProbeExecutionError,
     NoProcessorError,
     PdfOcrExecutionError,
     ProcessingError,
@@ -116,6 +117,14 @@ MAPPED_ERRORS: list[Exception] = [
     # probe, same rule — the engine and the local path in this message stay out of
     # the response.
     ImageOcrExecutionError(f"the OCR engine at {BACKEND_DETAIL} exited with status 1"),
+    # The media counterpart. Its message is written to carry everything a probe
+    # failure plausibly would — a local path, an engine, and the container the
+    # adapter claims it saw — because none of it may reach the wire, and the probe
+    # below is what proves the fixed public sentence is all a client gets.
+    MediaProbeExecutionError(
+        f"the media probe at {BACKEND_DETAIL} reported container 'matroska,webm' "
+        f"and exited with status 1"
+    ),
     # The one row this package raises itself. It goes through the same probe as
     # every core failure, because the rule it has to obey is the same one.
     CaptureReplayIntegrityError(f"complete but no content, per {BACKEND_DETAIL}"),

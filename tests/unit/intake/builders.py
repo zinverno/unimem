@@ -165,6 +165,50 @@ def make_image_envelope(**overrides: Any) -> CaptureEnvelope:
     return make_envelope(**(fields | overrides))
 
 
+AUDIO_MIME = "audio/mpeg"
+VIDEO_MIME = "video/mp4"
+
+
+def make_audio_payload(**overrides: Any) -> CapturePayload:
+    """The one audio shape this build ingests: a staged MP3 file_ref."""
+    fields: dict[str, Any] = {
+        "type": CapturePayloadType.AUDIO,
+        "mime_type": AUDIO_MIME,
+        "file_ref": STAGED_FILE_REF,
+        "title": "A recording",
+    }
+    return CapturePayload(**(fields | overrides))
+
+
+def make_audio_envelope(**overrides: Any) -> CaptureEnvelope:
+    """A valid staged-MP3 audio envelope, with optional field overrides."""
+    fields: dict[str, Any] = {
+        "id": "cap_intake_audio_01",
+        "payload": make_audio_payload(),
+    }
+    return make_envelope(**(fields | overrides))
+
+
+def make_video_payload(**overrides: Any) -> CapturePayload:
+    """The one video shape this build ingests: a staged MP4 file_ref."""
+    fields: dict[str, Any] = {
+        "type": CapturePayloadType.VIDEO,
+        "mime_type": VIDEO_MIME,
+        "file_ref": STAGED_FILE_REF,
+        "title": "A clip",
+    }
+    return CapturePayload(**(fields | overrides))
+
+
+def make_video_envelope(**overrides: Any) -> CaptureEnvelope:
+    """A valid staged-MP4 video envelope, with optional field overrides."""
+    fields: dict[str, Any] = {
+        "id": "cap_intake_video_01",
+        "payload": make_video_payload(),
+    }
+    return make_envelope(**(fields | overrides))
+
+
 def make_unsupported_envelope(
     payload_type: CapturePayloadType, **overrides: Any
 ) -> CaptureEnvelope:

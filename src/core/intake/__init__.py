@@ -68,19 +68,23 @@ from core.intake.errors import (
     UnsupportedCapturePayloadError,
 )
 from core.intake.service import (
+    AUDIO_MIME_TYPES,
     DOCUMENT_MIME_TYPES,
     IMAGE_MIME_TYPES,
     MATERIAL_PAYLOAD_FIELDS,
     TEXT_ENCODING,
+    VIDEO_MIME_TYPES,
     CaptureIntake,
     utc_now,
 )
 
 __all__ = [
+    "AUDIO_MIME_TYPES",
     "DOCUMENT_MIME_TYPES",
     "IMAGE_MIME_TYPES",
     "MATERIAL_PAYLOAD_FIELDS",
     "TEXT_ENCODING",
+    "VIDEO_MIME_TYPES",
     "CaptureIntake",
     "CaptureIntakeError",
     "CaptureMaterialUnavailableError",
