@@ -28,7 +28,7 @@ invents — none of them appear below, so none is quietly given a friendly statu
 code. They fall through to the ASGI server's ordinary 500, which is what an
 unhandled bug should look like. ``BaseException`` is never caught.
 
-Two rows are not ``ProcessingError``s and must never be mistaken for ones.
+Three rows are not ``ProcessingError``s and must never be mistaken for ones.
 :class:`~core.processing.ocr.PdfOcrExecutionError` says a recognition *run*
 failed — the engine was missing, crashed, timed out, or answered inconsistently —
 so nothing is known about the document and the capture is deliberately left
@@ -49,6 +49,23 @@ which is exactly the claim neither failure can support. Both sit outside the
 into the 422 row by accident, and they are separate types with separate rows
 because the public sentence a client reads should name what was actually being
 processed.
+
+Phase 5A-2 adds the third.
+:class:`~core.processing.media_probe.MediaProbeExecutionError` says a structural
+*probe* produced **no trusted structural result** for audio or video, so UniMem
+cannot reach a verdict about the submitted media. It is the same shape of claim
+as the other two and the same 503, and it is careful about what it does not
+assert: not that the bytes went unexamined — the failure may arrive before any
+byte is read, after some, or after all of them — not that the cause is transient,
+and not that a retry of the identical bytes would succeed.
+
+The distinction it carries is the sharpest of the set. A container that
+contradicts its declared type, or one lacking the stream its type requires, is a
+*trusted* structural observation and therefore a deterministic verdict about the
+submitted bytes: it arrives as a ``ProcessingInputError``, a 422, with the
+capture durably ``failed``. Only the absence of a trustworthy result is this row.
+Collapsing the two would either record a verdict this build has no evidence for,
+or hide a real refusal behind an unavailability answer.
 
 One core error is deliberately **absent** from this table and must stay absent.
 :class:`~core.processing.image_recognition.ImageOcrLimitExceeded` never reaches
@@ -93,6 +110,7 @@ from core.processing import (
     AmbiguousProcessorError,
     ImageOcrExecutionError,
     InvalidCaptureProcessingStateError,
+    MediaProbeExecutionError,
     NoProcessorError,
     PdfOcrExecutionError,
     ProcessingInputError,
@@ -187,6 +205,36 @@ _IMAGE_OCR_UNAVAILABLE: Final = HttpError(
     "the capture is stored and no content was produced",
 )
 
+#: The media counterpart, and a third row rather than a shared one, for the same
+#: reason the image row is separate from the document one: its public text names
+#: media because that is what the client submitted.
+#:
+#: The 503-not-422 reasoning is at its clearest here. This build cannot probe a
+#: container without an engine, so a failure may mean the engine is missing, or
+#: crashed, or timed out, or answered inconsistently with its own contract. What
+#: those share is not that the bytes went unexamined — some of them happen after
+#: the file has been read in full — but that **no structural result this build
+#: can trust came back**, leaving no basis for a verdict about the media.
+#: Answering 422 would state a conclusion the server does not have.
+#:
+#: It is deliberately *not* the answer for a container that contradicts its
+#: declaration or lacks the stream its type requires. Those are deterministic
+#: verdicts about the bytes, they arrive as ``ProcessingInputError``, and they
+#: are a 422 with the capture durably ``failed``. Keeping the two rows apart is
+#: what keeps "no result this build can trust" distinguishable from "a trusted
+#: result, and it does not meet the policy".
+#:
+#: The text names nothing about this machine: no engine, no version, no exit
+#: status, no container alias the probe observed, no stream detail, no subprocess
+#: output, no temporary file and no local path — all of which the underlying
+#: error's own message may carry for a server log.
+_MEDIA_PROBE_UNAVAILABLE: Final = HttpError(
+    503,
+    "media_probe_unavailable",
+    "media structure probing could not be completed; "
+    "the capture is stored and no content was produced",
+)
+
 #: Which core error becomes which HTTP response.
 #:
 #: Registration is by concrete type, and Starlette resolves a raised exception by
@@ -228,6 +276,7 @@ ERROR_MAPPINGS: Final[tuple[tuple[type[Exception], HttpError], ...]] = (
     (RawObjectStoreError, _STORAGE_UNAVAILABLE),
     (PdfOcrExecutionError, _OCR_UNAVAILABLE),
     (ImageOcrExecutionError, _IMAGE_OCR_UNAVAILABLE),
+    (MediaProbeExecutionError, _MEDIA_PROBE_UNAVAILABLE),
 )
 
 #: The code for a body FastAPI/Pydantic rejected before any core code ran.

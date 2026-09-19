@@ -11,10 +11,12 @@ spans a record store, a router, and a processor: routing before any state is
 written, the ``processing`` record durable before the processor runs, and
 ``complete`` durable before the caller is handed anything.
 
-``FakePdfPageOcr`` and ``FakeImageOcr`` are the last of them and the same idea one
-layer down: the two recognition ports exist so that the canonical policies can be
-tested with no rasterizer, no imaging library, no engine, and no subprocess
-anywhere in the process.
+``FakePdfPageOcr``, ``FakeImageOcr`` and ``FakeMediaProbe`` are the same idea one
+layer down: the three engine ports exist so that the canonical policies can be
+tested with no rasterizer, no imaging library, no media framework, no codec
+binding, no engine, and no subprocess anywhere in the process. ``FakeMediaProbe``
+is the starkest case — there is no real media adapter in this repository at all,
+so it is the *only* way the media policy runs.
 """
 
 import hashlib
@@ -34,6 +36,11 @@ from core.persistence import (
     ContentObjectNotFoundError,
 )
 from core.processing.image_recognition import ImageOcrResult
+from core.processing.media_probe import (
+    AudioStreamInfo,
+    MediaProbeResult,
+    VideoStreamInfo,
+)
 from core.processing.ocr import PdfOcrResult, RecognizedPage
 from core.storage import RawObjectNotFoundError, build_raw_ref
 from core.storage.raw import ReadableBinaryStream
@@ -503,3 +510,91 @@ class FakeImageOcr:
     def received_bytes(self) -> bytes:
         """The bytes the one call read out of the stream it was given."""
         return self._only_call()[3]
+
+
+def audio_stream(
+    index: int = 0,
+    *,
+    codec: str | None = "mp3",
+    sample_rate: int | None = 44100,
+    channels: int | None = 2,
+) -> AudioStreamInfo:
+    """One normalized audio stream, fully populated unless a test says otherwise."""
+    return AudioStreamInfo(index=index, codec=codec, sample_rate=sample_rate, channels=channels)
+
+
+def video_stream(
+    index: int = 1,
+    *,
+    codec: str | None = "h264",
+    width: int | None = 1920,
+    height: int | None = 1080,
+    frame_rate: str | None = "30000/1001",
+) -> VideoStreamInfo:
+    """One normalized video stream, fully populated unless a test says otherwise."""
+    return VideoStreamInfo(
+        index=index, codec=codec, width=width, height=height, frame_rate=frame_rate
+    )
+
+
+def probe_result(
+    *,
+    container_names: tuple[str, ...] = ("mp3",),
+    duration_seconds: float | None = 12.5,
+    audio_streams: tuple[AudioStreamInfo, ...] = (),
+    video_streams: tuple[VideoStreamInfo, ...] = (),
+) -> MediaProbeResult:
+    """A normalized probe result a test can vary one field of at a time."""
+    return MediaProbeResult(
+        container_names=container_names,
+        duration_seconds=duration_seconds,
+        audio_streams=audio_streams,
+        video_streams=video_streams,
+    )
+
+
+class FakeMediaProbe:
+    """A ``MediaProbe`` that answers from a script and records what it was asked.
+
+    It imports no media framework, no codec binding and no ``subprocess``, and
+    starts nothing — which is the whole point: this repository contains no real
+    media adapter, so the canonical policy in :mod:`core.processing.media` is
+    tested entirely through this.
+
+    It *does* read the stream it is handed, and keeps the bytes, so a test can
+    prove the processor actually opened the immutable original rather than
+    probing something it had lying around.
+
+    Three answering modes, and only one is used per instance. ``result`` returns
+    a prepared :class:`~core.processing.media_probe.MediaProbeResult`; ``raises``
+    fails instead of answering; and ``returns`` hands back whatever it was given.
+
+    ``returns`` exists to be *wrong*. The port's annotation binds a type checker
+    and nothing at run time, so an adapter really can return ``None``, a ``dict``,
+    or a result whose container names are unsorted, and
+    :func:`~core.processing.media_probe.validate_media_probe_result` is what the
+    processor relies on to catch it. Typed ``object`` so a test can express that
+    without a cast at every call site.
+    """
+
+    def __init__(
+        self,
+        *,
+        result: MediaProbeResult | None = None,
+        raises: Exception | None = None,
+        returns: object = None,
+    ) -> None:
+        self._result = result
+        self._raises = raises
+        self._returns = returns
+        #: The bytes handed to each call. Its length is the call count, which is
+        #: how a test proves the original is probed exactly once.
+        self.calls: list[bytes] = []
+
+    def probe(self, stream: BinaryIO) -> MediaProbeResult:
+        self.calls.append(stream.read())
+        if self._raises is not None:
+            raise self._raises
+        if self._result is not None:
+            return self._result
+        return cast(MediaProbeResult, self._returns)

@@ -69,21 +69,48 @@ refused without refusing the capture. ``core`` still imports no imaging library,
 no decoder, and no ``subprocess``. See
 `ADR-020 <../../docs/ADR/ADR-020-opt-in-local-image-ocr.md>`_.
 
-Phase 5A PR 1 adds **no processor at all** — the first slice in this package
-that does not. :mod:`core.processing.media_probe` is the typed seam a future
-audio or video processor will read container structure through: one method
-taking one binary stream, a normalized frozen result, and a validator that
-turns an inconsistent adapter answer into
+Phase 5A PR 1 added **no processor at all** — the first slice in this package
+that did not. :mod:`core.processing.media_probe` is the typed seam a media
+processor reads container structure through: one method taking one binary
+stream, a normalized frozen result, and a validator that turns an inconsistent
+adapter answer into
 :class:`~core.processing.media_probe.MediaProbeExecutionError` rather than into
-a verdict about the submitted media. Nothing registers it, nothing calls it, and
-no deployment can ingest an ``AUDIO`` or ``VIDEO`` capture as a result: the
-contracts learned the vocabulary at schema 0.3, and the runtime capability is a
-separate, later decision. ``core`` still imports no media framework, no codec
-library and no ``subprocess``, and this slice adds no ``tempfile`` use to this
-package or to the media boundary — the one ``tempfile`` in ``core`` is
-:mod:`core.storage.local`'s Phase 0B raw staging, which is untouched. No media
-adapter and no temporary-file machinery exists here at all. See `ADR-021
+a verdict about the submitted media. At that point nothing registered it,
+nothing called it, and no deployment could ingest an ``AUDIO`` or ``VIDEO``
+capture: the contracts had learned the vocabulary at schema 0.3, and the runtime
+capability was deliberately a separate, later decision. See `ADR-021
 <../../docs/ADR/ADR-021-original-first-time-based-media-ingestion.md>`_.
+
+Phase 5A PR 2 makes that decision and adds the eighth and ninth processors,
+:class:`AudioProcessor` (``audio@0.1``) and :class:`VideoProcessor`
+(``video@0.1``). They read the immutable original through the port exactly once,
+validate the answer before believing it, verify the probed container against the
+declared MIME type — the declaration routes and the observation verifies, so a
+disagreement is refused rather than corrected — and require at least one audio
+stream for ``AUDIO`` and at least one video stream for ``VIDEO``, with audio on a
+video capture optional either way. What they produce is a ``COMPLETE`` content
+object with the immutable original as its one asset, structural metadata
+describing what the container declares, and **no segments at all**: nothing has
+listened or watched, and Phase 5B owns transcription.
+
+**Whether a deployment has media at all is now an explicit choice**, and the
+first one this package has had. A deployment handed a
+:class:`~core.processing.media_probe.MediaProbe` registers **both** processors
+and accepts media at intake; a deployment without one registers **neither**, and
+:class:`~core.intake.CaptureIntake` refuses every ``AUDIO`` and ``VIDEO`` capture
+at the door with ``media_enabled`` defaulting to ``False``. Both halves come from
+the same argument in the composition root, so acceptance and processing cannot
+drift apart. That default deployment is the one that exists today.
+
+**There is still no engine here.** No concrete media adapter, no ``ffprobe``
+integration, no ``unimem_media`` package and no ``--media`` flag: the only way to
+turn media on is to pass a probe to
+:func:`~unimem_api.wiring.build_local_app` programmatically, and Phase 5A-3 owns
+the local deployment work that changes that. ``core`` still imports no media
+framework, no codec library and no ``subprocess``, and Phase 5A-2 adds no
+``tempfile`` use to this package or to the media path — the one ``tempfile`` in
+``core`` is :mod:`core.storage.local`'s Phase 0B raw staging, which is untouched.
+See `ADR-022 <../../docs/ADR/ADR-022-engine-independent-media-processing.md>`_.
 
 Phase 0H adds the step that calls them in order.
 :class:`ProcessingOrchestrator` takes a capture id, loads the authoritative
@@ -164,6 +191,27 @@ from core.processing.image_recognition import (
     validate_image_ocr_limit,
     validate_image_ocr_result,
 )
+from core.processing.media import (
+    AUDIO_MIME_TYPES,
+    AUDIO_STREAM_COUNT_KEY,
+    AUDIO_STREAMS_KEY,
+    CHANNELS_KEY,
+    CODEC_KEY,
+    CONTAINER_KEY,
+    DURATION_SECONDS_KEY,
+    FRAME_RATE_KEY,
+    HEIGHT_KEY,
+    INDEX_KEY,
+    MEDIA_CONTAINERS,
+    MEDIA_METADATA_KEY,
+    SAMPLE_RATE_KEY,
+    VIDEO_MIME_TYPES,
+    VIDEO_STREAM_COUNT_KEY,
+    VIDEO_STREAMS_KEY,
+    WIDTH_KEY,
+    AudioProcessor,
+    VideoProcessor,
+)
 from core.processing.media_probe import (
     AudioStreamInfo,
     MediaProbe,
@@ -202,12 +250,19 @@ from core.processing.webpage import (
 )
 
 __all__ = [
+    "AUDIO_MIME_TYPES",
+    "AUDIO_STREAMS_KEY",
+    "AUDIO_STREAM_COUNT_KEY",
     "BLOCK_METADATA_KEY",
     "BLOCK_TAGS",
     "CELL_SEPARATOR",
+    "CHANNELS_KEY",
+    "CODEC_KEY",
+    "CONTAINER_KEY",
     "DEFAULT_HTML_MIME_TYPE",
     "DEFAULT_TEXT_MIME_TYPE",
     "DOCX_MIME_TYPE",
+    "DURATION_SECONDS_KEY",
     "EMBEDDED_TEXT_PAGES_KEY",
     "ENCODED_BYTE_LIMIT",
     "ENCODED_FORMAT_KEY",
@@ -217,11 +272,14 @@ __all__ = [
     "ENGINE_INVOKED_KEY",
     "ENGINE_KEY",
     "ENGINE_VERSION_KEY",
+    "FRAME_RATE_KEY",
+    "HEIGHT_KEY",
     "HTML_ENCODING",
     "IGNORED_TAGS",
     "IMAGE_METADATA_KEY",
     "IMAGE_MIME_TYPES",
     "IMAGE_OCR_METADATA_KEY",
+    "INDEX_KEY",
     "JPEG_FORMAT",
     "JPEG_MIME_TYPE",
     "LIMIT_REASONS",
@@ -229,6 +287,8 @@ __all__ = [
     "MAX_ENCODED_PIXELS_KEY",
     "MAX_JPEG_MARKER_SEGMENTS",
     "MAX_JPEG_SCAN_BYTES",
+    "MEDIA_CONTAINERS",
+    "MEDIA_METADATA_KEY",
     "OCR_ATTEMPTED_PAGES_KEY",
     "OCR_METADATA_KEY",
     "OCR_PAGES_WITHOUT_TEXT_KEY",
@@ -239,12 +299,18 @@ __all__ = [
     "PNG_HEADER_SIZE",
     "PNG_MAX_DIMENSION",
     "PNG_MIME_TYPE",
+    "SAMPLE_RATE_KEY",
     "SETTINGS_KEY",
     "SKIPPED_REASON_KEY",
     "STARTING_STATUS",
     "TABLE_ROW_BLOCK",
     "TEXT_ENCODING",
+    "VIDEO_MIME_TYPES",
+    "VIDEO_STREAMS_KEY",
+    "VIDEO_STREAM_COUNT_KEY",
+    "WIDTH_KEY",
     "AmbiguousProcessorError",
+    "AudioProcessor",
     "AudioStreamInfo",
     "DocxBlock",
     "DocxProcessor",
@@ -276,6 +342,7 @@ __all__ = [
     "RecognizedPage",
     "TextDecodingError",
     "TextProcessor",
+    "VideoProcessor",
     "VideoStreamInfo",
     "WebpageProcessor",
     "extract",

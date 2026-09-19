@@ -77,6 +77,32 @@ refusal's shape are untouched — and intake still does not open, sniff, decode,
 or look inside the material it points at. Whether those bytes really carry a
 readable image header is a question for :mod:`core.processing.image`, one layer
 later.
+
+Phase 5A-2 adds two payload types on that same staged path — ``AUDIO`` and
+``VIDEO`` — and the first thing that is genuinely new here since Phase 0F: a
+**capability gate**. Media is the first modality a deployment may or may not
+have, because processing it needs an engine that is not part of this package, so
+``media_enabled`` says whether *this build* accepts media captures at all. It
+defaults to ``False``, which is today's deployment exactly.
+
+The gate is one boolean and deliberately not a registry. Two payload types
+turning on together is what the wiring actually needs, and a capability system
+for one flag would be architecture standing in for a requirement.
+
+**Refusal comes first, and the ordering is the guarantee.** A media envelope
+arriving at a build without the capability is refused *before* the declared MIME
+type is inspected, before the ``file_ref`` is parsed, before the raw store is
+asked anything, before the clock is read, and before any record is written. That
+holds even when the reference names nothing and even when the MIME type would be
+unsupported if the capability were on: a build that cannot ingest media has no
+business touching storage to discover which way to say no, and a refusal that
+depended on what is staged would be a read oracle over the object store.
+
+With the capability on, media is exactly the staged original path documents and
+images already use: resolve the reference, prove the bytes are there, write no
+second copy, record the declared type. Intake still does not open, sniff, decode
+or probe the material — whether those bytes really carry the declared container
+is a question for :mod:`core.processing.media`, one layer later.
 """
 
 from collections.abc import Callable
@@ -169,6 +195,26 @@ IMAGE_MIME_TYPES: Final[tuple[str, ...]] = ("image/png", "image/jpeg")
 #: The supported still-image formats as they appear in a refusal message.
 _IMAGE_MIME_TYPES_PHRASE: Final = " and ".join(IMAGE_MIME_TYPES)
 
+#: The audio formats this build has a processor for, on the same terms as the
+#: document and image tuples above: an ``AUDIO`` capture must declare one
+#: exactly, and intake sniffs nothing to find out.
+#:
+#: Restated here rather than imported from :mod:`core.processing`, exactly as its
+#: two siblings are. Intake decides which declarations *this deployment* accepts
+#: at its boundary — a fact about the build rather than about any one processor —
+#: and the wiring that registers the processors is what keeps the two coherent.
+#: A test asserts that coherence directly, so the duplication cannot drift.
+AUDIO_MIME_TYPES: Final[tuple[str, ...]] = ("audio/mpeg", "audio/wav", "audio/ogg")
+
+#: The supported audio formats as they appear in a refusal message.
+_AUDIO_MIME_TYPES_PHRASE: Final = " and ".join(AUDIO_MIME_TYPES)
+
+#: The video formats this build has a processor for.
+VIDEO_MIME_TYPES: Final[tuple[str, ...]] = ("video/mp4", "video/webm")
+
+#: The supported video formats as they appear in a refusal message.
+_VIDEO_MIME_TYPES_PHRASE: Final = " and ".join(VIDEO_MIME_TYPES)
+
 
 @dataclass(frozen=True)
 class _InlineMaterial:
@@ -219,10 +265,26 @@ class CaptureIntake:
         record_store: CaptureRecordStore,
         *,
         now: Callable[[], datetime] = utc_now,
+        media_enabled: bool = False,
     ) -> None:
+        """Take the two stores, the clock, and whether this build ingests media.
+
+        ``media_enabled`` defaults to ``False``, which is not a cautious default
+        but the accurate one: processing audio or video needs an engine that is
+        not part of this package, so a build that was not handed one cannot
+        honour a media capture and must not accept it. The composition root turns
+        both on together — see :func:`unimem_api.wiring.build_local_app` — because
+        accepting media at intake while registering no media processor would
+        strand every such capture mid-lifecycle.
+
+        One boolean, and deliberately not a capability registry: there is exactly
+        one optional acquisition capability, it gates exactly two payload types,
+        and a lookup table for that would be a framework with one row.
+        """
         self._raw_store = raw_store
         self._record_store = record_store
         self._now = now
+        self._media_enabled = media_enabled
 
     def accept(self, envelope: CaptureEnvelope) -> CaptureRecord:
         """Register a capture, store its bytes, and return the stored snapshot.
@@ -367,6 +429,20 @@ class CaptureIntake:
                 return self._staged_document(envelope)
             case CapturePayloadType.IMAGE:
                 return self._staged_image(envelope)
+            case CapturePayloadType.AUDIO:
+                return self._staged_media(
+                    envelope,
+                    payload_type=CapturePayloadType.AUDIO,
+                    mime_types=AUDIO_MIME_TYPES,
+                    mime_phrase=_AUDIO_MIME_TYPES_PHRASE,
+                )
+            case CapturePayloadType.VIDEO:
+                return self._staged_media(
+                    envelope,
+                    payload_type=CapturePayloadType.VIDEO,
+                    mime_types=VIDEO_MIME_TYPES,
+                    mime_phrase=_VIDEO_MIME_TYPES_PHRASE,
+                )
             case _:
                 raise UnsupportedCapturePayloadError(
                     f"capture {envelope.id!r} carries a {envelope.payload.type.value} payload; "
@@ -593,6 +669,139 @@ class CaptureIntake:
         # Minted here rather than taken from a caller: this is the reference the
         # capture record will carry, and the MIME type on it is the one the
         # submitter declared for *this capture*, not one the raw store inferred.
+        raw_object = raw_object_ref(digest, mime_type=payload.mime_type)
+        if not self._raw_store.exists(raw_object):
+            raise CaptureMaterialUnavailableError(
+                f"capture {envelope.id!r} refers to staged material that is not in the "
+                f"raw object store; stage the bytes first, then resubmit this capture"
+            )
+        return _StagedMaterial(raw_object)
+
+    def _staged_media(
+        self,
+        envelope: CaptureEnvelope,
+        *,
+        payload_type: CapturePayloadType,
+        mime_types: tuple[str, ...],
+        mime_phrase: str,
+    ) -> _StagedMaterial:
+        """Resolve an ``AUDIO`` or ``VIDEO`` payload, if this build ingests media.
+
+        The same acquisition boundary :meth:`_staged_document` and
+        :meth:`_staged_image` use, with one step in front of it that neither has:
+        **the capability check, and it comes first.**
+
+        Written as one method serving both payload types, unlike its two siblings,
+        and that is a judgement rather than an inconsistency. Those two are
+        separate because they were closed at different times and share no future;
+        these two arrive together, are enabled together by one flag, and differ
+        only in which tuple they test and which word appears in a message. The
+        difference that matters between audio and video — what structure each
+        *requires* — is a processing question and lives in
+        :mod:`core.processing.media`, not here.
+
+        **Capability refusal has priority over every media-specific check.** When
+        ``media_enabled`` is ``False`` this returns immediately, before:
+
+        * the declared MIME type is looked at;
+        * the ``file_ref`` is parsed;
+        * :meth:`~core.storage.raw.RawObjectStore.exists` or any other store read;
+        * the clock is read or any record is written.
+
+        That ordering is the guarantee, not an optimization. A build without the
+        capability must answer the same way for a reference naming nothing, for a
+        format it would refuse anyway, and for a perfectly valid staged MP3 — a
+        refusal that varied with what happens to be in the object store would let
+        a client probe durable storage through the shape of an error. It is also
+        why the message names the capability and not the submission.
+
+        With the capability on, the rest is the staged path unchanged:
+
+        * **``file_ref`` only.** ``text`` or ``html`` alongside it offers more
+          material than one ``CaptureRecord`` can hold, and choosing between
+          submitted representations would durably discard one while reporting
+          success. Media is never inline, so there is no second shape to fall
+          back to.
+        * **A declared format this build has a processor for.** Nothing is
+          inferred from bytes, from a container this boundary has not probed, or
+          from a filename it was never given.
+        * **Only UniMem raw references are resolved.** A filesystem path, a
+          ``file://`` URL, an HTTP URL or an S3 key is refused and is never
+          opened, resolved, or fetched.
+        * **A well-formed reference naming nothing** is a
+          :class:`~core.intake.errors.CaptureMaterialUnavailableError` — the
+          envelope is right and the bytes have not been staged.
+
+        Nothing here opens the material. Intake does not probe, does not call a
+        :class:`~core.processing.media_probe.MediaProbe`, does not read a magic
+        number, and does not infer a MIME type. Whether the bytes really carry the
+        declared container is verified one layer later, against a probe result,
+        which is what makes the declaration route and the observation verify.
+
+        No submitted value is echoed: the refusals name the payload type, the
+        field *names*, and the formats this build supports, never the
+        ``file_ref``, the declared MIME type, or any other client string.
+        """
+        if not self._media_enabled:
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries a {payload_type.value} payload; this "
+                f"deployment has no media capability, so it accepts no audio or video "
+                f"captures"
+            )
+
+        payload = envelope.payload
+        file_ref = payload.file_ref
+        if file_ref is None:
+            # Unreachable through a freshly validated envelope — ``CapturePayload``
+            # requires ``file_ref`` for audio and video — but reachable on an
+            # instance whose assignment was rejected *after* the value was
+            # written. A validated snapshot is not a continuously enforced object,
+            # so this boundary checks rather than assumes.
+            raise InvalidCaptureEnvelopeError(
+                f"capture {envelope.id!r} declares a {payload_type.value} payload "
+                f"but carries no file_ref"
+            )
+        alongside = [
+            name
+            for name in MATERIAL_PAYLOAD_FIELDS
+            if name != "file_ref" and getattr(payload, name) is not None
+        ]
+        if alongside:
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries a {payload_type.value} payload with "
+                f"file_ref and {' and '.join(alongside)}; a capture stores one raw "
+                f"original, and this build will not choose between submitted "
+                f"representations — resubmit with file_ref alone"
+            )
+        if payload.mime_type is None:
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries a {payload_type.value} payload declaring "
+                f"no mime_type; this build ingests {mime_phrase} only, and does not infer "
+                f"a container's format"
+            )
+        if payload.mime_type not in mime_types:
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries a {payload_type.value} payload declaring "
+                f"a mime_type this build has no processor for; it ingests {mime_phrase} only"
+            )
+
+        try:
+            digest = parse_raw_ref(file_ref)
+        except InvalidRawObjectRefError:
+            # Deliberately unchained, exactly as on the document and image paths.
+            # The store's own message quotes the reference it rejected, and a
+            # rejected reference is exactly the kind of client string — a home
+            # directory path, a private URL — that must not reach a log.
+            raise UnsupportedCapturePayloadError(
+                f"capture {envelope.id!r} carries a {payload_type.value} payload whose "
+                f"file_ref is not a UniMem raw object reference; this build resolves "
+                f"references of the form '{RAW_REF_SCHEME}:<64 lowercase hex characters>', "
+                f"as returned when the bytes were staged, and reads no filesystem path or URL"
+            ) from None
+
+        # Minted here rather than taken from a caller: this is the reference the
+        # capture record will carry, and the MIME type on it is the one the
+        # submitter declared for *this capture*.
         raw_object = raw_object_ref(digest, mime_type=payload.mime_type)
         if not self._raw_store.exists(raw_object):
             raise CaptureMaterialUnavailableError(
