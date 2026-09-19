@@ -41,24 +41,89 @@ from unimem_media import MediaPrerequisiteError
 #: Two questions at once, and both need a real process: whether `unimem_media`
 #: ended up in `sys.modules`, and whether anything ran a child. An AST scan
 #: could answer neither.
+#:
+#: **It answers the two prerequisite probes itself and runs no engine.** These
+#: are composition tests and must pass on an ordinary installation with no
+#: FFmpeg anywhere — proving that real ffprobe works is the dedicated
+#: `Local media probing` job's job, not this file's. So the child's
+#: `subprocess.run` intercepts exactly `["ffprobe", "-version"]` and
+#: `["ffprobe", "-protocols"]`, returns realistic successful results for them,
+#: and delegates anything else to the real function.
+#:
+#: The match is **exact**, and `delegated` records every command that did not
+#: match. If the adapter's probe argv ever changes, the stub stops answering,
+#: the command falls through to the host, and
+#: `test_the_stub_answered_every_probe` fails loudly — which is what stops this
+#: file quietly depending on a real engine again.
 OBSERVE_START: Final = """
 import json
 import subprocess
 import sys
 
+VERSION_BANNER = (
+    "ffprobe version 6.1.1-stub Copyright (c) 2007-2026 the FFmpeg developers\\n"
+    "built with gcc 13 (Ubuntu 13.2.0-23ubuntu3)\\n"
+    "configuration: --enable-gpl\\n"
+)
+PROTOCOLS = (
+    "Supported file protocols:\\n"
+    "Input:\\n"
+    "  cache\\n"
+    "  concat\\n"
+    "  data\\n"
+    "  fd\\n"
+    "  file\\n"
+    "  http\\n"
+    "  https\\n"
+    "Output:\\n"
+    "  crypto\\n"
+    "  fd\\n"
+    "  file\\n"
+)
+ANSWERED = {
+    ("ffprobe", "-version"): VERSION_BANNER,
+    ("ffprobe", "-protocols"): PROTOCOLS,
+}
+
 launched = []
+delegated = []
 real_run = subprocess.run
-subprocess.run = lambda *a, **k: launched.append(a[0] if a else k) or real_run(*a, **k)
+
+
+def fake_run(*args, **kwargs):
+    command = args[0] if args else kwargs.get("args")
+    launched.append(command)
+    key = tuple(command) if isinstance(command, (list, tuple)) else None
+    if key in ANSWERED:
+        return subprocess.CompletedProcess(
+            args=list(key),
+            returncode=0,
+            stdout=ANSWERED[key].encode("utf-8"),
+            stderr=b"",
+        )
+    delegated.append(command)
+    return real_run(*args, **kwargs)
+
+
+subprocess.run = fake_run
 
 import unimem_api.__main__ as cli
 
 cli.main(sys.argv[1:], server=lambda app, *, host, port: None)
 
+
+def rendered(commands):
+    return [
+        list(map(str, command)) if isinstance(command, (list, tuple)) else str(command)
+        for command in commands
+    ]
+
+
 print(json.dumps({
     "media_imported": any(name.startswith("unimem_media") for name in sys.modules),
     "ocr_imported": any(name.startswith("unimem_ocr") for name in sys.modules),
-    "launched": [list(map(str, command)) if isinstance(command, (list, tuple)) else str(command)
-                 for command in launched],
+    "launched": rendered(launched),
+    "delegated": rendered(delegated),
 }))
 """
 
@@ -309,6 +374,16 @@ class TestStartupRefusesWhenThePrerequisiteIsMissing:
 
 
 class TestADefaultStartLoadsAndRunsNothing:
+    """What a start loads and runs, observed in a fresh interpreter.
+
+    The negatives are the point, and they are only evidence because the
+    positives below prove the same observation can come back true. Neither half
+    needs an engine on this machine: the child answers the two prerequisite
+    probes itself, so the whole class passes on an ordinary installation with no
+    FFmpeg — which is the state the `Quality gates` and `Local PDF OCR` jobs run
+    in, and the state this file must never stop supporting.
+    """
+
     def test_it_does_not_import_the_media_adapter(self, tmp_path: Path) -> None:
         assert observe(tmp_path)["media_imported"] is False
 
@@ -318,6 +393,10 @@ class TestADefaultStartLoadsAndRunsNothing:
     def test_it_runs_no_subprocess_at_all(self, tmp_path: Path) -> None:
         """No ffprobe is probed, so a machine without FFmpeg starts normally."""
         assert observe(tmp_path)["launched"] == []
+
+    def test_it_delegates_nothing_to_the_host_either(self, tmp_path: Path) -> None:
+        """Nothing ran at all, so nothing could have fallen through to a real one."""
+        assert observe(tmp_path)["delegated"] == []
 
     def test_a_media_start_does_import_the_adapter(self, tmp_path: Path) -> None:
         """The negative above is only evidence if the positive is reachable."""
@@ -330,6 +409,30 @@ class TestADefaultStartLoadsAndRunsNothing:
 
         assert ["ffprobe", "-version"] in launched
         assert ["ffprobe", "-protocols"] in launched
+
+    def test_it_probes_each_prerequisite_exactly_once(self, tmp_path: Path) -> None:
+        launched = observe(tmp_path, "--media")["launched"]
+
+        assert launched.count(["ffprobe", "-version"]) == 1
+        assert launched.count(["ffprobe", "-protocols"]) == 1
+
+    def test_the_stub_answered_every_probe(self, tmp_path: Path) -> None:
+        """The guard against this file quietly depending on a real engine again.
+
+        `delegated` holds every command the stub did **not** recognize and
+        therefore handed to the host's real `subprocess.run`. It must be empty:
+        if the adapter's probe argv ever changes, the exact match stops matching,
+        the command escapes to the machine, and this fails — loudly, here, rather
+        than silently passing on a developer's laptop and failing in a job with
+        no FFmpeg installed.
+        """
+        assert observe(tmp_path, "--media")["delegated"] == []
+
+    def test_a_media_start_launches_nothing_but_those_two_probes(self, tmp_path: Path) -> None:
+        """Startup probes the engine; it does not probe a file or run ffmpeg."""
+        launched = observe(tmp_path, "--media")["launched"]
+
+        assert launched == [["ffprobe", "-version"], ["ffprobe", "-protocols"]]
 
     def test_a_media_start_imports_no_ocr_adapter(self, tmp_path: Path) -> None:
         assert observe(tmp_path, "--media")["ocr_imported"] is False
