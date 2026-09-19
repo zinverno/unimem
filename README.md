@@ -176,6 +176,27 @@ Phase 5 asks what it takes to ingest material that has a *duration*:
   and the only way to turn media on is to hand `build_local_app` a probe
   programmatically. `POST /v1/uploads` is untouched and still format-blind. See
   [ADR-022](docs/ADR/ADR-022-engine-independent-media-processing.md).
+- **Phase 5A, PR 3 — the local ffprobe media capability.** The engine, and the
+  flag that turns it on. `unimem_media` is a new adapter package **outside
+  `core`**, standard library plus `core`, that implements the `MediaProbe` port
+  over a system `ffprobe`; `python -m unimem_api --data-dir ./data --media` is
+  now a real media deployment. The submitted stream is staged into a private
+  unlinked temporary file in fixed-size chunks and handed to the child as its
+  standard input, and ffprobe is pointed at `fd:` under a one-protocol whitelist,
+  so **no filename, path, URL, `file_ref`, digest or declared type ever reaches
+  the command line** and arbitrary uploaded bytes cannot make it open an HTTP URL
+  or a file. The structural query is the smallest one that can fill a
+  `MediaProbeResult`; container aliases, durations, codecs, sample rates, channel
+  counts, dimensions and exact rational frame rates are normalized at that
+  boundary, and every failure to obtain a trustworthy result is a
+  `MediaProbeExecutionError` — never a verdict about the file, and never parsed
+  out of ffprobe's prose, which is discarded unread. Startup proves the engine
+  runs *and* supports the protocol the adapter uses, or the deployment refuses to
+  start. **No new Python dependency and deliberately no `[media]` extra**: the one
+  prerequisite is a program `pip` cannot install. Still no transcription, no
+  segments, no thumbnails, no keyframes, no extracted audio, no tags, no ffmpeg
+  and no cloud. See
+  [ADR-023](docs/ADR/ADR-023-local-ffprobe-media-capability.md).
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 
@@ -195,19 +216,21 @@ It binds `127.0.0.1:8765` by default and creates `./data` if it is missing:
 ```
 
 That is the **default deployment**, and it needs nothing beyond the Python
-package: no rasterizer, no imaging library, and no OCR engine. There are two
-optional capabilities, each off unless you ask for it and each independent of the
-other:
+package: no rasterizer, no imaging library, no OCR engine, and no media tooling.
+There are three optional capabilities, each off unless you ask for it and each
+independent of the others:
 
 | flag | what it adds | what it needs |
 | ---- | ------------ | ------------- |
 | `--pdf-ocr` | recognizes scanned PDF pages that carry no embedded text | the `ocr` extra (a rasterizer and an imaging library) **plus** a system Tesseract with `eng` and `rus` |
 | `--image-ocr` | recognizes text in staged PNG and JPEG images | a system Tesseract with `eng` and `rus`, and **no Python extra at all** |
+| `--media` | accepts audio and video captures and describes their container structure | a system FFmpeg providing `ffprobe`, and **no Python extra at all** |
 
-Both, either, or neither is a valid deployment. See
-[Scanned PDFs](#scanned-pdfs-opt-in-local-ocr) and
-[Images](#images-opt-in-local-ocr) below. Every other behaviour described in this
-README is identical in every mode.
+Any combination — all three, some, or none — is a valid deployment. See
+[Scanned PDFs](#scanned-pdfs-opt-in-local-ocr),
+[Images](#images-opt-in-local-ocr) and
+[Audio and video](#audio-and-video-opt-in-local-structural-probing) below. Every
+other behaviour described in this README is identical in every mode.
 
 > **This server has no authentication, authorization, or TLS.** Anyone who can
 > reach the port can submit captures and read everything stored. Keep the default
@@ -923,6 +946,125 @@ To check still-image ingestion and image OCR the same way, work through
 kind of guide, for PNG and JPEG. Owner acceptance is complete: the corrected
 full run passed all five rows, and Macro Phase 4 is closed.
 
+### Audio and video: opt-in local structural probing
+
+`--media` turns on audio and video ingestion, using a system `ffprobe` to read
+what the container declares. It is independent of both OCR flags: enable any
+combination.
+
+```bash
+python -m unimem_api --data-dir ./data --media
+```
+
+**The prerequisite is a system FFmpeg, and nothing else.** There is no `[media]`
+Python extra, because the adapter is standard library plus `core` and the one
+thing that is genuinely needed is a program `pip` cannot install. This project
+does not install, download, or vendor it:
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install ffmpeg
+
+# macOS
+brew install ffmpeg
+
+# Fedora
+sudo dnf install ffmpeg
+```
+
+Only `ffprobe` is used. The FFmpeg package also provides `ffmpeg`, and **nothing
+in this project ever invokes it** — the test suite uses it to build small fixture
+files, and production code does not.
+
+Startup proves two things before the socket is bound: that the configured
+`ffprobe` runs and reports a version, and that *that build* supports the `fd`
+input protocol the adapter feeds bytes through. A build without it would accept
+the command line and fail on the first capture, so it is refused up front:
+
+```
+--media was requested but local media probing is unavailable: ...
+```
+
+Without the flag, audio and video captures are refused at the door exactly as
+they always have been, `unimem_media` is never imported, and no `ffprobe` is
+probed or executed.
+
+#### What a media capture produces
+
+Stage the bytes and submit an envelope, exactly as for a PDF or an image:
+
+```bash
+file_ref=$(curl -sS -X POST http://127.0.0.1:8765/v1/uploads \
+  -F 'file=@talk.mp4;type=video/mp4' | python -c 'import json,sys; print(json.load(sys.stdin)["file_ref"])')
+
+curl -sS -X POST http://127.0.0.1:8765/v1/captures \
+  -H 'content-type: application/json' \
+  -d "{
+    \"schema_version\": \"0.3\",
+    \"id\": \"cap_media_01\",
+    \"source\": {\"type\": \"upload\", \"provider\": \"curl\"},
+    \"payload\": {\"type\": \"video\", \"mime_type\": \"video/mp4\", \"file_ref\": \"$file_ref\"},
+    \"context\": {\"captured_at\": \"2026-01-02T03:04:05+00:00\"}
+  }"
+```
+
+The content object carries the immutable original as its one asset, **no segments
+at all**, and structural metadata:
+
+```json
+{
+  "media": {
+    "container": "mp4",
+    "duration_seconds": 1.001,
+    "audio_stream_count": 1,
+    "video_stream_count": 1
+  },
+  "audio_streams": [
+    {"index": 1, "codec": "aac", "sample_rate": 44100, "channels": 2}
+  ],
+  "video_streams": [
+    {"index": 0, "codec": "h264", "width": 1920, "height": 1080,
+     "frame_rate": "30000/1001"}
+  ]
+}
+```
+
+The frame rate is the exact rational the container carries, not `29.97`: the
+rounding could not be undone later. A value the container did not declare is
+absent rather than `0` or `"unknown"`, and a silent video is valid media while a
+soundless audio file is not.
+
+Accepted formats are `audio/wav`, `audio/mpeg`, `audio/ogg`, `video/mp4` and
+`video/webm`. The declared type routes and the probed container verifies: an MP3
+submitted as `video/mp4` is a `422` and a durably failed capture, never a
+declaration quietly corrected. A probe that produced no trusted result is a fixed
+`503` with the capture left `processing`, because no verdict about the file is
+possible.
+
+#### What this does not do
+
+Phase 5A reads container structure and **nothing else**. There is no
+transcription, no interpreted media segment, no extracted audio track, no
+thumbnail, no keyframe, no embedded tag — not a title, an artist, or an album —
+no ffmpeg runtime conversion or transcoding, and no cloud processing of any kind.
+A media capture is an immutable original plus what its container declares about
+itself. Transcription is a later phase.
+
+Nothing is re-encoded and no filename, path, URL, `file_ref`, digest or declared
+MIME type reaches the engine's argument list: the bytes are staged into a private
+temporary file with no name in the filesystem and handed over as an inherited
+descriptor. A one-protocol whitelist means arbitrary uploaded bytes cannot make
+ffprobe open an HTTP URL or a file on the machine. ffprobe's diagnostics are
+discarded unread and are never parsed into a judgement about your file. The
+bounds — a 30-second timeout and a 1 MiB output budget — are bounds and **not a
+sandbox**: they impose no memory or CPU limit on the child process and cannot
+stop the operating system killing it.
+
+See [ADR-023](docs/ADR/ADR-023-local-ffprobe-media-capability.md).
+
+Macro Phase 5A is **open**: owner acceptance has not been run, and nothing here
+claims it has.
+
 `GET /health` reports process liveness only and checks nothing else.
 
 ## Browser capture
@@ -1066,12 +1208,13 @@ driven by CI. Macro Phase 2 closed on the strength of that run.
 ```
 src/core/contracts/   canonical domain contracts (Pydantic v2 models)
 src/core/storage/     raw object store port and local backend
-src/core/processing/  processor port, router, the text, webpage, pdf, pdf-ocr and docx processors, the OCR port, and the lifecycle orchestrator
+src/core/processing/  processor port, router, the text, webpage, pdf, pdf-ocr, docx, image, audio and video processors, the OCR and media-probe ports, and the lifecycle orchestrator
 src/core/rendering/   renderer port and the JSON and Markdown projections
 src/core/persistence/ capture record store port and the SQLite adapter
 src/core/intake/      capture intake, the envelope-to-stored-capture flow
 src/unimem_api/       the HTTP delivery adapter and its CLI — outside core
 src/unimem_ocr/       the optional local PDFium/Tesseract recognizer — outside core
+src/unimem_media/     the optional local ffprobe media probe — outside core, stdlib only
 clients/              connectors that call the HTTP API — outside core and unimem_api
 tests/                unit and integration tests
 docs/                 architecture notes and ADRs
@@ -1112,6 +1255,24 @@ and a passing one look the same in a green summary, so in CI every reason to ski
 — a missing extra, a missing engine, a missing language pack, a missing font — is
 a failure instead.
 
+The media suites work the same way and need **no extra at all** — only a system
+FFmpeg, installed as shown in
+[the media section](#audio-and-video-opt-in-local-structural-probing):
+
+```bash
+# skips if ffprobe or ffmpeg is missing
+.venv/bin/pytest tests/unit/media tests/integration/media -rs
+
+# same tests, but a missing prerequisite is a failure instead of a skip
+UNIMEM_REQUIRE_MEDIA_INTEGRATION=1 \
+  .venv/bin/pytest tests/unit/media tests/integration/media -v -rs \
+  --cov=core --cov=unimem_api --cov=unimem_media
+```
+
+`ffmpeg` is needed only to **build** the fixture files: no binary media fixture
+is committed to this repository and nothing is fetched at test time. Production
+code never invokes it.
+
 The browser connector is plain ES modules with **no dependencies** — no bundler,
 no test framework, no build step. `npm test` runs Node's own test runner, and
 the directory is loadable as an unpacked extension exactly as it sits in the
@@ -1137,3 +1298,12 @@ handles `--pdf-ocr`. **Tesseract and its `eng`/`rus` language data are system
 prerequisites**, installed by the machine's package manager and never by this
 project. A test asserts that importing the application loads no rasterizer even
 where the extra *is* installed.
+
+`src/unimem_media/` adds **no Python dependency of any kind** and has no extra to
+install: every module in it is standard library plus `core`, and a test walks the
+package to prove it. Its one prerequisite is a **system `ffprobe`**, from the
+machine's FFmpeg package, installed by the machine and never by this project. It
+depends on `core` and never the other way round — a test walks every module under
+`src/core/` to prove no import points back — and `unimem_api` imports it in
+exactly one place, inside the function that handles `--media`. A default start
+never executes that line.

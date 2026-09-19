@@ -4,11 +4,12 @@
 
     python -m unimem_api --data-dir ./data
 
-Five options and no more: where the data lives, what to bind, and whether this
-deployment recognizes scanned PDF pages and text in staged images. There is no
-config file, environment lookup, settings framework, profile, service manager,
-systemd unit, Docker image, or reload mode. Starting the server is one command
-and stopping it is Ctrl-C.
+Six options and no more: where the data lives, what to bind, and which of the
+three optional local capabilities this deployment has — recognizing scanned PDF
+pages, recognizing text in staged images, and probing the structure of audio and
+video. There is no config file, environment lookup, settings framework, profile,
+service manager, systemd unit, Docker image, or reload mode. Starting the server
+is one command and stopping it is Ctrl-C.
 
 **``--pdf-ocr`` and ``--image-ocr`` are the whole of the OCR configuration
 surface, and they are independent.** All four combinations are valid deployments;
@@ -32,6 +33,26 @@ library — plus a system Tesseract with the ``eng`` and ``rus`` data. Image
 recognition hands the submitted bytes to the engine and decodes nothing, so it
 needs the executable and the two language files and no Python extra at all. A
 deployment that wants only image OCR installs no native wheel.
+
+**``--media`` is a third, independent capability, and it differs from both in
+what it switches on.** The two OCR flags choose *which* processor handles a
+capture this build already accepts; ``--media`` decides whether audio and video
+are accepted at all. Without it the server is byte-for-byte the deployment it
+was: intake refuses ``AUDIO`` and ``VIDEO`` at the door, no media processor is
+registered, :mod:`unimem_media` is never imported, and no ``ffprobe`` is probed
+or executed. With it, this module builds the concrete
+:class:`~unimem_media.ffprobe.FfprobeMediaProbe`, *validates that capability's
+prerequisites before the socket is bound*, and hands the port to
+:func:`~unimem_api.wiring.build_local_app`, which derives both intake's
+``media_enabled`` and the media processor pair from it.
+
+Its prerequisite is a system ``ffprobe`` and **no Python extra at all** — there
+is deliberately no ``[media]`` extra, because the whole adapter is standard
+library plus ``core`` and the one thing that is genuinely needed is a program
+``pip`` cannot install. What ``--media`` buys is structural: container family,
+declared duration, and the streams a container declares. It is not transcription,
+not segmentation, not thumbnails or keyframes, not extracted audio, and not
+``ffmpeg`` — nothing under ``src/`` ever invokes that.
 
 Constructing the adapters here rather than in :mod:`unimem_api.wiring` is
 deliberate. This is the delivery layer — the module that already knows about
@@ -57,6 +78,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from core.processing.image_recognition import ImageOcr
+from core.processing.media_probe import MediaProbe
 from core.processing.ocr import PdfPageOcr
 from unimem_api.wiring import build_local_app
 
@@ -82,6 +104,7 @@ class Options:
     port: int
     pdf_ocr: bool
     image_ocr: bool
+    media: bool
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -135,6 +158,21 @@ def build_parser() -> argparse.ArgumentParser:
             "described but never interpreted, as before."
         ),
     )
+    parser.add_argument(
+        "--media",
+        action="store_true",
+        help=(
+            "accept audio and video captures and describe their container "
+            "structure, using a local system ffprobe. Requires FFmpeg's ffprobe "
+            "on PATH, built with the 'fd' input protocol, and no Python extra: "
+            "the adapter is standard library only. Startup fails if ffprobe is "
+            "missing or cannot open that protocol. Independent of --pdf-ocr and "
+            "--image-ocr. This reads container structure only — no transcription, "
+            "no segments, no thumbnails, no extracted audio, and no ffmpeg. "
+            "Without this flag audio and video captures are refused at the door, "
+            "as before."
+        ),
+    )
     return parser
 
 
@@ -147,6 +185,7 @@ def parse_args(argv: Sequence[str] | None = None) -> Options:
         port=namespace.port,
         pdf_ocr=namespace.pdf_ocr,
         image_ocr=namespace.image_ocr,
+        media=namespace.media,
     )
 
 
@@ -218,6 +257,42 @@ def build_image_ocr() -> ImageOcr:
         ) from exc
 
 
+def build_media_probe() -> MediaProbe:
+    """Build the local media probe, or exit with a sentence saying why not.
+
+    The same shape as the two OCR builders and, again, deliberately not the same
+    gate. :func:`unimem_media.build_ffprobe_media_probe` proves the configured
+    ``ffprobe`` can be launched and reports a version, and then proves that the
+    build which answered can open the ``fd`` input protocol the adapter hands it
+    bytes through. The second half matters because a build without that protocol
+    would accept the command line and fail on the *first capture*, which is
+    exactly the "starts, then cannot do its job" outcome a startup gate exists to
+    prevent.
+
+    The import is inside the function for the reason the OCR ones are: a default
+    start never runs this line, so a machine with no FFmpeg installed has nothing
+    to fail at, and ``unimem_media`` is genuinely not imported by a deployment
+    that did not ask for it. Nothing native is loaded either way — the package is
+    standard library plus ``core`` — and it ships with this distribution, because
+    there is no Python extra to install and nothing ``pip`` could supply.
+
+    A missing prerequisite becomes a ``SystemExit`` carrying the explanation the
+    prerequisite check wrote. It does not disable media and start anyway, which
+    would hand a deployment that asked for audio and video the build that refuses
+    both at the door; it does not fall back to naming a filesystem path so that
+    some other protocol would do; and it installs nothing, downloads nothing, and
+    contacts no service.
+    """
+    from unimem_media import MediaPrerequisiteError, build_ffprobe_media_probe
+
+    try:
+        return build_ffprobe_media_probe()
+    except MediaPrerequisiteError as exc:
+        raise SystemExit(
+            f"--media was requested but local media probing is unavailable: {exc}"
+        ) from exc
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -229,20 +304,22 @@ def main(
     exercised without binding a TCP port. It is the only seam, and it exists for
     testability rather than for configuration — nothing reads it from anywhere.
 
-    Each recognizer that was asked for is built *before*
+    Each capability that was asked for is built *before*
     :func:`~unimem_api.wiring.build_local_app` runs — Python evaluates the
     arguments first — so a deployment whose prerequisites are missing exits before
-    a data directory is created, let alone a port bound. The two gates are
-    independent and both run when both flags are given, which means the engine is
-    probed twice. That costs two fixed-argument subprocess calls at startup and is
-    deliberately not cached: a shared memo would make each capability's gate
-    depend on whether the other happened to run first.
+    a data directory is created, let alone a port bound. The three gates are
+    independent and each runs when its own flag is given, which means an engine
+    may be probed more than once in a session. That costs a few fixed-argument
+    subprocess calls at startup and is deliberately not cached: a shared memo
+    would make each capability's gate depend on whether another happened to run
+    first.
     """
     options = parse_args(argv)
     app = build_local_app(
         options.data_dir,
         pdf_ocr=build_pdf_ocr() if options.pdf_ocr else None,
         image_ocr=build_image_ocr() if options.image_ocr else None,
+        media_probe=build_media_probe() if options.media else None,
     )
     server(app, host=options.host, port=options.port)
     return 0

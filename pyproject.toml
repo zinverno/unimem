@@ -94,7 +94,14 @@ dev = [
 # that imports its native dependencies lazily, so installing it costs nothing and
 # leaving it out would mean `--pdf-ocr` failed with "no such module" on a machine
 # that had installed the extra.
-packages = ["src/core", "src/unimem_api", "src/unimem_ocr"]
+#
+# `unimem_media` ships for a stronger version of the same reason, and there is no
+# extra beside it to install: the whole package is standard library plus `core`,
+# and its only prerequisite is a system `ffprobe` the machine's package manager
+# provides. A Python extra would suggest `pip` could supply that, which it cannot.
+# Leaving the package out would mean `--media` failed with "no such module" on a
+# machine that had FFmpeg installed and everything it needs. See ADR-023.
+packages = ["src/core", "src/unimem_api", "src/unimem_ocr", "src/unimem_media"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
