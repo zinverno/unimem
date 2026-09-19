@@ -15,6 +15,7 @@ Nothing here imports a media engine, because there is none to import.
 """
 
 import hashlib
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -180,20 +181,57 @@ class TestTheAllowlistsStayCoherent:
 
 
 class TestNoMediaEngineIsRequired:
-    """The default build imports nothing that needs installing."""
+    """The default build imports nothing that needs installing.
 
-    def test_no_media_package_exists(self) -> None:
+    Phase 5A-3 gave the capability an engine and a flag, and neither weakens
+    that: ``unimem_media`` exists and ships with the distribution, but a default
+    start never imports it, no adapter reaches the composition root, and the
+    only Python dependency it would add is none.
+    """
+
+    def test_the_adapter_package_exists_and_is_outside_core(self) -> None:
         import importlib.util
 
-        assert importlib.util.find_spec("unimem_media") is None
+        assert importlib.util.find_spec("unimem_media") is not None
+        assert importlib.util.find_spec("core.unimem_media") is None
 
-    def test_no_cli_media_flag_exists(self) -> None:
-        """The capability is programmatic only until Phase 5A-3."""
+    def test_the_adapter_adds_no_python_dependency(self) -> None:
+        """Standard library plus `core`, so there is no `[media]` extra to install."""
+        import ast
+
+        import unimem_media
+
+        root = Path(unimem_media.__file__).parent
+        third_party: set[str] = set()
+        allowed = {"core", "unimem_media"} | set(sys.stdlib_module_names)
+        for module in sorted(root.rglob("*.py")):
+            for node in ast.walk(ast.parse(module.read_text())):
+                if isinstance(node, ast.Import):
+                    names = {alias.name.split(".")[0] for alias in node.names}
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    names = {node.module.split(".")[0]}
+                else:
+                    continue
+                third_party |= names - allowed
+
+        assert third_party == set()
+
+    def test_the_cli_media_flag_exists_and_defaults_to_off(self, tmp_path: Path) -> None:
+        """The capability is deployment configuration, and it is opt-in."""
         import unimem_api.__main__ as cli
 
         parser = cli.build_parser()
         options = {action.option_strings[0] for action in parser._actions if action.option_strings}
-        assert "--media" not in options
+
+        assert "--media" in options
+        assert cli.parse_args(["--data-dir", str(tmp_path)]).media is False
+
+    def test_no_response_model_carries_the_capability(self) -> None:
+        """It is a command line and nothing else; no wire type mentions it."""
+        import unimem_api.models as models
+
+        for model in (models.HealthResponse, models.CaptureAcceptedResponse):
+            assert not [name for name in model.model_fields if "media" in name]
 
     def test_wiring_imports_no_concrete_media_adapter(self) -> None:
         """Checked as imports, not as text: the prose names these to forbid them."""

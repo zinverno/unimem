@@ -39,6 +39,7 @@ class TestArgumentParsing:
             port=DEFAULT_PORT,
             pdf_ocr=False,
             image_ocr=False,
+            media=False,
         )
 
     def test_the_default_bind_is_loopback(self) -> None:
@@ -49,7 +50,12 @@ class TestArgumentParsing:
         options = parse_args(["--data-dir", str(tmp_path), "--host", "0.0.0.0", "--port", "9001"])
 
         assert options == Options(
-            data_dir=tmp_path, host="0.0.0.0", port=9001, pdf_ocr=False, image_ocr=False
+            data_dir=tmp_path,
+            host="0.0.0.0",
+            port=9001,
+            pdf_ocr=False,
+            image_ocr=False,
+            media=False,
         )
 
     def test_the_data_dir_becomes_a_path(self, tmp_path: Path) -> None:
