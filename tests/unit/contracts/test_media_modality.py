@@ -16,10 +16,11 @@ promise ADR-002 makes, in order to tidy up a modality it is not even about.
 **Schema support is not deployment capability.** Everything below says the
 contracts have the words. Nothing below says a deployment can ingest audio.
 Phase 5A-2 added the processors and an opt-in intake gate, so a build *handed a*
-:class:`~core.processing.media_probe.MediaProbe` now can — and the default build
-still cannot, refusing every media capture at the door. The two facts stay
-separate, and ``test_the_modality_has_processors_but_no_engine`` is what keeps
-them from being confused.
+:class:`~core.processing.media_probe.MediaProbe` can — and Phase 5A-3 added an
+engine that can produce one, outside ``core``. The default build still cannot
+ingest media, refusing every such capture at the door. The three facts stay
+separate, and ``test_the_modality_has_processors_and_an_engine_outside_core`` is
+what keeps them from being confused.
 """
 
 from datetime import UTC, datetime
@@ -290,15 +291,17 @@ class TestAudioAndVideoAreDistinct:
         assert "AUDIO" in ContentType.__members__
 
 
-def test_the_modality_has_processors_but_no_engine() -> None:
-    """What Phase 5A-2 changed here, and what it deliberately did not.
+def test_the_modality_has_processors_and_an_engine_outside_core() -> None:
+    """What each Phase 5A slice changed here, and what none of them did.
 
     Phase 5A-1 asserted that *nothing* normalized audio or video: the contracts
-    had the vocabulary and the system had no use for it. Phase 5A-2 supplies the
-    policy, so ``AudioProcessor`` and ``VideoProcessor`` now exist — and the half
-    that has not moved is the one still worth pinning. There is no engine, no
-    concrete adapter, and no ``unimem_media`` package; a deployment reaches media
-    only by being handed a
+    had the vocabulary and the system had no use for it. Phase 5A-2 supplied the
+    policy, so ``AudioProcessor`` and ``VideoProcessor`` exist. Phase 5A-3 supplies
+    an engine — and where it lives is the half still worth pinning.
+
+    ``unimem_media`` is now importable, and it is **outside** ``core``:
+    ``core.processing`` has no concrete adapter, names no engine, and cannot be
+    made to load one. A deployment reaches media only by being handed a
     :class:`~core.processing.media_probe.MediaProbe` explicitly, and the default
     one still refuses every media capture at intake.
 
@@ -312,5 +315,36 @@ def test_the_modality_has_processors_but_no_engine() -> None:
     assert hasattr(processing, "AudioProcessor")
     assert hasattr(processing, "VideoProcessor")
 
+    # The engine exists, and none of it is in `core`.
+    assert importlib.util.find_spec("unimem_media") is not None
     assert not hasattr(processing, "FfprobeMediaProbe")
-    assert importlib.util.find_spec("unimem_media") is None
+    assert not [name for name in dir(processing) if "ffprobe" in name.lower()]
+
+
+def test_core_never_imports_the_media_adapter() -> None:
+    """The dependency direction, checked as imports rather than as prose.
+
+    ``unimem_media`` may depend on ``core``; ``core`` may never depend on it. An
+    import anywhere under ``src/core/`` would invert that and make the kernel
+    untestable on a machine with no media tooling installed.
+    """
+    import ast
+    from pathlib import Path
+
+    import core
+
+    root = Path(core.__file__).parent
+    offenders: list[str] = []
+    for module in sorted(root.rglob("*.py")):
+        tree = ast.parse(module.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = {alias.name.split(".")[0] for alias in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names = {node.module.split(".")[0]}
+            else:
+                continue
+            if names & {"unimem_media", "unimem_ocr", "unimem_api"}:
+                offenders.append(str(module.relative_to(root)))
+
+    assert offenders == []

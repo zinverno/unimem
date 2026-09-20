@@ -456,3 +456,168 @@ jobs:
               if found < floor:
                   sys.exit(f"{name} contributed {found} tests; at least {floor} were required")
           PY
+
+  local-media:
+    # The sixth job, and the only one that installs FFmpeg. The five above run
+    # on machines with no media tooling at all and must keep doing so: nothing
+    # they exercise needs ffprobe, and that is the property which makes local
+    # media probing *optional*. In particular the `Quality gates` job still
+    # installs `.[dev]` and nothing else, and the media unit suites run there
+    # against doubles, so a green quality gate is evidence that the default
+    # build needs no engine.
+    #
+    # This job is the other half. It proves the thing a double cannot:
+    #
+    #   a real WAV, MP3, OGG, MP4 and WebM, built on the spot by system ffmpeg
+    #     -> real ffprobe reads their containers through the `fd:` input
+    #     -> real container aliases, durations, codecs, sample rates, channel
+    #        counts, dimensions and exact rational frame rates
+    #     -> POST /v1/uploads + POST /v1/captures against a real server process
+    #        on a real socket, started with `--media`
+    #     -> an AUDIO or VIDEO ContentObject with structural metadata, the
+    #        immutable original as its one asset, and no segments at all
+    #     -> the process is stopped and restarted over the same data directory
+    #        and everything reads back identically
+    #
+    # ...and the refusals: an MP3 declared as MP4 is a 422 and a durably FAILED
+    # capture, while an engine that fails mid-run leaves the capture PROCESSING
+    # behind a safe 503.
+    #
+    # There is deliberately NO Python media extra to install. The adapter is
+    # standard library plus `core`, so this job installs `.[dev]` exactly as the
+    # quality gates do, and the only thing that makes it different is apt.
+    name: Local media probing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install FFmpeg
+        # A system prerequisite, installed by the machine's package manager.
+        # This project never installs, downloads, or vendors it — which is
+        # exactly why it has to be named here. The package provides both
+        # `ffprobe`, which production uses, and `ffmpeg`, which only the tests
+        # use, to *build* the fixtures: no binary media fixture is committed to
+        # this repository and nothing is fetched at test time.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Install the package with dev dependencies ONLY
+        # Deliberately not ".[dev,media]". There is no such extra, and the
+        # absence is part of what this job demonstrates.
+        run: python -m pip install -e ".[dev]"
+
+      - name: Print what is actually going to run
+        # Through the project's own prerequisite surface rather than a separate
+        # shell command, so this log line is evidence about the code path the
+        # adapter takes — including the `fd` protocol check, which a bare
+        # `ffprobe -version` would not exercise.
+        run: |
+          ffprobe -version | head -1
+          python -c "from unimem_media import describe_prerequisites; print(describe_prerequisites())"
+
+      - name: Real media probing, with skips forbidden
+        env:
+          # Without this the native tests skip when ffprobe or ffmpeg is
+          # missing, and a green run would prove nothing. With it, every one of
+          # those reasons is a failure instead. The OCR required flags are
+          # deliberately NOT set: those suites need tooling this job does not
+          # install, and they skip here on purpose.
+          UNIMEM_REQUIRE_MEDIA_INTEGRATION: "1"
+        # `unimem_media` is measured alongside the two packages the quality-gates
+        # job measures: the adapter is where the subprocess, the temporary files
+        # and the resource bounds live, and an unmeasured adapter is where an
+        # untested error path hides.
+        #
+        # The whole suite rather than a media-only selection, exactly as the
+        # `Local PDF OCR` job runs it: the coverage floor is defined over the
+        # baseline packages, so measuring a subset against it would either fail
+        # honestly or have to be exempted dishonestly. The OCR native suites skip
+        # here, on purpose — this job installs no Tesseract and no rasterizer,
+        # and their required flags are deliberately unset.
+        run: |
+          pytest \
+            --cov=core --cov=unimem_api --cov=unimem_media \
+            -rs --junitxml=local-media.xml
+
+      - name: Prove the native media tests actually ran
+        # Belt and braces, exactly as for the two OCR jobs. The required mode
+        # turns every in-test skip into a failure, so this can only fire if a
+        # class is renamed, deselected, or skipped by something outside that
+        # policy — each of which would otherwise leave a passing job that never
+        # touched ffprobe.
+        #
+        # Each acceptance group is counted separately and by its *full* name.
+        # Counting by bare class name would let two different modules'
+        # identically named classes cover for each other.
+        if: always()
+        run: |
+          python - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          #: Fully-qualified class -> the number of tests it must contribute, at least.
+          REQUIRED = {
+              "tests.integration.media.test_real_ffprobe.TestTheFixturesAreReal": 13,
+              "tests.integration.media.test_real_ffprobe.TestTheProbeReadsRealContainers": 23,
+              "tests.integration.media.test_real_ffprobe.TestTheProbeReadsRealDurations": 12,
+              "tests.integration.media.test_real_ffprobe.TestTheProbeReadsRealAudioStreams": 17,
+              "tests.integration.media.test_real_ffprobe.TestTheProbeReadsRealVideoStreams": 15,
+              "tests.integration.media.test_real_ffprobe.TestStreamsTheProbeIgnores": 3,
+              "tests.integration.media.test_real_ffprobe.TestTheRealEngineFailing": 3,
+              "tests.integration.media.test_real_ffprobe.TestTheRealEngineIsShareable": 4,
+              "tests.integration.media.test_real_ffprobe.TestTheStartupGateOnThisMachine": 4,
+              "tests.integration.media.test_real_media_http.TestEveryFamilyOverRealHttp": 48,
+              "tests.integration.media.test_real_media_http.TestTheRealStreamFactsReachCanonicalContent": 7,
+              "tests.integration.media.test_real_media_http.TestADeclarationTheBytesContradict": 5,
+              "tests.integration.media.test_real_media_http.TestTheDefaultDeploymentStillRefusesMedia": 2,
+              "tests.integration.media.test_real_media_http.TestARestartOfTheServerProcess": 3,
+              "tests.integration.media.test_real_media_http.TestARuntimeProbeFailureOverHttp": 7,
+              "tests.integration.media.test_real_media_http.TestStartupRefusalIsNotASkip": 2,
+          }
+
+          #: Everything under this prefix is the required native suite.
+          NATIVE_PREFIX = "tests.integration.media."
+
+          suite = ET.parse("local-media.xml").getroot()
+          totals = suite.find("testsuite") if suite.tag == "testsuites" else suite
+          if totals is None:
+              sys.exit("no test suite was recorded")
+
+          ran = int(totals.get("tests", "0"))
+          errors = int(totals.get("errors", "0"))
+          print(f"tests={ran} errors={errors}")
+          if ran == 0:
+              sys.exit("the suite did not run at all")
+          if errors:
+              # A missing prerequisite under the required mode surfaces as a
+              # collection error rather than a skip, so this is not a formality.
+              sys.exit(f"{errors} collection or setup errors were recorded")
+
+          counted = {}
+          skipped = []
+          for case in totals.iter("testcase"):
+              name = case.get("classname") or ""
+              if not name.startswith(NATIVE_PREFIX):
+                  continue
+              counted[name] = counted.get(name, 0) + 1
+              if case.find("skipped") is not None:
+                  skipped.append(f"{name}::{case.get('name')}")
+
+          native = sum(counted.values())
+          print(f"native media tests={native} skipped={len(skipped)}")
+          if native == 0:
+              sys.exit("no native media test ran; ffprobe was never exercised")
+          if skipped:
+              sys.exit("required media tests were skipped: " + ", ".join(skipped))
+
+          for name, floor in REQUIRED.items():
+              found = counted.get(name, 0)
+              print(f"{name}={found} (required >= {floor})")
+              if found < floor:
+                  sys.exit(f"{name} contributed {found} tests; at least {floor} were required")
+          PY
