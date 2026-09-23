@@ -1062,8 +1062,15 @@ stop the operating system killing it.
 
 See [ADR-023](docs/ADR/ADR-023-local-ffprobe-media-capability.md).
 
-Macro Phase 5A is **open**: owner acceptance has not been run, and nothing here
-claims it has.
+To check audio and video ingestion by hand on your own machine, work through
+[docs/MANUAL_MEDIA_ACCEPTANCE.md](docs/MANUAL_MEDIA_ACCEPTANCE.md) — the same
+kind of owner acceptance guide, in Russian, for the six media scenarios
+MED-A…MED-F. Nothing in it is claimed to have passed automatically.
+
+Macro Phase 5A is **open**: owner acceptance is **pending**. The checklist
+exists and has not been run — every row of its result table is `NOT_RUN`, no
+owner run is recorded, and nothing here claims otherwise. CI evidence does not
+close the phase.
 
 `GET /health` reports process liveness only and checks nothing else.
 

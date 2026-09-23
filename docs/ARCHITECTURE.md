@@ -598,11 +598,29 @@ python -m unimem_api --data-dir ./data --media
   -> COMPLETE canonical media content
 ```
 
-The rest of Phase 5A is **not implemented** here. Owner manual acceptance belongs
-to 5A-4, and **Macro Phase 5A stays open until that record exists**: this
-repository closes a macro phase with an owner acceptance run against a named
-merged `main`, and CI evidence is not one. Phase 5B, transcription, is not
-designed.
+**Phase 5A-4 — owner manual acceptance.** Answers "what does a human have to see
+with their own eyes before this phase may be called closed?" One document,
+[docs/MANUAL_MEDIA_ACCEPTANCE.md](MANUAL_MEDIA_ACCEPTANCE.md), and nothing else:
+a runnable owner checklist of six scenarios — MED-A, the default deployment stays
+media-free; MED-B, real standalone audio; MED-C, real video including the
+silent-video rule; MED-D, a declaration the observation contradicts; MED-E,
+durability and capability-independent reads across a real process restart; MED-F,
+one real owner-supplied file judged by a human. **Documentation only: no
+processor, no route, no contract, no flag, no CI job, no test and no
+dependency.** It concentrates on what is operator-visible and machine-specific,
+and deliberately does not re-run by hand what the `Local media probing` job
+already proves.
+
+**This slice is the acceptance ceremony, and merging the checklist is not
+performing it.** The guide ships with every row of its result table at `NOT_RUN`
+and no owner run recorded, so **Macro Phase 5A stays OPEN** until the owner runs
+it, in full, on a clean checkout, against a named merged `main` that already
+contains the guide, and all six rows pass in that same run. `BLOCKED` is not a
+kind of passing, a partial run does not close the phase, and rows from different
+runs or different commits are never combined. This repository closes a macro
+phase with an owner acceptance run, and CI evidence is not one.
+
+Phase 5B, transcription, is not designed.
 
 ## Future data flow
 
