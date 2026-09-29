@@ -36,6 +36,26 @@ jobs:
         # coverage floor applies to it rather than only to the kernel.
         run: pytest --cov=core --cov=unimem_api
 
+  youtube-captions:
+    name: YouTube captions (offline fixtures)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install optional retrieval dependency and dev tools
+        run: python -m pip install -e ".[dev,youtube]"
+      - name: Type check with the real retrieval dependency
+        run: mypy
+      - name: Prove retrieval dependency is available
+        run: python -c "from youtube_transcript_api import YouTubeTranscriptApi"
+      - name: Offline end-to-end and independent adapter coverage floor
+        # Real library over fixture HTTP. No live YouTube requests in CI.
+        run: |
+          pytest tests/unit/youtube tests/integration/youtube \
+            --cov=unimem_youtube --cov-report=term-missing --junitxml=youtube.xml
+
   browser-connector:
     name: Browser connector
     runs-on: ubuntu-latest

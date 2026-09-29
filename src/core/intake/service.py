@@ -266,8 +266,9 @@ class CaptureIntake:
         *,
         now: Callable[[], datetime] = utc_now,
         media_enabled: bool = False,
+        caption_artifacts_enabled: bool = False,
     ) -> None:
-        """Take the two stores, the clock, and whether this build ingests media.
+        """Take the stores, clock and explicitly enabled staged capabilities.
 
         ``media_enabled`` defaults to ``False``, which is not a cautious default
         but the accurate one: processing audio or video needs an engine that is
@@ -277,14 +278,18 @@ class CaptureIntake:
         accepting media at intake while registering no media processor would
         strand every such capture mid-lifecycle.
 
-        One boolean, and deliberately not a capability registry: there is exactly
-        one optional acquisition capability, it gates exactly two payload types,
-        and a lookup table for that would be a framework with one row.
+        ``caption_artifacts_enabled`` separately accepts the staged FILE format
+        in ADR-024. Its application composition supplies the caption processor;
+        the default API leaves this gate off. These are explicit build choices,
+        not a dynamic capability registry.
         """
         self._raw_store = raw_store
         self._record_store = record_store
         self._now = now
         self._media_enabled = media_enabled
+        # Enabled only by the caption application alongside its processor.
+        # The existing HTTP composition retains its previous capabilities.
+        self._caption_artifacts_enabled = caption_artifacts_enabled
 
     def accept(self, envelope: CaptureEnvelope) -> CaptureRecord:
         """Register a capture, store its bytes, and return the stored snapshot.
@@ -429,6 +434,8 @@ class CaptureIntake:
                 return self._staged_document(envelope)
             case CapturePayloadType.IMAGE:
                 return self._staged_image(envelope)
+            case CapturePayloadType.FILE if self._caption_artifacts_enabled:
+                return self._staged_caption_artifact(envelope)
             case CapturePayloadType.AUDIO:
                 return self._staged_media(
                     envelope,
@@ -452,6 +459,29 @@ class CaptureIntake:
                     f"{CapturePayloadType.DOCUMENT.value} captures, and staged "
                     f"{_IMAGE_MIME_TYPES_PHRASE} {CapturePayloadType.IMAGE.value} captures only"
                 )
+
+    def _staged_caption_artifact(self, envelope: CaptureEnvelope) -> _StagedMaterial:
+        """ADR-024: one supported FILE format, never an arbitrary path or URL."""
+        payload = envelope.payload
+        if (
+            payload.mime_type != "application/vnd.unimem.youtube-captions+json"
+            or payload.file_ref is None
+            or payload.text is not None
+            or payload.html is not None
+        ):
+            raise UnsupportedCapturePayloadError(
+                "caption artifacts require their declared MIME and a staged file_ref alone"
+            )
+        try:
+            digest = parse_raw_ref(payload.file_ref)
+        except InvalidRawObjectRefError:
+            raise UnsupportedCapturePayloadError(
+                "caption artifacts require a UniMem raw object reference"
+            ) from None
+        raw_object = raw_object_ref(digest, mime_type=payload.mime_type)
+        if not self._raw_store.exists(raw_object):
+            raise CaptureMaterialUnavailableError("caption artifact has not been staged")
+        return _StagedMaterial(raw_object)
 
     def _staged_document(self, envelope: CaptureEnvelope) -> _StagedMaterial:
         """Resolve a ``DOCUMENT`` payload to the staged raw object it names.

@@ -38,6 +38,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+youtube = [
+    # The transport policy is verified against these exact endpoint semantics.
+    "youtube-transcript-api==1.2.4",
+    "requests>=2.32.3,<3",
+]
 # The optional PDF *rasterization* capability, and deliberately optional. A
 # default deployment installs neither of these, imports neither of them, and
 # refuses textless PDFs exactly as it always did; `pip install
@@ -78,6 +83,8 @@ ocr = [
     "Pillow>=11.0",
 ]
 dev = [
+    "types-requests>=2.32",
+    "types-defusedxml>=0.7",
     "pytest>=8.3",
     # Starlette's TestClient runs the ASGI app in-process over an HTTP client
     # library; it is the only way to exercise the real HTTP stack without
@@ -101,7 +108,7 @@ dev = [
 # provides. A Python extra would suggest `pip` could supply that, which it cannot.
 # Leaving the package out would mean `--media` failed with "no such module" on a
 # machine that had FFmpeg installed and everything it needs. See ADR-023.
-packages = ["src/core", "src/unimem_api", "src/unimem_ocr", "src/unimem_media"]
+packages = ["src/core", "src/unimem_api", "src/unimem_ocr", "src/unimem_media", "src/unimem_youtube"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -186,6 +193,12 @@ ignore_missing_imports = true
 # untestable in the job that checks it.
 [[tool.mypy.overrides]]
 module = ["PIL.*"]
+ignore_missing_imports = true
+
+# Retrieval is optional; the separate YouTube CI job installs the typed package
+# and checks this same code with the real dependency present.
+[[tool.mypy.overrides]]
+module = ["youtube_transcript_api.*"]
 ignore_missing_imports = true
 
 [tool.pydantic-mypy]

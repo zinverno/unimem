@@ -622,6 +622,43 @@ phase with an owner acceptance run, and CI evidence is not one.
 
 Phase 5B, transcription, is not designed.
 
+## YouTube caption acquisition and offline export (CLI)
+
+`src/unimem_youtube/` implements the browser-independent application operation,
+optional retrieval adapter, caption processor and pure `youtube-caption-markdown/1`
+export. [ADR-024](ADR/ADR-024-youtube-caption-artifact-and-cli.md) defines the
+versioned JSON input artifact, external-caption semantics, exact canonical
+mapping and bounded network policy. Existing contracts, stores and lifecycle
+owners are reused. Intake gains only an opt-in staged caption FILE capability;
+the default HTTP composition, routes and `markdown/0.1` renderer are unchanged.
+`render` reads saved canonical content without retrieval dependencies or network.
+See the [operator guide and evidence](YOUTUBE_CAPTIONS.md).
+
+## Planned next slices (not implemented)
+
+The [implementation plan](../tasks/plan.md) orders browser-independent YouTube
+caption acquisition, durable capture and CLI Markdown export before a required
+**Zen Browser/Linux** delivery slice. Firefox is a related development/checking
+platform; existing Chromium behaviour does not establish Zen support. The plan
+records the current connector's service-worker-only manifest, API/error handling,
+permissions, local API protection and background-lifetime gaps. Zen runtime
+acceptance is **NOT RUN**.
+
+Keep source platform, content format/modality, processing method and export/
+Obsidian delivery separate. Reuse existing source and provenance contracts;
+YouTube fields are not universal requirements. GitHub will later support
+explicit selection of README, files and code fragments from one pinned commit,
+with preserved structure and bounded acquisition. It remains alongside audio,
+images and video processing. Between Zen delivery and later source work is an
+explicit **Zen → UniMem → agreed Obsidian note import** milestone through
+Veynrel/Companion. No Obsidian integration, GitHub implementation or speculative
+schema is part of the CLI slice.
+
+These are requirements and proposed work, not amendments to accepted ADRs.
+Any implementation that changes capture/intake, rendering, local API acceptance
+or connector state/interaction semantics must include the corresponding narrow
+ADR. Existing closed phases and the open Phase 5A acceptance gate are unchanged.
+
 ## Future data flow
 
 ```

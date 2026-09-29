@@ -1074,10 +1074,42 @@ close the phase.
 
 `GET /health` reports process liveness only and checks nothing else.
 
+## YouTube captions through CLI
+
+The browser-independent caption slice stores a selected YouTube caption track
+through UniMem's existing pipeline, then exports Markdown with source, capture
+time, track facts and timed text. It does not download or analyse video/audio.
+
+```bash
+python -m pip install ".[youtube]"
+python -m unimem_youtube capture 'https://www.youtube.com/watch?v=jNQXAC9IVRw' \
+  --languages ru en --data-dir /tmp/unimem-youtube-demo/data \
+  --output-dir /tmp/unimem-youtube-demo/notes
+python -m unimem_youtube render CAPTURE_ID \
+  --data-dir /tmp/unimem-youtube-demo/data \
+  --output-dir /tmp/unimem-youtube-demo/rendered-again
+```
+
+Use the returned `capture_id` in the second command. `render` works without the
+retrieval extra or network. Output conflicts fail rather than overwrite; a failed
+export leaves a completed capture available for another render. These are explicit
+staging directories, not an Obsidian vault. See [installation, error semantics,
+limits and live evidence](docs/YOUTUBE_CAPTIONS.md).
+
 ## Browser capture
 
-The first real client of that API: a Chromium extension that saves either the
-text you have selected or the page you are looking at.
+**Primary target for the next browser release: Zen Browser on Linux.** Firefox
+is the related development platform; Chromium compatibility remains desirable.
+The existing connector below is Chromium-only and has not been ported or
+accepted in Zen. The CLI slice above is followed by Zen delivery, then a separate
+milestone for agreed Obsidian note import through Veynrel/Companion. See the
+[plan and extension audit](tasks/plan.md) and
+[implementation tasks](tasks/todo.md). GitHub is a later source alongside
+multimedia, not part of either immediate slice.
+
+The current client saves either selected text or the current page. These are
+**Chromium development-install instructions**, not Zen installation or a
+daily-use extension distribution:
 
 1. Start the UniMem API:
 
@@ -1158,7 +1190,10 @@ local API. There is no `<all_urls>`, no `tabs`, no `storage`, no `cookies`, no
 
 All deliberate for this phase:
 
-- **Chrome/Chromium MV3 only.** No Firefox or Safari port.
+- **Current implementation: Chrome/Chromium MV3 only.** Zen/Linux is the required
+  next browser target; Zen runtime acceptance is **NOT RUN**. The
+  [plan](tasks/plan.md#local-installation-and-reproducible-manual-smoke) separates
+  temporary development installation from signed daily-use distribution.
 - **Top-level document only**, for both captures. A selection inside a
   cross-origin iframe is not captured, and an iframe's contents are not part of a
   page snapshot. Widening permissions to reach them is not a trade this connector
