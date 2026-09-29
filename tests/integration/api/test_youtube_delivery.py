@@ -22,10 +22,11 @@ ROUTE = "/v1/youtube/operations"
 
 @contextmanager
 def server(
-    data: Path, mode: str = "success"
+    data: Path, mode: str = "success", *, port: int = 0
 ) -> Iterator[tuple[httpx2.Client, subprocess.Popen[str]]]:
     with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        probe.bind(("127.0.0.1", port))
         port = probe.getsockname()[1]
     process = subprocess.Popen(
         [sys.executable, "-m", "tests.delivery_process", "server", mode, str(data), str(port)],

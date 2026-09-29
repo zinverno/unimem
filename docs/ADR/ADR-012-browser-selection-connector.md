@@ -24,6 +24,11 @@ network handling and tab-scoped feedback. The one manifest change is a
 is still loopback only, and the popup this ADR rejected is still rejected, for
 the reason it gives.
 
+**Extended by [ADR-026](ADR-026-recoverable-browser-delivery.md):** shared Zen/Gecko
+and Chromium startup, protected credentials, management UI and bounded local
+YouTube operation references. The historical no-local-state restriction remains
+only for text/page retry envelopes; the server still owns all lifecycle.
+
 ## Context
 
 ADR-011 built an API and said, in as many words, that the callers were `curl` and
@@ -77,8 +82,8 @@ implementation is a guess about the second.
 
 **Capture happens only on an explicit click.** `chrome.action.onClicked` is the
 user gesture that grants `activeTab` for the current page, so there is
-deliberately **no popup** — a popup replaces that event and takes the gesture
-with it, leaving the extension needing standing access instead.
+deliberately **no popup**, preserving one-click selection. A popup replaces
+that event but can also receive activeTab; standing page access is not required.
 
 **`activeTab` and `scripting`, and nothing else.**
 
@@ -297,8 +302,8 @@ Costs:
 - **A static content script with `<all_urls>`.** Rejected: permanent read access
   to every page in exchange for convenience the click already provides.
 - **A popup instead of `action.onClicked`.** Rejected: the popup replaces the
-  click event that grants `activeTab`, so the extension would need standing page
-  access to do the same job.
+  click event and changes one-click selection into a separate UI action.
+  A popup can receive `activeTab`; the choice does not require standing access.
 - **Fetching from the injected page code.** Rejected: it runs in page-origin
   territory beside page script, does not carry the extension's host permission,
   and the natural "fix" is to add CORS middleware to the server.

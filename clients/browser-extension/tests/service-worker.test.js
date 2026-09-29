@@ -32,6 +32,7 @@ let scenario;
 let listener;
 let installedListener;
 let menuListener;
+let messageListener;
 /** Every `chrome.contextMenus.create` call, across the whole module's lifetime. */
 let menusCreatedAtImport;
 /** Rejections Node saw while a test ran. Must always be empty. */
@@ -41,6 +42,9 @@ const recordRejection = (reason) => rejections.push(reason);
 
 before(async () => {
   globalThis.chrome = {
+    permissions: { contains: async () => true },
+    storage: { session: { get: async () => ({credential: "t".repeat(43)}) }, local: { get: async () => ({}) } },
+    tabs: { create: async () => {} },
     action: {
       onClicked: {
         addListener: (fn) => {
@@ -63,6 +67,8 @@ before(async () => {
       },
     },
     runtime: {
+      id: "test", getURL: (p) => "moz-extension://00000000-0000-0000-0000-000000000000/" + p,
+      onMessage: { addListener: (fn) => { messageListener = fn; } },
       onInstalled: {
         addListener: (fn) => {
           installedListener = fn;
@@ -75,15 +81,20 @@ before(async () => {
           menuListener = fn;
         },
       },
-      create: (item) => {
+      removeAll: async () => { calls.menus = []; },
+      create: (item, callback) => {
         calls.menus.push(item);
+        callback();
         return item.id;
       },
     },
   };
   globalThis.fetch = async (url, options) => {
     calls.fetch.push({ url, options });
-    return scenario.fetch();
+    const value = await scenario.fetch();
+    let body;
+    try { body = JSON.stringify(await value.json()); } catch { body = "invalid JSON"; }
+    return new Response(body, {status: value.status, headers: {"Content-Type": "application/json"}});
   };
 
   // Menu calls are recorded from before the import, so that "importing the
@@ -175,7 +186,7 @@ describe("a successful click", () => {
     await click(TAB);
 
     assert.deepEqual(lastBadge(), { text: BADGE_OK, tabId: 7 });
-    assert.deepEqual(lastTitle(), { title: "UniMem: saved", tabId: 7 });
+    assert.deepEqual(lastTitle(), { title: "UniMem: сохранено", tabId: 7 });
   });
 
   it("shows busy first, also scoped to the clicked tab", async () => {
@@ -211,14 +222,14 @@ describe("every failure still ends in safe feedback", () => {
           throw new Error("Cannot access contents of url \"chrome://extensions\".");
         };
       },
-      "UniMem: cannot read the selection on this page",
+      "UniMem: нет доступа к выделению на этой странице",
     ],
     [
       "nothing is selected",
       () => {
         scenario.executeScript = () => [{ result: "   " }];
       },
-      "UniMem: select some text first",
+      "UniMem: сначала выделите текст",
     ],
     [
       "the API is not running",
@@ -227,7 +238,7 @@ describe("every failure still ends in safe feedback", () => {
           throw new TypeError("Failed to fetch");
         };
       },
-      "UniMem: service unavailable, capture outcome unknown",
+      "UniMem: сервер недоступен, результат захвата неизвестен",
     ],
     [
       "the API answers with a conflict",
@@ -237,7 +248,7 @@ describe("every failure still ends in safe feedback", () => {
           json: async () => ({ error: { code: "capture_already_exists", message: "taken" } }),
         });
       },
-      "UniMem: that capture already exists",
+      "UniMem: такой захват уже существует",
     ],
     [
       "the API answers with an unreadable body",
@@ -249,7 +260,7 @@ describe("every failure still ends in safe feedback", () => {
           },
         });
       },
-      "UniMem: unexpected response from the API",
+      "UniMem: неподдерживаемый ответ API",
     ],
     [
       "the flow throws something no outcome describes",
@@ -262,7 +273,7 @@ describe("every failure still ends in safe feedback", () => {
           } };
         };
       },
-      "UniMem: capture failed",
+      "UniMem: сервер недоступен, результат захвата неизвестен",
     ],
   ];
 
@@ -338,7 +349,7 @@ describe("a click on a page that cannot be captured", () => {
 
     assert.deepEqual(calls.executeScript, []);
     assert.deepEqual(calls.fetch, []);
-    assert.equal(lastTitle().title, "UniMem: cannot capture from this page");
+    assert.equal(lastTitle().title, "UniMem: эту страницу нельзя сохранить");
     assert.equal(lastBadge().tabId, 3);
   });
 
@@ -360,17 +371,17 @@ describe("registering the whole-page menu item", () => {
   });
 
   it("creates exactly one item when the extension is installed", async () => {
-    installedListener();
+    await drive(() => installedListener(), "installation");
 
-    assert.equal(calls.menus.length, 1);
+    assert.equal(calls.menus.length, 3);
   });
 
   it("creates it with the stable id, exact title, and action context", async () => {
-    installedListener();
+    await drive(() => installedListener(), "installation");
 
     assert.deepEqual(calls.menus[0], {
       id: "unimem-save-whole-page",
-      title: "Save whole page to UniMem",
+      title: "Сохранить всю страницу в UniMem",
       contexts: ["action"],
     });
   });
@@ -381,17 +392,18 @@ describe("registering the whole-page menu item", () => {
     };
 
     try {
-      assert.doesNotThrow(() => installedListener());
+      await drive(() => installedListener(), "menu refusal");
     } finally {
-      globalThis.chrome.contextMenus.create = (item) => {
+      globalThis.chrome.contextMenus.create = (item, callback) => {
         calls.menus.push(item);
+        callback();
         return item.id;
       };
     }
   });
 });
 
-describe("choosing 'Save whole page to UniMem'", () => {
+describe("choosing 'Сохранить всю страницу в UniMem'", () => {
   beforeEach(() => {
     scenario.executeScript = () => [{ result: "<html><body>the page body</body></html>" }];
   });
@@ -400,14 +412,14 @@ describe("choosing 'Save whole page to UniMem'", () => {
     await chooseMenuItem(TAB);
 
     assert.deepEqual(lastBadge(), { text: BADGE_OK, tabId: 7 });
-    assert.deepEqual(lastTitle(), { title: "UniMem: saved", tabId: 7 });
+    assert.deepEqual(lastTitle(), { title: "UniMem: сохранено", tabId: 7 });
   });
 
   it("shows busy first, and says it is saving a page", async () => {
     await chooseMenuItem(TAB);
 
     assert.deepEqual(calls.badges[0], { text: BADGE_BUSY, tabId: 7 });
-    assert.deepEqual(calls.titles[0], { title: "UniMem: saving page...", tabId: 7 });
+    assert.deepEqual(calls.titles[0], { title: "UniMem: сохранение страницы…", tabId: 7 });
   });
 
   it("scopes every single action call to that tab", async () => {
@@ -460,21 +472,21 @@ describe("choosing 'Save whole page to UniMem'", () => {
           throw new Error("Cannot access contents of url \"chrome://extensions\".");
         };
       },
-      "UniMem: could not read this page",
+      "UniMem: не удалось прочитать страницу",
     ],
     [
       "the page returns nothing",
       () => {
         scenario.executeScript = () => [{}];
       },
-      "UniMem: could not read this page",
+      "UniMem: не удалось прочитать страницу",
     ],
     [
       "the page returns only whitespace",
       () => {
         scenario.executeScript = () => [{ result: "  \r\n " }];
       },
-      "UniMem: could not read this page",
+      "UniMem: не удалось прочитать страницу",
     ],
     [
       "the API is not running",
@@ -483,7 +495,7 @@ describe("choosing 'Save whole page to UniMem'", () => {
           throw new TypeError("Failed to fetch");
         };
       },
-      "UniMem: service unavailable, capture outcome unknown",
+      "UniMem: сервер недоступен, результат захвата неизвестен",
     ],
     [
       "the flow throws something no outcome describes",
@@ -494,7 +506,7 @@ describe("choosing 'Save whole page to UniMem'", () => {
           },
         });
       },
-      "UniMem: capture failed",
+      "UniMem: сервер недоступен, результат захвата неизвестен",
     ],
   ];
 
@@ -529,7 +541,7 @@ describe("choosing 'Save whole page to UniMem'", () => {
 
     assert.deepEqual(calls.executeScript, []);
     assert.deepEqual(calls.fetch, []);
-    assert.equal(lastTitle().title, "UniMem: cannot capture from this page");
+    assert.equal(lastTitle().title, "UniMem: эту страницу нельзя сохранить");
     assert.equal(lastBadge().tabId, 3);
   });
 
@@ -569,4 +581,27 @@ describe("a context-menu click that is not ours", () => {
       assert.deepEqual(calls.fetch, []);
     });
   }
+});
+
+
+describe("trusted management messaging", () => {
+  it("rejects a website/content sender and extra fields without requests or credentials", async () => {
+    for (const sender of [{id:"test",url:"https://example.org"},{id:"other",url:chrome.runtime.getURL("manage.html")},{id:"test",url:chrome.runtime.getURL("manage.html"),frameId:2}]) {
+      let answer;
+      assert.equal(messageListener({type:"check"},sender,(a)=>{answer=a;}),false);
+      assert.equal(answer.error.code,"invalid_message");
+    }
+    let answer;
+    messageListener({type:"list",token:"x"},{id:"test",url:chrome.runtime.getURL("manage.html")},a=>{answer=a;});
+    assert.equal(answer.error.code,"invalid_message");
+    assert.equal(calls.fetch.length,0);
+  });
+  it("accepts only a bounded management action, never returning a credential", async () => {
+    let answer;
+    const kept=messageListener({type:"list"},{id:"test",url:chrome.runtime.getURL("manage.html")},a=>{answer=a;});
+    assert.equal(kept,true);
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(answer.ok,true);assert.deepEqual(answer.value,[]);
+    assert.ok(!JSON.stringify(answer).includes("t".repeat(43)));
+  });
 });

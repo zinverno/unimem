@@ -26,11 +26,12 @@ function fakeContextMenus(options = {}) {
   const created = [];
   return {
     created,
-    create: (item) => {
+    create: (item, callback) => {
       if (options.refuseWith) {
         throw options.refuseWith;
       }
       created.push(item);
+      callback();
       return item.id;
     },
   };
@@ -42,7 +43,7 @@ describe("the whole-page menu item", () => {
   });
 
   it("says exactly what choosing it does", () => {
-    assert.equal(WHOLE_PAGE_MENU_TITLE, "Save whole page to UniMem");
+    assert.equal(WHOLE_PAGE_MENU_TITLE, "Сохранить всю страницу в UniMem");
   });
 
   it("appears on the action's own context and nowhere else", () => {
@@ -72,7 +73,7 @@ describe("registering it", () => {
 
     assert.deepEqual(contextMenus.created[0], {
       id: "unimem-save-whole-page",
-      title: "Save whole page to UniMem",
+      title: "Сохранить всю страницу в UniMem",
       contexts: ["action"],
     });
   });
@@ -97,12 +98,12 @@ describe("registering it", () => {
     assert.deepEqual(contextMenus.created[0].contexts, [...WHOLE_PAGE_MENU_CONTEXTS]);
   });
 
-  it("never throws when Chrome refuses the item", () => {
+  it("propagates refusal for the terminal listener to report", async () => {
     // Creating a duplicate id throws. There is no user waiting on the answer and
     // no `onInstalled` frame to catch it, so this must be terminal on its own.
     const contextMenus = fakeContextMenus({ refuseWith: new Error("Cannot create item") });
 
-    assert.doesNotThrow(() => createWholePageMenu(contextMenus));
+    await assert.rejects(createWholePageMenu(contextMenus), /menu_unavailable/);
   });
 });
 
@@ -124,4 +125,28 @@ describe("recognizing a click on it", () => {
       assert.equal(isWholePageMenu(info), false);
     });
   }
+});
+
+describe("shared menu lifecycle", () => {
+  it("reads runtime.lastError inside the callback and rejects without leaking details", async () => {
+    const { createMenu } = await import("../lib/browser.js");
+    let read = false;
+    const api = {
+      runtime: { get lastError() { read = true; return { message: "private browser detail" }; } },
+      contextMenus: { create(_item, callback) { queueMicrotask(callback); } },
+    };
+    await assert.rejects(createMenu(api, { id: "test" }), /^Error: menu_unavailable$/);
+    assert.equal(read, true);
+  });
+  it("reinstallation replaces the three stable items without duplicates", async () => {
+    const { installMenus } = await import("../lib/menu.js");
+    const items = new Map();
+    const api = { runtime: {}, contextMenus: {
+      async removeAll() { items.clear(); },
+      create(item, callback) { assert.equal(items.has(item.id), false); items.set(item.id, item); callback(); },
+    } };
+    await installMenus(api);
+    await installMenus(api);
+    assert.equal(items.size, 3);
+  });
 });

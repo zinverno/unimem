@@ -34,36 +34,37 @@ export const BADGE_FAIL = "!";
  * exactly as it always has.
  */
 const BUSY_TITLES = Object.freeze({
-  selection: "UniMem: saving selection...",
-  page: "UniMem: saving page...",
+  selection: "UniMem: сохранение выделенного текста…",
+  page: "UniMem: сохранение страницы…",
 });
 
 /** The one fallback, used for any outcome this map has not been taught. */
-const FALLBACK_TITLE = "UniMem: capture failed";
+const FALLBACK_TITLE = "UniMem: не удалось сохранить";
 
 /** Human wording for a durable lifecycle state a probe found. */
 const DURABLE_STATE_TITLES = Object.freeze({
-  received: "UniMem: received, but not yet stored",
-  stored: "UniMem: stored, but not yet processed",
-  processing: "UniMem: capture is still processing",
-  failed: "UniMem: the server could not process this capture",
+  received: "UniMem: получено, ещё не записано",
+  stored: "UniMem: записано, ещё не обработано",
+  processing: "UniMem: обработка продолжается",
+  failed: "UniMem: сервер не смог обработать материал",
 });
 
 /** Human wording for the typed error codes the API documents. */
 const SERVER_ERROR_TITLES = Object.freeze({
-  capture_already_exists: "UniMem: that capture already exists",
-  content_conflict: "UniMem: the server already has content for this capture",
-  invalid_capture_state: "UniMem: the capture is not in a state that can be processed",
-  not_found: "UniMem: the capture was not found",
-  unsupported_payload: "UniMem: this kind of capture is not supported yet",
-  invalid_capture_envelope: "UniMem: the capture was rejected as invalid",
-  invalid_request: "UniMem: the capture was rejected as invalid",
+  unauthorized: "UniMem: токен отклонён. Откройте настройки подключения",
+  capture_already_exists: "UniMem: такой захват уже существует",
+  content_conflict: "UniMem: результат этого захвата уже существует",
+  invalid_capture_state: "UniMem: состояние захвата не допускает обработку",
+  not_found: "UniMem: захват не найден",
+  unsupported_payload: "UniMem: этот формат пока не поддерживается",
+  invalid_capture_envelope: "UniMem: сервер отклонил некорректный запрос",
+  invalid_request: "UniMem: сервер отклонил некорректный запрос",
   // Modality-neutral since whole-page capture: an HTML snapshot the server
   // finds no visible text in reaches this code too, and it is not a selection.
-  processing_failed: "UniMem: the capture could not be processed",
-  processing_configuration_error: "UniMem: the server is not configured to process this",
-  data_integrity_error: "UniMem: the server could not read back its own data",
-  storage_unavailable: "UniMem: the capture store is unavailable",
+  processing_failed: "UniMem: материал не удалось обработать",
+  processing_configuration_error: "UniMem: обработчик не настроен на сервере",
+  data_integrity_error: "UniMem: сервер не смог прочитать сохранённые данные",
+  storage_unavailable: "UniMem: хранилище недоступно",
 });
 
 /** What to show the moment the user acts, before anything has happened. */
@@ -84,9 +85,9 @@ export function busyFeedback(kind) {
  * worth mentioning.
  */
 const CONFIRMATION_TITLES = Object.freeze({
-  post: "UniMem: saved",
-  replay: "UniMem: saved (confirmed retry)",
-  probe: "UniMem: saved (confirmed after a network error)",
+  post: "UniMem: сохранено",
+  replay: "UniMem: сохранено (подтверждено повторным запросом)",
+  probe: "UniMem: сохранено (подтверждено после сетевой ошибки)",
 });
 
 /** What to show once the attempt has resolved, one way or the other. */
@@ -117,27 +118,27 @@ function successTitle(result) {
 function failureTitle(result, outcome) {
   switch (outcome) {
     case OUTCOME.BLANK_SELECTION:
-      return "UniMem: select some text first";
+      return "UniMem: сначала выделите текст";
     case OUTCOME.UNSUPPORTED_PAGE:
-      return "UniMem: cannot capture from this page";
+      return "UniMem: эту страницу нельзя сохранить";
     case OUTCOME.INJECTION_FAILED:
-      return "UniMem: cannot read the selection on this page";
+      return "UniMem: нет доступа к выделению на этой странице";
     case OUTCOME.PAGE_CAPTURE_FAILED:
       // Says only that the page could not be read. Never why, and never with
       // any of the page in it.
-      return "UniMem: could not read this page";
+      return "UniMem: не удалось прочитать страницу";
     case OUTCOME.UNAVAILABLE:
       return result?.probed
-        ? "UniMem: service unavailable, capture outcome unknown"
-        : "UniMem: service unavailable";
+        ? "UniMem: сервер недоступен, результат захвата неизвестен"
+        : "UniMem: сервер недоступен";
     case OUTCOME.UNCONFIRMED:
-      return "UniMem: the capture could not be confirmed";
+      return "UniMem: сохранение не подтверждено";
     case OUTCOME.DURABLE_STATE:
       return DURABLE_STATE_TITLES[result?.status] ?? FALLBACK_TITLE;
     case OUTCOME.SERVER_ERROR:
       return serverErrorTitle(result);
     case OUTCOME.PROTOCOL_ERROR:
-      return "UniMem: unexpected response from the API";
+      return "UniMem: неподдерживаемый ответ API";
     case OUTCOME.UNEXPECTED_ERROR:
       // Deliberately says nothing about what threw. Whatever it was, its
       // message is not written for a person reading a toolbar tooltip.

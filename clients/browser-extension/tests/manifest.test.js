@@ -37,7 +37,7 @@ describe("manifest", () => {
   });
 
   it("declares an action with a title that says what clicking does", () => {
-    assert.equal(manifest.action.default_title, "Save selected text to UniMem");
+    assert.equal(manifest.action.default_title, "Сохранить выделенный текст в UniMem");
   });
 
   it("has no popup, so onClicked stays the user gesture that grants activeTab", () => {
@@ -57,12 +57,12 @@ describe("what the extension says it is", () => {
   it("describes both of the things it can save", () => {
     assert.equal(
       manifest.description,
-      "Save selected text or the current page to your local UniMem capture API.",
+      "Сохранение текста, страниц и субтитров YouTube в локальный UniMem.",
     );
   });
 
   it("carries a deliberately bumped extension version", () => {
-    assert.equal(manifest.version, "0.2.0");
+    assert.equal(manifest.version, "0.3.0");
     assert.notEqual(manifest.version, "0.1.0");
   });
 
@@ -71,7 +71,7 @@ describe("what the extension says it is", () => {
   });
 
   it("does not confuse its own version with the canonical schema version", () => {
-    // The extension is at 0.2.0; the contract it emits is schema 0.3. They
+    // The extension is at 0.3.0; the contract it emits is schema 0.3. They
     // moved on different schedules for different reasons, and this test exists
     // so that nobody "fixes" one to match the other.
     assert.notEqual(manifest.version, SCHEMA_VERSION);
@@ -81,7 +81,7 @@ describe("what the extension says it is", () => {
 
 describe("permissions", () => {
   it("are exactly the minimal intended set", () => {
-    assert.deepEqual(manifest.permissions, ["activeTab", "scripting", "contextMenus"]);
+    assert.deepEqual(manifest.permissions, ["activeTab", "scripting", "contextMenus", "storage", "downloads"]);
   });
 
   it("include activeTab", () => {
@@ -100,16 +100,15 @@ describe("permissions", () => {
     assert.ok(manifest.permissions.includes("contextMenus"));
   });
 
-  it("grew by exactly one permission", () => {
-    const beforeThisPhase = ["activeTab", "scripting"];
+  it("adds only job/settings storage and explicit file downloads", () => {
+    const beforeThisPhase = ["activeTab", "scripting", "contextMenus"];
     const added = manifest.permissions.filter((name) => !beforeThisPhase.includes(name));
 
-    assert.deepEqual(added, ["contextMenus"]);
+    assert.deepEqual(added, ["storage", "downloads"]);
   });
 
   for (const forbidden of [
     "tabs",
-    "storage",
     "notifications",
     "webRequest",
     "cookies",
@@ -118,7 +117,6 @@ describe("permissions", () => {
     "declarativeNetRequest",
     "pageCapture",
     "tabCapture",
-    "downloads",
     "history",
     "bookmarks",
     "debugger",
@@ -179,4 +177,11 @@ describe("what the manifest must not do", () => {
   it("declares no web accessible resources", () => {
     assert.equal(manifest.web_accessible_resources, undefined);
   });
+});
+
+it("shares ES modules with a Gecko event page and stable identity", () => {
+ assert.equal(manifest.minimum_chrome_version, "121");
+ assert.deepEqual(manifest.background.scripts, [manifest.background.service_worker]);
+ assert.equal(manifest.browser_specific_settings.gecko.id, "unimem@zinverno.github.io");
+ assert.equal(manifest.options_ui.page, "manage.html");
 });

@@ -1,12 +1,13 @@
 # YouTube CLI capture, then Zen/Linux delivery
 
-Updated: 2026-09-29. Block A is implemented and merged in
-[PR #31](https://github.com/zinverno/unimem/pull/31). B1 implements protected local
-HTTP delivery on `feat/protected-youtube-delivery`; see
-[ADR-025](../docs/ADR/ADR-025-protected-local-youtube-delivery.md) and
-[connection/restart guide](../docs/LOCAL_DELIVERY.md). B2–B4 and C–D remain future
-work. Prior CLI verification remains in [todo.md](todo.md) and the
-[CLI guide](../docs/YOUTUBE_CAPTIONS.md).
+Updated: 2026-09-29. A and B1 are merged (PR #31/#32). B2/B3 implement the
+protected shared browser extension, connection UI, durable operation references
+and Markdown preview/download on `feat/zen-browser-youtube-capture`.
+[ADR-026](../docs/ADR/ADR-026-recoverable-browser-delivery.md),
+[installation](../docs/BROWSER_DELIVERY.md),
+[measured evidence and remaining B4 gates](../docs/BROWSER_VERIFICATION.md).
+The audit below is the historical planning baseline; its gaps are superseded by
+ADR-026 where implemented. C–D remain future work. Signed distribution remains NOT RUN.
 Tasks and acceptance gates: [todo.md](todo.md).
 
 ## Baseline and scope
@@ -151,7 +152,7 @@ static manifests over the same source tree. Do not maintain two extension
 implementations or add a framework/bundler merely to promise portability.
 Documentation version thresholds are not tested-browser versions.
 
-## Next browser slice: required gates, not current implementation
+## Original browser gates (implementation and current evidence linked above)
 
 B1 implements the server prerequisite in ADR-025: explicit local bearer-token
 setup/rotation, protection of all old/new routes, Host/Origin and bounded ingress,
@@ -179,7 +180,7 @@ HTTP/auth/acceptance changes are recorded in ADR-025 against ADR-011/013.
 
 ### Local installation and reproducible manual smoke
 
-**Current result: Zen runtime acceptance NOT RUN.** `zen`, `zen-browser`, and
+**Historical pre-B2 result: Zen runtime acceptance NOT RUN.** `zen`, `zen-browser`, and
 `firefox` were not found on this environment's `PATH`. Chromium is on `PATH`
 but was not launched or used for acceptance. No tested browser version is
 recorded. If Zen cannot be provided for the next slice, mark its runtime gate

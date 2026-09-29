@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>UniMem — задания и подключение</title><link rel="stylesheet" href="manage.css"></head>
+<body><main>
+<header><p class="eyebrow">Локальный UniMem</p><h1>Материалы и задания</h1><p>Выберите «YouTube → Markdown» в меню значка на странице ролика. Обычный клик сохраняет выделенный текст; «Сохранить всю страницу» — HTML страницы.</p></header>
+<p id="notice" role="status" aria-live="polite"></p>
+<section aria-labelledby="connection-heading"><h2 id="connection-heading">Подключение</h2><p>Адрес сервера: <code>http://127.0.0.1:8765</code></p>
+<p>Получите токен командой <code>python -m unimem_api --data-dir ./data --show-token</code>. Для субтитров запустите сервер с <code>--youtube</code>.</p>
+<form id="settings-form"><label for="token">Новый токен</label><input id="token" type="password" autocomplete="off" spellcheck="false" maxlength="43" aria-describedby="token-help"><p id="token-help">Токен не показывается повторно. Пустое поле сохраняет только порядок языков.</p>
+<label class="check"><input id="remember" type="checkbox"> Запомнить токен на этом устройстве</label><p>По умолчанию токен хранится до завершения сеанса браузера. Постоянное хранилище не зашифровано; другие программы вашего пользователя могут прочитать профиль.</p>
+<label for="languages">Приоритет языков субтитров</label><input id="languages" value="ru,en" maxlength="200" required aria-describedby="languages-help"><p id="languages-help">От 1 до 10 кодов через запятую, в порядке выбора. Перевод не выполняется. Изменения применяются к новым заданиям.</p>
+<div class="actions"><button type="submit">Сохранить настройки</button><button id="delete-token" type="button">Удалить токен</button><button id="check" type="button">Проверить подключение</button><button id="permission" type="button">Разрешить доступ к локальному API</button></div></form>
+<p id="credential-state"></p><p id="connection-state" role="status"></p></section>
+<section aria-labelledby="jobs-heading"><h2 id="jobs-heading">Последние операции</h2><p>До 50 локальных ссылок. Задания выполняет сервер; закрытие этой страницы не отменяет принятые операции. Повторный выбор того же ролика открывает существующее задание. Для нового захвата есть «Сохранить заново».</p>
+<label for="jobs">Выберите операцию</label><select id="jobs"><option value="">Заданий пока нет</option></select>
+<div id="job" hidden><h3>Выбранное задание</h3><dl id="details"></dl><p id="job-error" role="status"></p>
+<div class="actions"><button id="refresh">Обновить статус</button><button id="send">Отправить</button><button id="retry">Повторить доставку</button><button id="again">Сохранить заново</button><button id="remove">Удалить локальную ссылку</button></div>
+<p>«Повторить доставку» проверяет прежний ID и отправляет те же параметры только при неподтверждённом приёме. «Сохранить заново» создаёт новый ID и новый захват. Удаление ссылки не отменяет работу и не удаляет серверный capture.</p>
+<h3>Результат</h3><div class="actions"><button id="preview">Получить Markdown</button><button id="download" disabled>Сохранить .md…</button></div><p id="export-state" role="status"></p><pre id="markdown" tabindex="0" aria-label="Markdown как текст"></pre>
+<p>Это результат в UniMem. Импорт в Obsidian в этой версии не выполняется.</p></div></section>
+</main><script type="module" src="manage.js"></script></body></html>

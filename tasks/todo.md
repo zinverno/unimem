@@ -70,7 +70,7 @@ modules skipped); the built wheel also rendered persisted content in a new
 process without those dependencies. [Live evidence](../docs/YOUTUBE_CAPTIONS.md#opt-in-live-acceptance)
 is a separate PASS on one public video. Zen runtime acceptance remains NOT RUN.
 CI's final status is reported against the actual PR head at handoff, not inferred
-from these local results. B2–B4 and C–D remain unimplemented; B1 evidence follows below.
+from these local results. B2/B3 implementation and available B4 evidence are recorded below; C–D remain future work.
 
 ## B — Next PR: Zen/Linux browser delivery
 
@@ -99,43 +99,40 @@ the exact PR head at handoff, separately from these local measurements.
 
 ### B2 — Compatible extension startup and original captures
 
-Dependencies: B1. Likely scope: manifest/browser entry, small API adapter, tests.
-
-- [ ] Validate one combined MV3 manifest in Zen first; use small static variants
-  only for demonstrated constraints, sharing all business logic without a new
-  framework or build infrastructure.
-- [ ] Verify module loading, menu registration, Promise/callback error paths,
-  denied scripting/host permission and background unload/restart.
-- [ ] Preserve text and whole-page gestures, least privileges and loopback
-  destination; run `npm test --prefix clients/browser-extension` plus real Zen
-  checks. Record Firefox/Chromium regressions independently.
+- [x] Implement a shared MV3 event-page/service-worker manifest, native modules,
+  stable Gecko ID and callback/lastError handling without a framework.
+- [x] Restore protected text/page capture through the shared credential transport,
+  retaining original envelopes, 200/201, bounded replay and HTML boundaries.
+- [x] Add explicit credential/settings UI, session default, opt-in local storage,
+  typed read-only readiness probe, removal/rotation and denied-permission handling.
+- [x] Run Node, protected B1 cross-language and packaging checks; preserve CI gates.
+- [ ] Complete all target-browser acceptance rows. See exact per-browser results
+  in [BROWSER_VERIFICATION.md](../docs/BROWSER_VERIFICATION.md); no blanket PASS.
 
 ### B3 — Explicit YouTube action and recoverable status
 
-Dependencies: B1–B2. Likely scope: action/menu or justified popup, delivery/status
-client, minimal capture-reference storage if needed, relevant ADR updates/tests.
-
-- [ ] Freeze selected tab/video URL at the gesture; send it through the protected
-  local API and show accepted/processing/result/error truthfully.
-- [ ] Preserve accepted work across UI closure/background unload; reopen status
-  for the same capture. Any local reference storage explicitly updates the
-  former no-state policy without moving lifecycle ownership into the extension.
-- [ ] Verify two tabs, SPA navigation, lost responses, denied access, unavailable
-  captions, closed tab/popup and no duplicate work. Update affected assertions
-  deliberately; never weaken them just to pass.
+- [x] Freeze URL and ordered languages; persist operation identity before POST.
+  Coalesce concurrent actions and require explicit new operation for reacquisition.
+- [x] Store bounded local references/observations, not a second lifecycle or
+  transcript store. Record policy in ADR-026 and invariant 18.
+- [x] Restore the same IDs after UI/background closure, manual refresh, explicit
+  same-ID delivery, typed validation, and accepted-but-missing handling.
+- [x] Authorize Markdown reads; safe text preview and explicit Blob download.
+  Export failure does not change capture state; no Obsidian claim/import.
+- [x] Add failure/storage/response/race tests and real protected B1 TCP acceptance
+  with a synthetic caption provider and POST/acquisition/capture counts.
 
 ### B4 — Zen acceptance and install documentation
 
-Dependencies: B3. Likely scope: installation guide, smoke/evidence record,
-distribution metadata/artifact preparation.
-
-- [ ] Run every [manual smoke row](plan.md#local-installation-and-reproducible-manual-smoke)
-  in real Zen/Linux; record exact browser/base versions, commit and result.
-- [ ] Separate temporary development install from signed daily-use installation;
-  test real permission prompts and persistence across browser restart. Keep
-  publication separate from preparation.
-- [ ] Mark Zen `NOT RUN`/`BLOCKED` if unavailable; provide the local procedure
-  and do not claim support from Firefox, Chromium or Python/Node tests.
+- [x] Locate actual Zen including Flatpak; use isolated profile and temporary data.
+- [x] Provide reproducible dev ZIP, stable identity, metadata, SHA256 and install/
+  connection/recovery instructions in [browser guide](../docs/BROWSER_DELIVERY.md).
+- [x] Keep runtime, synthetic/live and signed-distribution evidence separate in
+  [verification](../docs/BROWSER_VERIFICATION.md).
+- [ ] Complete every native/browser-platform acceptance row that remains open in
+  the verification record; partial evidence does not complete B4.
+- [ ] Signed installation, permission prompts after normal installation, browser
+  restart and updates. No signed package; no submission/publication authorized.
 
 ## C — Core user flow: agreed Obsidian note import
 

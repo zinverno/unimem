@@ -8,6 +8,11 @@ processor, replay, or persistence change. The canonical schema stays `0.2`; the
 *extension* moves to `0.2.0`, which is an unrelated number that happens to look
 alike.
 
+**Extended by [ADR-026](ADR-026-recoverable-browser-delivery.md):** shared Zen/Gecko
+and Chromium startup, protected credentials, management UI and bounded local
+YouTube operation references. The historical no-local-state restriction remains
+only for text/page retry envelopes; the server still owns all lifecycle.
+
 ## Context
 
 [ADR-014](ADR-014-html-webpage-ingestion.md) made HTML ingestion real. A
@@ -308,8 +313,8 @@ Costs:
 ## Alternatives rejected
 
 - **A popup with two buttons.** Deletes `chrome.action.onClicked`, and with it the
-  gesture that grants `activeTab`. It would trade a working one-click capture for
-  a two-click one *and* need standing page access.
+  one-click selection flow. A popup can receive `activeTab`; the reason to
+  keep the existing action is interaction continuity, not standing access.
 - **A second toolbar action.** MV3 allows one action per extension.
 - **A page-context or selection-context menu item.** Puts UniMem in the
   right-click menu of every page the user opens, for no capability the action
