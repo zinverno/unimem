@@ -1076,8 +1076,18 @@ close the phase.
 
 ## Browser capture
 
-The first real client of that API: a Chromium extension that saves either the
-text you have selected or the page you are looking at.
+**Primary target for the next browser release: Zen Browser on Linux.** Firefox
+is the related development platform; Chromium compatibility remains desirable.
+The existing connector below is Chromium-only and has not been ported or
+accepted in Zen. The next implementation starts with browser-independent
+YouTube captions → durable capture → Markdown through CLI, followed by Zen
+delivery. See the [plan and extension audit](tasks/plan.md) and
+[implementation tasks](tasks/todo.md). GitHub is a later source alongside
+multimedia, not part of either immediate slice.
+
+The current client saves either selected text or the current page. These are
+**Chromium development-install instructions**, not Zen installation or a
+daily-use extension distribution:
 
 1. Start the UniMem API:
 
@@ -1158,7 +1168,10 @@ local API. There is no `<all_urls>`, no `tabs`, no `storage`, no `cookies`, no
 
 All deliberate for this phase:
 
-- **Chrome/Chromium MV3 only.** No Firefox or Safari port.
+- **Current implementation: Chrome/Chromium MV3 only.** Zen/Linux is the required
+  next browser target; Zen runtime acceptance is **NOT RUN**. The
+  [plan](tasks/plan.md#local-installation-and-reproducible-manual-smoke) separates
+  temporary development installation from signed daily-use distribution.
 - **Top-level document only**, for both captures. A selection inside a
   cross-origin iframe is not captured, and an iframe's contents are not part of a
   page snapshot. Widening permissions to reach them is not a trade this connector
