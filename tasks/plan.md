@@ -1,6 +1,7 @@
 # YouTube CLI capture, then Zen/Linux delivery
 
-Updated: 2026-09-29. Block A is implemented on `feat/youtube-transcript-markdown`;
+Updated: 2026-09-29. Block A is implemented on `feat/youtube-transcript-markdown`,
+in open [PR #31](https://github.com/zinverno/unimem/pull/31);
 verification and handoff evidence are tracked in [todo.md](todo.md) and the
 [CLI guide](../docs/YOUTUBE_CAPTIONS.md). Blocks B-D remain future work.
 Tasks and acceptance gates: [todo.md](todo.md).

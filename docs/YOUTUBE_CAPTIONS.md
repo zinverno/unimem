@@ -149,9 +149,24 @@ mypy
 pytest --cov=core --cov=unimem_api --cov=unimem_youtube
 ```
 
-The dedicated CI job measures the new package independently with a 90% floor;
-the existing quality job continues to test the base installation without the
-retrieval extra. The actual final counts and CI status belong to the PR handoff.
+Observed against implementation commit `266497b6c69b56d0b0f0da6199c49b0e31b536a2`
+(2026-09-29):
+
+| Check | Result |
+| --- | --- |
+| Focused YouTube suite | 93 passed; independent branch coverage 95.85% |
+| Full local suite, core/API/YouTube coverage | 4,274 passed; branch coverage 97.35% |
+| Ruff lint / format / strict mypy | PASS; mypy checked 234 source files |
+| Base installation without retrieval dependencies | 60 passed; two retrieval-only modules skipped; API/application imports and mypy PASS |
+| Wheel and sdist | Built; wheel installed without retrieval extra and rendered persisted fixture content in a fresh CLI process |
+| Existing browser Node suite | 11 test files passed; no browser runtime acceptance implied |
+
+The full local suite was run outside the restricted sandbox after an existing
+API test stalled inside it; all data remained in temporary directories. The
+dedicated CI job measures the new package independently with a 90% floor; the
+existing quality job continues to test the base installation without the
+retrieval extra. Final CI status is reported against the actual head of
+[PR #31](https://github.com/zinverno/unimem/pull/31) at handoff.
 
 The future browser adapter calls the same application service. Zen/Linux remains
 the mandatory next browser target; manifest checks, Python tests and other

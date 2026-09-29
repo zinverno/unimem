@@ -54,12 +54,23 @@ Dependencies: A2. Likely scope: CLI entry, pure export boundary, focused tests/d
 
 Dependencies: A1–A3. Likely scope: tests, instructions, PR evidence.
 
-- [ ] Run focused suites, then `ruff check .`, `ruff format --check .`, `mypy`,
+- [x] Run focused suites, then `ruff check .`, `ruff format --check .`, `mypy`,
   and `pytest --cov=core --cov=unimem_api`; retain the 90% coverage floor.
 - [x] Provide a reproducible CLI smoke using temporary storage; report fixture
   vs live evidence separately, and any external prerequisite as unverified.
-- [ ] Review diff/ADRs; hand off the three-part browser-independence/Zen-work/
+- [x] Review diff/ADRs; hand off the three-part browser-independence/Zen-work/
   actual-Zen-evidence report. No extension port, GitHub ingestion or merge.
+
+Evidence (2026-09-29): [PR #31](https://github.com/zinverno/unimem/pull/31) is open.
+Focused: 93 passed, new-package branch coverage 95.85%. Full local regression:
+4,274 passed, combined core/API/YouTube branch coverage 97.35%. Ruff, formatting,
+strict mypy, wheel/sdist and existing browser Node checks pass. A clean base
+installation without retrieval dependencies passed 60 tests (two retrieval-only
+modules skipped); the built wheel also rendered persisted content in a new
+process without those dependencies. [Live evidence](../docs/YOUTUBE_CAPTIONS.md#opt-in-live-acceptance)
+is a separate PASS on one public video. Zen runtime acceptance remains NOT RUN.
+CI's final status is reported against the actual PR head at handoff, not inferred
+from these local results. B–D are not implemented.
 
 ## B — Next PR: Zen/Linux browser delivery
 
