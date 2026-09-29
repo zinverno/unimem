@@ -7,6 +7,24 @@ it takes heterogeneous digital content — text, webpages, images, documents,
 video, code, files — and normalizes it into a versioned canonical
 representation that a larger shared-memory / AI context system can build on.
 
+## Protected local delivery (B1)
+
+[ADR-025](ADR/ADR-025-protected-local-youtube-delivery.md) adds mandatory local
+bearer authentication and Host/Origin/body/request limits around every existing
+API route. Only minimal liveness remains public. A separate `youtube_operations`
+table in `unimem.sqlite3` owns durable delivery IDs and queued/running/terminal
+state. A Linux process lease and one bounded worker compose the existing YouTube
+service with a reserved capture ID; intake/orchestrator/raw/content ownership and
+schema 0.3 stay intact. Completed results render without acquisition or file writes.
+The operation table neither duplicates canonical content nor advances CaptureRecord.
+
+[Setup, limits and recovery](LOCAL_DELIVERY.md) define compatibility: old clients
+must explicitly send credentials; `--youtube` is opt-in and requires the optional
+extra. Historical phase descriptions below describe their original scopes;
+ADR-025 replaces their anonymous-HTTP statements. Zen/Linux UI and runtime
+acceptance are the next slice; agreed Obsidian import follows it. Multimedia and
+GitHub remain planned sources/processing, not replaced by this delivery work.
+
 ## Current scope
 
 **Phase 0A — domain contracts.** Answers "what are the fundamental objects

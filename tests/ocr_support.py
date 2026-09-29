@@ -46,6 +46,8 @@ from typing import Any, Final, NoReturn
 
 import pytest
 
+from tests.api_auth import AUTH_HEADERS, token_path
+
 #: Set this in any environment where a PDF OCR test is not allowed to quietly not
 #: happen. It turns "run this if the machine can" into "run this, or fail".
 REQUIRE_PDF_OCR_ENV: Final = "UNIMEM_REQUIRE_PDF_OCR_INTEGRATION"
@@ -196,7 +198,9 @@ def free_port() -> int:
 
 def read_json(url: str) -> dict[str, Any]:
     """Read one JSON document over a live socket, with no client library."""
-    with urllib.request.urlopen(url, timeout=30) as response:
+    with urllib.request.urlopen(
+        urllib.request.Request(url, headers=AUTH_HEADERS), timeout=30
+    ) as response:
         parsed: dict[str, Any] = json.loads(response.read())
     return parsed
 
@@ -227,6 +231,8 @@ def serve_process(
         "unimem_api",
         "--data-dir",
         str(data_dir),
+        "--token-file",
+        str(token_path(data_dir.parent)),
         "--host",
         "127.0.0.1",
         "--port",

@@ -1,5 +1,12 @@
 # Ручная приёмка документов (Macro Phase 3)
 
+> **Обновление B1:** HTTP теперь требует явный bearer token. Команды ниже
+> используют `ucurl` и приватный `$ACC/api.token`; настройки добавлены в `env.sh`.
+> Это обновление подключения, а не повторное открытие прежней ручной приёмки.
+> Исторические результаты остаются прежними. Лимиты: JSON 8 MiB,
+> весь multipart 512 MiB; [контракт защиты и восстановления](LOCAL_DELIVERY.md).
+
+
 Этот документ — исполняемый чек-лист для владельца. Он проверяет **то, что уже
 построено**: приём PDF с текстовым слоем, приём DOCX, отказ от сканов в обычном
 режиме, необязательное локальное распознавание английских и русских сканов,
@@ -136,6 +143,14 @@ export PYTHONPATH="\$REPO:\$ACC/bin"
 export API="http://127.0.0.1:8791"
 export DOCX="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 EOF
+cat >> "$ACC/env.sh" <<'AUTH'
+export UNIMEM_TOKEN_FILE="$ACC/api.token"
+ucurl() {
+  printf 'header = "Authorization: Bearer %s"\n' "$(cat "$UNIMEM_TOKEN_FILE")" |
+    curl --config - "$@"
+}
+AUTH
+source "$ACC/env.sh"
 cat "$ACC/env.sh"
 echo
 echo "Строка для второго терминала (скопируйте её целиком):"
@@ -778,13 +793,14 @@ PY
 source "<путь, напечатанный на шаге 1>/env.sh"
 cd "$REPO"
 echo "каталог данных этого прогона: $ACC/data"     # сверьте с первым терминалом
-"$PY" -m unimem_api --data-dir "$ACC/data" --port 8791
+"$PY" -m unimem_api --data-dir "$ACC/data" --token-file "$ACC/api.token" --init-token
+"$PY" -m unimem_api --data-dir "$ACC/data" --token-file "$ACC/api.token" --port 8791
 ```
 
 Первый терминал — проверка, что сервер жив:
 
 ```bash
-curl -sS "$API/health"          # ожидается {"status":"ok"}
+ucurl -sS "$API/health"          # ожидается {"status":"ok"}
 ```
 
 Останавливать этот сервер — только `Ctrl+C` во втором терминале. Никаких
@@ -799,7 +815,7 @@ curl -sS "$API/health"          # ожидается {"status":"ok"}
 Шаг первый — положить байты:
 
 ```bash
-curl -sS -F "file=@$ACC/in/text.pdf;type=application/pdf" "$API/v1/uploads" \
+ucurl -sS -F "file=@$ACC/in/text.pdf;type=application/pdf" "$API/v1/uploads" \
   -o "$ACC/out/a_upload.json" -w 'upload HTTP %{http_code}\n'
 cat "$ACC/out/a_upload.json"; echo
 ```
@@ -810,7 +826,7 @@ cat "$ACC/out/a_upload.json"; echo
 REF=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/a_upload.json")
 "$PY" "$ACC/bin/envelope.py" doc_a_pdf application/pdf "$REF" > "$ACC/out/a_envelope.json"
 
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/a_envelope.json" \
   -o "$ACC/out/a_capture.json" -w 'capture HTTP %{http_code}\n'
 cat "$ACC/out/a_capture.json"; echo
@@ -819,9 +835,9 @@ cat "$ACC/out/a_capture.json"; echo
 Прочитать долговечную запись и канонический объект:
 
 ```bash
-curl -sS "$API/v1/captures/doc_a_pdf" \
+ucurl -sS "$API/v1/captures/doc_a_pdf" \
   -o "$ACC/out/a_record.json" -w 'record HTTP %{http_code}\n'
-curl -sS "$API/v1/captures/doc_a_pdf/content" \
+ucurl -sS "$API/v1/captures/doc_a_pdf/content" \
   -o "$ACC/out/a_content.json" -w 'content HTTP %{http_code}\n'
 
 "$PY" "$ACC/bin/show.py" record "$ACC/out/a_record.json"
@@ -878,18 +894,18 @@ curl -sS "$API/v1/captures/doc_a_pdf/content" \
 Контроль читается как *абзац A, таблица 2×2, абзац B*.
 
 ```bash
-curl -sS -F "file=@$ACC/in/doc.docx;type=$DOCX" "$API/v1/uploads" \
+ucurl -sS -F "file=@$ACC/in/doc.docx;type=$DOCX" "$API/v1/uploads" \
   -o "$ACC/out/b_upload.json" -w 'upload HTTP %{http_code}\n'
 
 REF=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/b_upload.json")
 "$PY" "$ACC/bin/envelope.py" doc_b_docx "$DOCX" "$REF" > "$ACC/out/b_envelope.json"
 
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/b_envelope.json" \
   -o "$ACC/out/b_capture.json" -w 'capture HTTP %{http_code}\n'
 
-curl -sS "$API/v1/captures/doc_b_docx" -o "$ACC/out/b_record.json"
-curl -sS "$API/v1/captures/doc_b_docx/content" -o "$ACC/out/b_content.json"
+ucurl -sS "$API/v1/captures/doc_b_docx" -o "$ACC/out/b_record.json"
+ucurl -sS "$API/v1/captures/doc_b_docx/content" -o "$ACC/out/b_content.json"
 
 "$PY" "$ACC/bin/show.py" record "$ACC/out/b_record.json"
 "$PY" "$ACC/bin/show.py" content "$ACC/out/b_content.json"
@@ -913,13 +929,13 @@ curl -sS "$API/v1/captures/doc_b_docx/content" -o "$ACC/out/b_content.json"
 
 ```bash
 # B2: ни заголовка в core properties, ни присланного -> title должен быть None
-curl -sS -F "file=@$ACC/in/untitled.docx;type=$DOCX" "$API/v1/uploads" \
+ucurl -sS -F "file=@$ACC/in/untitled.docx;type=$DOCX" "$API/v1/uploads" \
   -o "$ACC/out/b2_upload.json"
 REF2=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/b2_upload.json")
 "$PY" "$ACC/bin/envelope.py" doc_b_untitled "$DOCX" "$REF2" > "$ACC/out/b2_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/b2_envelope.json" -o /dev/null -w 'capture HTTP %{http_code}\n'
-curl -sS "$API/v1/captures/doc_b_untitled/content" -o "$ACC/out/b2_content.json"
+ucurl -sS "$API/v1/captures/doc_b_untitled/content" -o "$ACC/out/b2_content.json"
 "$PY" "$ACC/bin/show.py" content "$ACC/out/b2_content.json"
 ```
 
@@ -928,9 +944,9 @@ curl -sS "$API/v1/captures/doc_b_untitled/content" -o "$ACC/out/b2_content.json"
 REF=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/b_upload.json")   # те же байты, что в DOC-B
 "$PY" "$ACC/bin/envelope.py" doc_b_titled "$DOCX" "$REF" 'Заголовок от клиента' \
   > "$ACC/out/b3_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/b3_envelope.json" -o /dev/null -w 'capture HTTP %{http_code}\n'
-curl -sS "$API/v1/captures/doc_b_titled/content" -o "$ACC/out/b3_content.json"
+ucurl -sS "$API/v1/captures/doc_b_titled/content" -o "$ACC/out/b3_content.json"
 "$PY" "$ACC/bin/show.py" content "$ACC/out/b3_content.json"
 ```
 
@@ -970,7 +986,7 @@ B2 и B3, вывод `original.py`.
 запомнен.
 
 ```bash
-curl -sS -F "file=@$ACC/in/scan_en.pdf;type=application/pdf" "$API/v1/uploads" \
+ucurl -sS -F "file=@$ACC/in/scan_en.pdf;type=application/pdf" "$API/v1/uploads" \
   -o "$ACC/out/c_upload.json" -w 'upload HTTP %{http_code}\n'
 
 REF=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/c_upload.json")
@@ -978,16 +994,16 @@ echo "$REF" | tee "$ACC/out/scan_en.ref"        # понадобится в DOC-
 
 "$PY" "$ACC/bin/envelope.py" doc_c_scan_default application/pdf "$REF" \
   > "$ACC/out/c_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/c_envelope.json" \
   -o "$ACC/out/c_capture.json" -w 'capture HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/c_capture.json"
 
-curl -sS "$API/v1/captures/doc_c_scan_default" \
+ucurl -sS "$API/v1/captures/doc_c_scan_default" \
   -o "$ACC/out/c_record.json" -w 'record HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/c_record.json"
 
-curl -sS "$API/v1/captures/doc_c_scan_default/content" \
+ucurl -sS "$API/v1/captures/doc_c_scan_default/content" \
   -o "$ACC/out/c_content.json" -w 'content HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/c_content.json"
 ```
@@ -1063,7 +1079,7 @@ tesseract --list-langs                 # в списке должны быть �
 же **тот же каталог данных**, но с флагом:
 
 ```bash
-"$PY" -m unimem_api --data-dir "$ACC/data" --port 8791 --pdf-ocr
+"$PY" -m unimem_api --data-dir "$ACC/data" --token-file "$ACC/api.token" --port 8791 --pdf-ocr
 ```
 
 `--data-dir` тот же самый — это принципиально: DOC-D читает байты, положенные в
@@ -1076,7 +1092,7 @@ DOC-C.
 Проверка:
 
 ```bash
-curl -sS "$API/health"          # ожидается {"status":"ok"}
+ucurl -sS "$API/health"          # ожидается {"status":"ok"}
 ```
 
 ---
@@ -1093,12 +1109,12 @@ REF=$(cat "$ACC/out/scan_en.ref")
 "$PY" "$ACC/bin/envelope.py" doc_d_scan_ocr application/pdf "$REF" \
   > "$ACC/out/d_envelope.json"
 
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/d_envelope.json" \
   -o "$ACC/out/d_capture.json" -w 'capture HTTP %{http_code}\n'
 
-curl -sS "$API/v1/captures/doc_d_scan_ocr" -o "$ACC/out/d_record.json"
-curl -sS "$API/v1/captures/doc_d_scan_ocr/content" -o "$ACC/out/d_content.json"
+ucurl -sS "$API/v1/captures/doc_d_scan_ocr" -o "$ACC/out/d_record.json"
+ucurl -sS "$API/v1/captures/doc_d_scan_ocr/content" -o "$ACC/out/d_content.json"
 "$PY" "$ACC/bin/show.py" record "$ACC/out/d_record.json"
 "$PY" "$ACC/bin/show.py" content "$ACC/out/d_content.json"
 ```
@@ -1106,14 +1122,14 @@ curl -sS "$API/v1/captures/doc_d_scan_ocr/content" -o "$ACC/out/d_content.json"
 То же для русского контроля:
 
 ```bash
-curl -sS -F "file=@$ACC/in/scan_ru.pdf;type=application/pdf" "$API/v1/uploads" \
+ucurl -sS -F "file=@$ACC/in/scan_ru.pdf;type=application/pdf" "$API/v1/uploads" \
   -o "$ACC/out/d_ru_upload.json"
 RREF=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/d_ru_upload.json")
 "$PY" "$ACC/bin/envelope.py" doc_d_scan_ru application/pdf "$RREF" \
   > "$ACC/out/d_ru_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/d_ru_envelope.json" -o /dev/null -w 'capture HTTP %{http_code}\n'
-curl -sS "$API/v1/captures/doc_d_scan_ru/content" -o "$ACC/out/d_ru_content.json"
+ucurl -sS "$API/v1/captures/doc_d_scan_ru/content" -o "$ACC/out/d_ru_content.json"
 "$PY" "$ACC/bin/show.py" content "$ACC/out/d_ru_content.json"
 ```
 
@@ -1150,10 +1166,10 @@ curl -sS "$API/v1/captures/doc_d_scan_ru/content" -o "$ACC/out/d_ru_content.json
 **Старый отказ не оживает.** Проверьте это явно:
 
 ```bash
-curl -sS "$API/v1/captures/doc_c_scan_default" \
+ucurl -sS "$API/v1/captures/doc_c_scan_default" \
   -o "$ACC/out/c_record_after_ocr.json" -w 'record HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/c_record_after_ocr.json"
-curl -sS "$API/v1/captures/doc_c_scan_default/content" -o /dev/null -w 'content HTTP %{http_code}\n'
+ucurl -sS "$API/v1/captures/doc_c_scan_default/content" -o /dev/null -w 'content HTTP %{http_code}\n'
 ```
 
 **Ожидается:** `doc_c_scan_default` по-прежнему `failed`, его content
@@ -1187,16 +1203,16 @@ curl -sS "$API/v1/captures/doc_c_scan_default/content" -o /dev/null -w 'content 
 > Это не отказ и не дефект, но и не то, что проверяет DOC-E.
 
 ```bash
-curl -sS -F "file=@$ACC/in/mixed.pdf;type=application/pdf" "$API/v1/uploads" \
+ucurl -sS -F "file=@$ACC/in/mixed.pdf;type=application/pdf" "$API/v1/uploads" \
   -o "$ACC/out/e_upload.json" -w 'upload HTTP %{http_code}\n'
 REF=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/e_upload.json")
 "$PY" "$ACC/bin/envelope.py" doc_e_mixed application/pdf "$REF" > "$ACC/out/e_envelope.json"
 
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/e_envelope.json" \
   -o "$ACC/out/e_capture.json" -w 'capture HTTP %{http_code}\n'
 
-curl -sS "$API/v1/captures/doc_e_mixed/content" -o "$ACC/out/e_content.json"
+ucurl -sS "$API/v1/captures/doc_e_mixed/content" -o "$ACC/out/e_content.json"
 "$PY" "$ACC/bin/show.py" content "$ACC/out/e_content.json"
 ```
 
@@ -1270,7 +1286,7 @@ snap() {
         record)  url="$API/v1/captures/$id" ;;
         content) url="$API/v1/captures/$id/content" ;;
       esac
-      curl -sS "$url" -o "$ACC/out/${phase}_${id}_${kind}.json" \
+      ucurl -sS "$url" -o "$ACC/out/${phase}_${id}_${kind}.json" \
         -w '%{http_code}' > "$ACC/out/${phase}_${id}_${kind}.status"
     done
     printf '%-20s record %s  content %s\n' "$id" \
@@ -1291,14 +1307,14 @@ snap before
 остановлен:
 
 ```bash
-curl -sS --max-time 3 "$API/health" || echo "сервер остановлен, как и ожидалось"
+ucurl -sS --max-time 3 "$API/health" || echo "сервер остановлен, как и ожидалось"
 ```
 
 Запустите заново в том же втором терминале, на **том же** каталоге данных и
 **в обычном режиме, без `--pdf-ocr`**:
 
 ```bash
-"$PY" -m unimem_api --data-dir "$ACC/data" --port 8791
+"$PY" -m unimem_api --data-dir "$ACC/data" --token-file "$ACC/api.token" --port 8791
 ```
 
 Это важная часть сценария: **чтение сохранённого содержимого не должно требовать
@@ -1376,7 +1392,7 @@ capture одного PDF — это два разных `ContentObject`, ука�
 ### G1 — повторная отправка того же capture id
 
 ```bash
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/a_envelope.json" \
   -o "$ACC/out/g1.json" -w 'HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/g1.json"
@@ -1392,10 +1408,10 @@ curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
 AREF=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/a_upload.json")
 "$PY" "$ACC/bin/envelope.py" doc_g_again application/pdf "$AREF" \
   > "$ACC/out/g2_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/g2_envelope.json" \
   -o "$ACC/out/g2.json" -w 'HTTP %{http_code} '; cat "$ACC/out/g2.json"; echo
-curl -sS "$API/v1/captures/doc_g_again/content" -o "$ACC/out/g2_content.json"
+ucurl -sS "$API/v1/captures/doc_g_again/content" -o "$ACC/out/g2_content.json"
 
 echo "--- новый capture ---"; "$PY" "$ACC/bin/show.py" content "$ACC/out/g2_content.json"
 echo "--- DOC-A для сравнения ---"; "$PY" "$ACC/bin/show.py" content "$ACC/out/a_content.json"
@@ -1412,12 +1428,12 @@ echo "--- DOC-A для сравнения ---"; "$PY" "$ACC/bin/show.py" content
 "$PY" "$ACC/bin/envelope.py" doc_g_ghost application/pdf \
   "sha256:0000000000000000000000000000000000000000000000000000000000000001" \
   > "$ACC/out/g3_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/g3_envelope.json" \
   -o "$ACC/out/g3.json" -w 'HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/g3.json"
 
-curl -sS "$API/v1/captures/doc_g_ghost" -o "$ACC/out/g3_record.json" \
+ucurl -sS "$API/v1/captures/doc_g_ghost" -o "$ACC/out/g3_record.json" \
   -w 'record HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/g3_record.json"
 ```
@@ -1430,11 +1446,11 @@ curl -sS "$API/v1/captures/doc_g_ghost" -o "$ACC/out/g3_record.json" \
 ```bash
 "$PY" "$ACC/bin/envelope.py" doc_g_path application/pdf "/etc/passwd" \
   > "$ACC/out/g4_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/g4_envelope.json" \
   -o "$ACC/out/g4.json" -w 'HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/g4.json"
-curl -sS "$API/v1/captures/doc_g_path" -o /dev/null -w 'record HTTP %{http_code}\n'
+ucurl -sS "$API/v1/captures/doc_g_path" -o /dev/null -w 'record HTTP %{http_code}\n'
 ```
 
 **Ожидается:** `422`, `error.code: unsupported_payload`, `GET record` → `404`.
@@ -1462,15 +1478,15 @@ DOC-D: подставьте свой путь и свой новый capture id.
 MY="/путь/к/вашему/файлу.pdf"           # или .docx с нужным $DOCX в -F и в envelope
 MY_ID="doc_own_01"                      # каждый новый файл -- новый capture id
 
-curl -sS -F "file=@$MY;type=application/pdf" "$API/v1/uploads" \
+ucurl -sS -F "file=@$MY;type=application/pdf" "$API/v1/uploads" \
   -o "$ACC/out/own_upload.json" -w 'upload HTTP %{http_code}\n'
 MYREF=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/own_upload.json")
 "$PY" "$ACC/bin/envelope.py" "$MY_ID" application/pdf "$MYREF" > "$ACC/out/own_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/own_envelope.json" \
   -o "$ACC/out/own_capture.json" -w 'capture HTTP %{http_code}\n'
-curl -sS "$API/v1/captures/$MY_ID"         -o "$ACC/out/own_record.json"
-curl -sS "$API/v1/captures/$MY_ID/content" -o "$ACC/out/own_content.json"
+ucurl -sS "$API/v1/captures/$MY_ID"         -o "$ACC/out/own_record.json"
+ucurl -sS "$API/v1/captures/$MY_ID/content" -o "$ACC/out/own_content.json"
 ```
 
 **Смотрите локально** (эти команды печатают содержимое вашего документа):

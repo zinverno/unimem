@@ -1,71 +1,9 @@
-"""``python -m unimem_api`` — the local capture server, made runnable.
+"""Local authenticated capture server; see docs/LOCAL_DELIVERY.md.
 
-::
-
-    python -m unimem_api --data-dir ./data
-
-Six options and no more: where the data lives, what to bind, and which of the
-three optional local capabilities this deployment has — recognizing scanned PDF
-pages, recognizing text in staged images, and probing the structure of audio and
-video. There is no config file, environment lookup, settings framework, profile,
-service manager, systemd unit, Docker image, or reload mode. Starting the server
-is one command and stopping it is Ctrl-C.
-
-**``--pdf-ocr`` and ``--image-ocr`` are the whole of the OCR configuration
-surface, and they are independent.** All four combinations are valid deployments;
-neither flag implies, enables, or configures the other. With neither, the server
-is byte-for-byte the deployment it was: the default
-:class:`~core.processing.PdfProcessor` and
-:class:`~core.processing.ImageProcessor` are registered, a PDF carrying no
-embedded text is refused exactly as before, an image is stored and described
-without being interpreted, no optional package is imported, and no engine is
-probed or executed.
-
-With ``--pdf-ocr`` this module builds the concrete PDFium/Tesseract adapter; with
-``--image-ocr`` it builds the direct-image one. Either way it *validates that
-capability's prerequisites before the socket is bound* and hands the port to
-:func:`~unimem_api.wiring.build_local_app`, which registers the OCR-enabled
-processor in the default one's place.
-
-**Their prerequisites are not the same, and the CLI does not pretend otherwise.**
-PDF recognition needs the optional ``ocr`` extra — a rasterizer and an imaging
-library — plus a system Tesseract with the ``eng`` and ``rus`` data. Image
-recognition hands the submitted bytes to the engine and decodes nothing, so it
-needs the executable and the two language files and no Python extra at all. A
-deployment that wants only image OCR installs no native wheel.
-
-**``--media`` is a third, independent capability, and it differs from both in
-what it switches on.** The two OCR flags choose *which* processor handles a
-capture this build already accepts; ``--media`` decides whether audio and video
-are accepted at all. Without it the server is byte-for-byte the deployment it
-was: intake refuses ``AUDIO`` and ``VIDEO`` at the door, no media processor is
-registered, :mod:`unimem_media` is never imported, and no ``ffprobe`` is probed
-or executed. With it, this module builds the concrete
-:class:`~unimem_media.ffprobe.FfprobeMediaProbe`, *validates that capability's
-prerequisites before the socket is bound*, and hands the port to
-:func:`~unimem_api.wiring.build_local_app`, which derives both intake's
-``media_enabled`` and the media processor pair from it.
-
-Its prerequisite is a system ``ffprobe`` and **no Python extra at all** — there
-is deliberately no ``[media]`` extra, because the whole adapter is standard
-library plus ``core`` and the one thing that is genuinely needed is a program
-``pip`` cannot install. What ``--media`` buys is structural: container family,
-declared duration, and the streams a container declares. It is not transcription,
-not segmentation, not thumbnails or keyframes, not extracted audio, and not
-``ffmpeg`` — nothing under ``src/`` ever invokes that.
-
-Constructing the adapters here rather than in :mod:`unimem_api.wiring` is
-deliberate. This is the delivery layer — the module that already knows about
-argv, uvicorn, and exit codes — so it is the right place for the imports that may
-need native libraries on the machine, and it keeps the composition root free of
-them. A default installation never executes either import at all.
-
-**The default bind is 127.0.0.1, and that is a security decision rather than a
-convenience.** This phase has no authentication, no authorization, no API keys,
-and no TLS: every caller that can reach the port can submit captures and read
-back everything stored. Loopback is the only interface on which that is an
-acceptable posture, so it is the default, and a ``--host`` that widens it is an
-explicit choice made by whoever types it.
+Credentials are explicitly created/shown/rotated locally. The server binds only
+loopback, and data routes always require bearer authentication. Optional OCR,
+media and YouTube capabilities validate their prerequisites before serving.
+No reload or multiple workers: lifespan owns the data-directory process lease.
 """
 
 import argparse
@@ -80,6 +18,8 @@ from fastapi import FastAPI
 from core.processing.image_recognition import ImageOcr
 from core.processing.media_probe import MediaProbe
 from core.processing.ocr import PdfPageOcr
+from unimem_api.credentials import issue_token, read_token
+from unimem_api.security import ApiSecurity
 from unimem_api.wiring import build_local_app
 
 #: Loopback. See the module docstring — this is not a placeholder.
@@ -105,6 +45,11 @@ class Options:
     pdf_ocr: bool
     image_ocr: bool
     media: bool
+    youtube: bool = False
+    token_file: Path | None = None
+    init_token: bool = False
+    rotate_token: bool = False
+    show_token: bool = False
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -122,10 +67,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--host",
         default=DEFAULT_HOST,
-        help=(
-            f"interface to bind (default: {DEFAULT_HOST}). This server has no "
-            f"authentication — do not expose it to an untrusted network."
-        ),
+        choices=("127.0.0.1", "localhost", "::1"),
+        help="loopback interface only; every data route requires bearer authentication",
     )
     parser.add_argument(
         "--port",
@@ -173,6 +116,28 @@ def build_parser() -> argparse.ArgumentParser:
             "as before."
         ),
     )
+    parser.add_argument(
+        "--youtube",
+        action="store_true",
+        help="enable durable YouTube delivery; requires the youtube extra",
+    )
+    parser.add_argument(
+        "--token-file", type=Path, help="owner-only credential file (default: data-dir/api.token)"
+    )
+    credentials = parser.add_mutually_exclusive_group()
+    credentials.add_argument(
+        "--init-token", action="store_true", help="explicitly create a credential, then exit"
+    )
+    credentials.add_argument(
+        "--rotate-token",
+        action="store_true",
+        help="replace credential, then exit; restart the server",
+    )
+    credentials.add_argument(
+        "--show-token",
+        action="store_true",
+        help="explicitly print the secret for local connection setup, then exit",
+    )
     return parser
 
 
@@ -186,19 +151,25 @@ def parse_args(argv: Sequence[str] | None = None) -> Options:
         pdf_ocr=namespace.pdf_ocr,
         image_ocr=namespace.image_ocr,
         media=namespace.media,
+        youtube=namespace.youtube,
+        token_file=namespace.token_file,
+        init_token=namespace.init_token,
+        rotate_token=namespace.rotate_token,
+        show_token=namespace.show_token,
     )
 
 
 def serve(app: FastAPI, *, host: str, port: int) -> None:
-    """Hand the app to uvicorn and block until it stops.
-
-    Programmatic, with the app object already built — not an import string, which
-    would make uvicorn construct the application itself and take the composition
-    decision away from :mod:`unimem_api.wiring`. No reload, no worker count, no
-    lifespan hooks, no logging configuration: whatever uvicorn does by default is
-    what this phase wants.
-    """
-    uvicorn.run(app, host=host, port=port)
+    """Serve one process, without access URLs or untrusted proxy headers in logs."""
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        access_log=False,
+        proxy_headers=False,
+        limit_concurrency=32,
+        timeout_graceful_shutdown=10,
+    )
 
 
 def build_pdf_ocr() -> PdfPageOcr:
@@ -315,12 +286,28 @@ def main(
     first.
     """
     options = parse_args(argv)
-    app = build_local_app(
-        options.data_dir,
-        pdf_ocr=build_pdf_ocr() if options.pdf_ocr else None,
-        image_ocr=build_image_ocr() if options.image_ocr else None,
-        media_probe=build_media_probe() if options.media else None,
-    )
+    token_file = options.token_file or options.data_dir / "api.token"
+    try:
+        if options.init_token or options.rotate_token:
+            issue_token(token_file, rotate=options.rotate_token)
+            return 0
+        if options.show_token:
+            print(read_token(token_file))
+            return 0
+        security = ApiSecurity(read_token(token_file), port=options.port)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
+    try:
+        app = build_local_app(
+            options.data_dir,
+            security=security,
+            youtube=options.youtube,
+            pdf_ocr=build_pdf_ocr() if options.pdf_ocr else None,
+            image_ocr=build_image_ocr() if options.image_ocr else None,
+            media_probe=build_media_probe() if options.media else None,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
     server(app, host=options.host, port=options.port)
     return 0
 

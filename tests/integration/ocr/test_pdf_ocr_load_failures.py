@@ -23,12 +23,13 @@ from pathlib import Path
 from typing import Any, Final
 
 import pytest
-from fastapi.testclient import TestClient
 
 from core.contracts import CaptureRecord, CaptureStatus
 from core.contracts import CaptureStatus as Status
 from core.contracts.base import SCHEMA_VERSION
 from tests import ocr_support, pdfs
+from tests.api_auth import TEST_SECURITY
+from tests.api_auth import AuthenticatedClient as TestClient
 from unimem_api import DATABASE_FILENAME, RAW_DIRNAME, build_local_app
 
 ocr_support.require_rasterizer()
@@ -70,7 +71,9 @@ def client(data_dir: Path, tmp_path: Path) -> Iterator[TestClient]:
         engine_version="load-failure-regression",
         executable=str(tmp_path / "deliberately-absent-engine"),
     )
-    with TestClient(build_local_app(data_dir, pdf_ocr=recognizer)) as running:
+    with TestClient(
+        build_local_app(data_dir, pdf_ocr=recognizer, security=TEST_SECURITY)
+    ) as running:
         yield running
 
 

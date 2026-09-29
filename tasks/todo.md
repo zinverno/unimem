@@ -61,7 +61,7 @@ Dependencies: A1–A3. Likely scope: tests, instructions, PR evidence.
 - [x] Review diff/ADRs; hand off the three-part browser-independence/Zen-work/
   actual-Zen-evidence report. No extension port, GitHub ingestion or merge.
 
-Evidence (2026-09-29): [PR #31](https://github.com/zinverno/unimem/pull/31) is open.
+Evidence (2026-09-29): [PR #31](https://github.com/zinverno/unimem/pull/31) is merged.
 Focused: 93 passed, new-package branch coverage 95.85%. Full local regression:
 4,274 passed, combined core/API/YouTube branch coverage 97.35%. Ruff, formatting,
 strict mypy, wheel/sdist and existing browser Node checks pass. A clean base
@@ -70,20 +70,32 @@ modules skipped); the built wheel also rendered persisted content in a new
 process without those dependencies. [Live evidence](../docs/YOUTUBE_CAPTIONS.md#opt-in-live-acceptance)
 is a separate PASS on one public video. Zen runtime acceptance remains NOT RUN.
 CI's final status is reported against the actual PR head at handoff, not inferred
-from these local results. B–D are not implemented.
+from these local results. B2–B4 and C–D remain unimplemented; B1 evidence follows below.
 
 ## B — Next PR: Zen/Linux browser delivery
 
 ### B1 — Local API protection and acceptance contract
 
-Dependencies: A4. Likely scope: delivery boundary, auth/validation tests, ADR.
+Dependencies: A4 (merged PR #31). Implemented server scope: delivery boundary,
+auth/validation, durable operations, bounded worker and ADR-025.
 
-- [ ] Review all existing local routes and protect pairing/authorization,
+- [x] Review all existing local routes and implement explicit local credentials/authorization,
   Host/Origin, input and resource bounds before exposing new browser routes.
-- [ ] Define durable acceptance, server-owned work, status lookup and ambiguous
+- [x] Define durable acceptance, server-owned work, status lookup and ambiguous
   request handling; use the A2 service and keep current capture semantics intact.
-- [ ] Verify unauthorized webpage/caller denial and accepted-work survival;
+- [x] Verify unauthorized webpage/caller denial and accepted-work survival;
   specify any restart recovery honestly rather than inferring it from storage.
+
+B1 evidence: [setup and deterministic TCP/process acceptance](../docs/LOCAL_DELIVERY.md).
+Mandatory bearer credentials cover old routes as well as new YouTube routes.
+Durable submit/replay uses the existing SQLite file; recovery uses reserved capture
+IDs and never blindly repeats acquisition. Zen UI/runtime and vault import are
+not included. Local gates: 4,310 full-regression tests passed; core/API coverage 99.19%.
+Dedicated B1: 36 passed / 94.79%; YouTube: 102 passed / 96.20%.
+Ruff/format/strict mypy, 11 browser Node suites, wheel/sdist and base installed-wheel
+checks passed. Base without retrieval: 42 passed / one retrieval-only module
+skipped, plus fresh-process offline CLI render. Hosted CI is verified against
+the exact PR head at handoff, separately from these local measurements.
 
 ### B2 — Compatible extension startup and original captures
 
@@ -128,7 +140,7 @@ distribution metadata/artifact preparation.
 ## C — Core user flow: agreed Obsidian note import
 
 Dependencies: B4. This is the next milestone after the Zen browser scenario,
-not part of the current CLI PR.
+not part of the current B1 server PR.
 
 - [ ] Implement Zen → UniMem → note preview and agreed import through the existing
   Veynrel/Companion integration boundaries; no direct-write bypass.

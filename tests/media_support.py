@@ -43,6 +43,8 @@ from typing import Any, Final, NoReturn
 
 import pytest
 
+from tests.api_auth import AUTH_HEADERS, token_path
+
 #: Set this in any environment where a media test is not allowed to quietly not
 #: happen. It turns "run this if the machine can" into "run this, or fail".
 REQUIRE_MEDIA_ENV: Final = "UNIMEM_REQUIRE_MEDIA_INTEGRATION"
@@ -153,7 +155,9 @@ def free_port() -> int:
 
 def read_json(url: str) -> dict[str, Any]:
     """Read one JSON document over a live socket, with no client library."""
-    with urllib.request.urlopen(url, timeout=30) as response:
+    with urllib.request.urlopen(
+        urllib.request.Request(url, headers=AUTH_HEADERS), timeout=30
+    ) as response:
         parsed: dict[str, Any] = json.loads(response.read())
     return parsed
 
@@ -183,6 +187,8 @@ def serve_process(
         "unimem_api",
         "--data-dir",
         str(data_dir),
+        "--token-file",
+        str(token_path(data_dir.parent)),
         "--host",
         "127.0.0.1",
         "--port",
@@ -256,7 +262,16 @@ def start_without_ffprobe(data_dir: Path, empty_dir: Path) -> "subprocess.Comple
         "sys.exit(cli.main(sys.argv[1:], server=lambda app, *, host, port: None))"
     )
     return subprocess.run(
-        [sys.executable, "-c", script, "--data-dir", str(data_dir), "--media"],
+        [
+            sys.executable,
+            "-c",
+            script,
+            "--data-dir",
+            str(data_dir),
+            "--token-file",
+            str(token_path(data_dir.parent)),
+            "--media",
+        ],
         capture_output=True,
         text=True,
         timeout=TOOL_TIMEOUT,

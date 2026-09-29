@@ -1,5 +1,12 @@
 # Ручная приёмка изображений (Macro Phase 4)
 
+> **Обновление B1:** HTTP теперь требует явный bearer token. Команды ниже
+> используют `ucurl` и приватный `$ACC/api.token`; настройки добавлены в `env.sh`.
+> Это обновление подключения, а не повторное открытие прежней ручной приёмки.
+> Исторические результаты остаются прежними. Лимиты: JSON 8 MiB,
+> весь multipart 512 MiB; [контракт защиты и восстановления](LOCAL_DELIVERY.md).
+
+
 Этот документ — исполняемый чек-лист для владельца. Он проверяет **то, что уже
 построено**: приём статичных PNG и JPEG без интерпретации (Phase 4A) и
 необязательное локальное распознавание текста на изображении (Phase 4B).
@@ -73,7 +80,7 @@
 ### Порядок выполнения: три жизни сервера над одним каталогом данных
 
 ```
-① python -m unimem_api --data-dir "$ACC/data" --port 8792                → IMG-A
+① python -m unimem_api --data-dir "$ACC/data" --token-file "$ACC/api.token" --port 8792                → IMG-A
 ② остановить; тот же --data-dir, плюс --image-ocr                        → IMG-B, IMG-C, IMG-E
 ③ остановить; тот же --data-dir, СНОВА без --image-ocr                   → IMG-D
 ```
@@ -308,6 +315,14 @@ export API="http://127.0.0.1:8792"
 export PNG="image/png"
 export JPEG="image/jpeg"
 EOF
+cat >> "$ACC/env.sh" <<'AUTH'
+export UNIMEM_TOKEN_FILE="$ACC/api.token"
+ucurl() {
+  printf 'header = "Authorization: Bearer %s"\n' "$(cat "$UNIMEM_TOKEN_FILE")" |
+    curl --config - "$@"
+}
+AUTH
+source "$ACC/env.sh"
 cat "$ACC/env.sh"
 echo
 echo "Строка для второго терминала (скопируйте её целиком):"
@@ -1035,14 +1050,15 @@ OCR`: движок отрабатывает, возвращает пустой �
 
 ```bash
 source "$ACC/env.sh"; cd "$REPO"
-"$PY" -m unimem_api --data-dir "$ACC/data" --port 8792
+"$PY" -m unimem_api --data-dir "$ACC/data" --token-file "$ACC/api.token" --init-token
+"$PY" -m unimem_api --data-dir "$ACC/data" --token-file "$ACC/api.token" --port 8792
 ```
 
 Каталог `$ACC/data` сервер создаст сам. Оставьте терминал открытым — сервер
 живёт в нём. Вернитесь в первый терминал и проверьте, что он отвечает:
 
 ```bash
-curl -sS "$API/health"; echo
+ucurl -sS "$API/health"; echo
 ```
 
 Ожидается `{"status":"ok"}`. `GET /health` сообщает только о живости процесса и
@@ -1065,7 +1081,7 @@ curl -sS "$API/health"; echo
 ### IMG-A1 — PNG
 
 ```bash
-curl -sS -F "file=@$ACC/in/text.png;type=image/png" "$API/v1/uploads" \
+ucurl -sS -F "file=@$ACC/in/text.png;type=image/png" "$API/v1/uploads" \
   -o "$ACC/out/a1_upload.json" -w 'upload HTTP %{http_code}\n'
 REF_A1=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/a1_upload.json")
 echo "file_ref: $REF_A1"
@@ -1073,15 +1089,15 @@ echo "file_ref: $REF_A1"
 
 ```bash
 "$PY" "$ACC/bin/envelope.py" img_a1_png "$PNG" "$REF_A1" > "$ACC/out/a1_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/a1_envelope.json" \
   -o "$ACC/out/a1_capture.json" -w 'capture HTTP %{http_code}\n'
 ```
 
 ```bash
-curl -sS "$API/v1/captures/img_a1_png" \
+ucurl -sS "$API/v1/captures/img_a1_png" \
   -o "$ACC/out/a1_record.json" -w 'record HTTP %{http_code}\n'
-curl -sS "$API/v1/captures/img_a1_png/content" \
+ucurl -sS "$API/v1/captures/img_a1_png/content" \
   -o "$ACC/out/a1_content.json" -w 'content HTTP %{http_code}\n'
 ```
 
@@ -1108,18 +1124,18 @@ curl -sS "$API/v1/captures/img_a1_png/content" \
 ### IMG-A2 — JPEG
 
 ```bash
-curl -sS -F "file=@$ACC/in/structural.jpg;type=image/jpeg" "$API/v1/uploads" \
+ucurl -sS -F "file=@$ACC/in/structural.jpg;type=image/jpeg" "$API/v1/uploads" \
   -o "$ACC/out/a2_upload.json" -w 'upload HTTP %{http_code}\n'
 REF_A2=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/a2_upload.json")
 
 "$PY" "$ACC/bin/envelope.py" img_a2_jpeg "$JPEG" "$REF_A2" > "$ACC/out/a2_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/a2_envelope.json" \
   -o "$ACC/out/a2_capture.json" -w 'capture HTTP %{http_code}\n'
 
-curl -sS "$API/v1/captures/img_a2_jpeg" \
+ucurl -sS "$API/v1/captures/img_a2_jpeg" \
   -o "$ACC/out/a2_record.json" -w 'record HTTP %{http_code}\n'
-curl -sS "$API/v1/captures/img_a2_jpeg/content" \
+ucurl -sS "$API/v1/captures/img_a2_jpeg/content" \
   -o "$ACC/out/a2_content.json" -w 'content HTTP %{http_code}\n'
 ```
 
@@ -1163,7 +1179,7 @@ curl -sS "$API/v1/captures/img_a2_jpeg/content" \
 В терминале сервера остановите процесс (`Ctrl+C`) и запустите заново:
 
 ```bash
-"$PY" -m unimem_api --data-dir "$ACC/data" --port 8792 --image-ocr
+"$PY" -m unimem_api --data-dir "$ACC/data" --token-file "$ACC/api.token" --port 8792 --image-ocr
 ```
 
 Набор `[ocr]` для этого **не нужен и не ставится**: изображение уходит движку
@@ -1177,15 +1193,15 @@ IMG-C и IMG-E получают `BLOCKED`, а IMG-D остаётся `NOT_RUN` �
 недостающее сами и начните прогон заново.
 
 ```bash
-curl -sS "$API/health"; echo
+ucurl -sS "$API/health"; echo
 ```
 
 Проверьте заодно, что данные шага 4 пережили этот перезапуск и читаются новым
 процессом:
 
 ```bash
-curl -sS -o /dev/null -w 'A1 record %{http_code}\n' "$API/v1/captures/img_a1_png"
-curl -sS -o /dev/null -w 'A2 record %{http_code}\n' "$API/v1/captures/img_a2_jpeg"
+ucurl -sS -o /dev/null -w 'A1 record %{http_code}\n' "$API/v1/captures/img_a1_png"
+ucurl -sS -o /dev/null -w 'A2 record %{http_code}\n' "$API/v1/captures/img_a2_jpeg"
 ```
 
 Оба — `200`. Это ещё не IMG-D (тот проверяет и содержимое, и снимки целиком), но
@@ -1204,7 +1220,7 @@ curl -sS -o /dev/null -w 'A2 record %{http_code}\n' "$API/v1/captures/img_a2_jpe
 Слово на картинке вы уже прочитали глазами на шаге 3.
 
 ```bash
-curl -sS -F "file=@$ACC/in/text.png;type=image/png" "$API/v1/uploads" \
+ucurl -sS -F "file=@$ACC/in/text.png;type=image/png" "$API/v1/uploads" \
   -o "$ACC/out/b_upload.json" -w 'upload HTTP %{http_code}\n'
 REF_B=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/b_upload.json")
 ```
@@ -1215,13 +1231,13 @@ REF_B=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/b_upload.json")
 
 ```bash
 "$PY" "$ACC/bin/envelope.py" img_b_ocr_text "$PNG" "$REF_B" > "$ACC/out/b_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/b_envelope.json" \
   -o "$ACC/out/b_capture.json" -w 'capture HTTP %{http_code}\n'
 
-curl -sS "$API/v1/captures/img_b_ocr_text" \
+ucurl -sS "$API/v1/captures/img_b_ocr_text" \
   -o "$ACC/out/b_record.json" -w 'record HTTP %{http_code}\n'
-curl -sS "$API/v1/captures/img_b_ocr_text/content" \
+ucurl -sS "$API/v1/captures/img_b_ocr_text/content" \
   -o "$ACC/out/b_content.json" -w 'content HTTP %{http_code}\n'
 ```
 
@@ -1297,18 +1313,18 @@ Tesseract, `eng` и `rus`; capture не `201`; `status` не `complete`; сег�
 заголовок заявляет 5000 × 5000 = 25 000 000 пикселей.
 
 ```bash
-curl -sS -F "file=@$ACC/in/oversize-header.png;type=image/png" "$API/v1/uploads" \
+ucurl -sS -F "file=@$ACC/in/oversize-header.png;type=image/png" "$API/v1/uploads" \
   -o "$ACC/out/c_upload.json" -w 'upload HTTP %{http_code}\n'
 REF_C=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/c_upload.json")
 
 "$PY" "$ACC/bin/envelope.py" img_c_pixel_skip "$PNG" "$REF_C" > "$ACC/out/c_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/c_envelope.json" \
   -o "$ACC/out/c_capture.json" -w 'capture HTTP %{http_code}\n'
 
-curl -sS "$API/v1/captures/img_c_pixel_skip" \
+ucurl -sS "$API/v1/captures/img_c_pixel_skip" \
   -o "$ACC/out/c_record.json" -w 'record HTTP %{http_code}\n'
-curl -sS "$API/v1/captures/img_c_pixel_skip/content" \
+ucurl -sS "$API/v1/captures/img_c_pixel_skip/content" \
   -o "$ACC/out/c_content.json" -w 'content HTTP %{http_code}\n'
 ```
 
@@ -1465,18 +1481,18 @@ Phase 4B — `eng+rus`, OEM 1, PSM 3, без коррекции ориентац
 MY="/путь/к/вашему/изображению.png"     # ваш путь; никуда не отправляется
 MY_MIME="image/png"                      # или image/jpeg
 
-curl -sS -F "file=@$MY;type=$MY_MIME" "$API/v1/uploads" \
+ucurl -sS -F "file=@$MY;type=$MY_MIME" "$API/v1/uploads" \
   -o "$ACC/out/e_upload.json" -w 'upload HTTP %{http_code}\n'
 REF_E=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/e_upload.json")
 
 "$PY" "$ACC/bin/envelope.py" img_e_own_01 "$MY_MIME" "$REF_E" > "$ACC/out/e_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/e_envelope.json" \
   -o "$ACC/out/e_capture.json" -w 'capture HTTP %{http_code}\n'
 
-curl -sS "$API/v1/captures/img_e_own_01" \
+ucurl -sS "$API/v1/captures/img_e_own_01" \
   -o "$ACC/out/e_record.json" -w 'record HTTP %{http_code}\n'
-curl -sS "$API/v1/captures/img_e_own_01/content" \
+ucurl -sS "$API/v1/captures/img_e_own_01/content" \
   -o "$ACC/out/e_content.json" -w 'content HTTP %{http_code}\n'
 ```
 
@@ -1660,7 +1676,7 @@ content не `200`; сегментов не ровно один; `type` или `
 for id in img_a1_png img_a2_jpeg img_b_ocr_text img_c_pixel_skip img_e_own_01; do
   for kind in "" "/content"; do
     name=$([ -z "$kind" ] && echo record || echo content)
-    code=$(curl -sS -o "$ACC/snap/before_${id}_${name}.json" \
+    code=$(ucurl -sS -o "$ACC/snap/before_${id}_${name}.json" \
                  -w '%{http_code}' "$API/v1/captures/$id$kind")
     echo "$code" > "$ACC/snap/before_${id}_${name}.status"
     echo "before $id $name $code"
@@ -1685,11 +1701,11 @@ done
 и запустите заново **тем же** `--data-dir` и **без** `--image-ocr`:
 
 ```bash
-"$PY" -m unimem_api --data-dir "$ACC/data" --port 8792
+"$PY" -m unimem_api --data-dir "$ACC/data" --token-file "$ACC/api.token" --port 8792
 ```
 
 ```bash
-curl -sS "$API/health"; echo
+ucurl -sS "$API/health"; echo
 ```
 
 Никаких `--pdf-ocr`, `--image-ocr` и другого каталога данных. Каталог
@@ -1701,7 +1717,7 @@ curl -sS "$API/health"; echo
 for id in img_a1_png img_a2_jpeg img_b_ocr_text img_c_pixel_skip img_e_own_01; do
   for kind in "" "/content"; do
     name=$([ -z "$kind" ] && echo record || echo content)
-    code=$(curl -sS -o "$ACC/snap/after_${id}_${name}.json" \
+    code=$(ucurl -sS -o "$ACC/snap/after_${id}_${name}.json" \
                  -w '%{http_code}' "$API/v1/captures/$id$kind")
     echo "$code" > "$ACC/snap/after_${id}_${name}.status"
     echo "after  $id $name $code"

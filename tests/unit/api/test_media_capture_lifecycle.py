@@ -28,11 +28,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 
 from core.contracts import CaptureStatus, ContentType, ProcessingStatus
 from core.processing.media_probe import MediaProbeExecutionError
 from core.storage import build_raw_ref
+from tests.api_auth import TEST_SECURITY
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.processing.doubles import (
     FakeMediaProbe,
     audio_stream,
@@ -77,7 +78,7 @@ def envelope(
 
 
 def app_with(probe: FakeMediaProbe, tmp_path: Path) -> Any:
-    return build_local_app(tmp_path / "data", media_probe=probe)
+    return build_local_app(tmp_path / "data", media_probe=probe, security=TEST_SECURITY)
 
 
 def stage(client: TestClient, mime_type: str) -> str:
@@ -295,7 +296,7 @@ class TestTheUploadRouteIsUnchanged:
     @pytest.mark.parametrize("media", [True, False], ids=["media-on", "media-off"])
     def test_staging_media_bytes_is_accepted_either_way(self, tmp_path: Path, media: bool) -> None:
         probe = FakeMediaProbe(result=GOOD_AUDIO) if media else None
-        app = build_local_app(tmp_path / "data", media_probe=probe)
+        app = build_local_app(tmp_path / "data", media_probe=probe, security=TEST_SECURITY)
 
         with TestClient(app) as client:
             response = client.post("/v1/uploads", files={"file": ("clip.mp3", MP3, "audio/mpeg")})

@@ -63,6 +63,9 @@ naming them by ``file_ref``; if the route wrote into one store and intake
 resolved against another, that reference would dangle every time.
 """
 
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Final
 
@@ -89,6 +92,10 @@ from core.processing.media_probe import MediaProbe
 from core.processing.ocr import PdfPageOcr
 from core.storage import LocalRawObjectStore
 from unimem_api.app import create_app
+from unimem_api.security import ApiSecurity
+from unimem_api.worker import DeliveryWorker, ServerLease
+from unimem_youtube.operations import OperationStore
+from unimem_youtube.service import YoutubeCaptureService
 
 #: The content-addressed raw object tree, under the data directory.
 RAW_DIRNAME: Final = "raw"
@@ -168,6 +175,9 @@ def _media_processors(
 def build_local_app(
     data_dir: Path,
     *,
+    security: ApiSecurity,
+    youtube: bool = False,
+    worker_command: tuple[str, ...] | None = None,
     pdf_ocr: PdfPageOcr | None = None,
     image_ocr: ImageOcr | None = None,
     media_probe: MediaProbe | None = None,
@@ -243,6 +253,8 @@ def build_local_app(
     stored ``ContentObject`` is just canonical content. What a default app cannot
     do is *process* the scan that produced it.
     """
+    if youtube:
+        require_youtube()
     data_dir.mkdir(parents=True, exist_ok=True)
     database = data_dir / DATABASE_FILENAME
 
@@ -266,10 +278,40 @@ def build_local_app(
     )
     orchestrator = ProcessingOrchestrator(router, record_store, content_store)
 
+    operations = OperationStore(database) if youtube else None
+    youtube_service = YoutubeCaptureService(data_dir) if youtube else None
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        with ServerLease(data_dir) as lease:
+            worker = (
+                DeliveryWorker(data_dir, operations, lease.fd, command=worker_command)
+                if operations
+                else None
+            )
+            if worker:
+                worker.start()
+            try:
+                yield
+            finally:
+                if worker:
+                    await asyncio.to_thread(worker.stop)
+
     return create_app(
         intake=intake,
         orchestrator=orchestrator,
         record_store=record_store,
         content_store=content_store,
         raw_store=raw_store,
+        security=security,
+        lifespan=lifespan,
+        operations=operations,
+        youtube_service=youtube_service,
     )
+
+
+def require_youtube() -> None:
+    try:
+        from unimem_youtube.retrieval import acquire  # noqa: F401
+    except ImportError:
+        raise ValueError("YouTube HTTP capability requires the optional youtube extra.") from None

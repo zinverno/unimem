@@ -14,7 +14,6 @@ from types import ModuleType
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 import core
 import unimem_api
@@ -22,6 +21,8 @@ import unimem_ocr
 from core.intake import CaptureIntake
 from core.processing import ProcessingOrchestrator, ProcessorRouter, TextProcessor
 from core.rendering import JsonRenderer, MarkdownRenderer
+from tests.api_auth import TEST_SECURITY
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.api.builders import CAPTURE_ID, text_envelope
 from tests.unit.api.conftest import Stack, build_stack, served_paths
 from tests.unit.api.doubles import (
@@ -46,6 +47,7 @@ def test_the_factory_accepts_doubles_for_every_dependency() -> None:
         record_store=record_store,
         content_store=content_store,
         raw_store=raw_store,
+        security=TEST_SECURITY,
     )
 
     assert isinstance(app, FastAPI)

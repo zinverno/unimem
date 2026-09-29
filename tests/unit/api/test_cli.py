@@ -12,6 +12,7 @@ import uvicorn
 from fastapi import FastAPI
 
 import unimem_api.__main__ as cli
+from tests.api_auth import token_path
 from unimem_api.__main__ import DEFAULT_HOST, DEFAULT_PORT, Options, main, parse_args
 
 
@@ -47,11 +48,11 @@ class TestArgumentParsing:
         assert DEFAULT_HOST == "127.0.0.1"
 
     def test_all_three_options_are_honoured(self, tmp_path: Path) -> None:
-        options = parse_args(["--data-dir", str(tmp_path), "--host", "0.0.0.0", "--port", "9001"])
+        options = parse_args(["--data-dir", str(tmp_path), "--host", "::1", "--port", "9001"])
 
         assert options == Options(
             data_dir=tmp_path,
-            host="0.0.0.0",
+            host="::1",
             port=9001,
             pdf_ocr=False,
             image_ocr=False,
@@ -74,14 +75,17 @@ class TestArgumentParsing:
     def test_the_help_warns_against_exposing_the_server(self) -> None:
         help_text = cli.build_parser().format_help()
 
-        assert "no authentication" in help_text
+        assert "bearer authentication" in help_text
 
 
 class TestMain:
     def test_it_builds_the_app_and_hands_it_to_the_server(self, tmp_path: Path) -> None:
         server = RecordingServer()
 
-        exit_code = main(["--data-dir", str(tmp_path / "data")], server=server)
+        exit_code = main(
+            ["--data-dir", str(tmp_path / "data"), "--token-file", str(token_path(tmp_path))],
+            server=server,
+        )
 
         assert exit_code == 0
         assert len(server.calls) == 1
@@ -93,17 +97,29 @@ class TestMain:
         server = RecordingServer()
 
         main(
-            ["--data-dir", str(tmp_path), "--host", "10.0.0.5", "--port", "9999"],
+            [
+                "--data-dir",
+                str(tmp_path),
+                "--host",
+                "::1",
+                "--port",
+                "9999",
+                "--token-file",
+                str(token_path(tmp_path)),
+            ],
             server=server,
         )
 
         _, host, port = server.calls[0]
-        assert (host, port) == ("10.0.0.5", 9999)
+        assert (host, port) == ("::1", 9999)
 
     def test_it_creates_a_data_directory_that_does_not_exist(self, tmp_path: Path) -> None:
         data_dir = tmp_path / "deeply" / "nested" / "data"
 
-        main(["--data-dir", str(data_dir)], server=RecordingServer())
+        main(
+            ["--data-dir", str(data_dir), "--token-file", str(token_path(tmp_path))],
+            server=RecordingServer(),
+        )
 
         assert data_dir.is_dir()
 
@@ -112,7 +128,9 @@ class TestMain:
         data_dir = tmp_path / "data"
         server = RecordingServer()
 
-        main(["--data-dir", str(data_dir)], server=server)
+        main(
+            ["--data-dir", str(data_dir), "--token-file", str(token_path(tmp_path))], server=server
+        )
 
         assert (data_dir / "unimem.sqlite3").exists()
 
@@ -133,4 +151,16 @@ def test_serve_hands_the_app_to_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None
 
     cli.serve(app, host="127.0.0.1", port=8765)
 
-    assert calls == [(app, {"host": "127.0.0.1", "port": 8765})]
+    assert calls == [
+        (
+            app,
+            {
+                "host": "127.0.0.1",
+                "port": 8765,
+                "access_log": False,
+                "proxy_headers": False,
+                "limit_concurrency": 32,
+                "timeout_graceful_shutdown": 10,
+            },
+        )
+    ]

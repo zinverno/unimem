@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from core.contracts import (
@@ -32,6 +31,8 @@ from core.contracts import (
     IntentAction,
 )
 from core.contracts.base import SCHEMA_VERSION
+from tests.api_auth import TEST_SECURITY
+from tests.api_auth import AuthenticatedClient as TestClient
 from unimem_api import build_local_app
 
 #: The file the connector's own tests are written against.
@@ -67,7 +68,7 @@ def case(request: pytest.FixtureRequest) -> dict[str, Any]:
 
 @pytest.fixture
 def client(tmp_path: Path) -> Iterator[TestClient]:
-    with TestClient(build_local_app(tmp_path / "data")) as test_client:
+    with TestClient(build_local_app(tmp_path / "data", security=TEST_SECURITY)) as test_client:
         yield test_client
 
 

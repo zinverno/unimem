@@ -23,9 +23,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 
 from core.storage import build_raw_ref
+from tests.api_auth import TEST_SECURITY
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.processing.doubles import (
     FakeMediaProbe,
     audio_stream,
@@ -91,7 +92,9 @@ def probe() -> FakeMediaProbe:
 
 @pytest.fixture
 def client(tmp_path: Path, probe: FakeMediaProbe) -> Any:
-    with TestClient(build_local_app(tmp_path / "data", media_probe=probe)) as test_client:
+    with TestClient(
+        build_local_app(tmp_path / "data", media_probe=probe, security=TEST_SECURITY)
+    ) as test_client:
         yield test_client
 
 
@@ -130,7 +133,9 @@ class TestAnEquivalentMediaResubmission:
 
     def test_video_replay_is_200(self, tmp_path: Path) -> None:
         probe = FakeMediaProbe(result=GOOD_VIDEO)
-        with TestClient(build_local_app(tmp_path / "d", media_probe=probe)) as client:
+        with TestClient(
+            build_local_app(tmp_path / "d", media_probe=probe, security=TEST_SECURITY)
+        ) as client:
             stage(client, MP3, "video/mp4")
             assert client.post("/v1/captures", json=video_body()).status_code == 201
 
@@ -270,7 +275,9 @@ class TestSameIdIsNotSameRequest:
         from core.processing.media_probe import MediaProbeExecutionError
 
         probe = FakeMediaProbe(raises=MediaProbeExecutionError("gone"))
-        with TestClient(build_local_app(tmp_path / "d", media_probe=probe)) as client:
+        with TestClient(
+            build_local_app(tmp_path / "d", media_probe=probe, security=TEST_SECURITY)
+        ) as client:
             stage(client)
             assert client.post("/v1/captures", json=audio_body()).status_code == 503
 
@@ -286,7 +293,9 @@ class TestLegacyVideoCanBeCapturedButNotReplayed:
     ) -> None:
         """Historical ``VIDEO`` is valid at 0.1 and 0.2, and still ingests."""
         probe = FakeMediaProbe(result=GOOD_VIDEO)
-        with TestClient(build_local_app(tmp_path / "d", media_probe=probe)) as client:
+        with TestClient(
+            build_local_app(tmp_path / "d", media_probe=probe, security=TEST_SECURITY)
+        ) as client:
             stage(client, MP3, "video/mp4")
 
             response = client.post("/v1/captures", json=video_body(schema_version=version))
@@ -301,7 +310,9 @@ class TestLegacyVideoCanBeCapturedButNotReplayed:
     def test_its_exact_resubmission_is_a_conflict(self, tmp_path: Path, version: str) -> None:
         """Nothing durable retains the ingress version, so equivalence is unprovable."""
         probe = FakeMediaProbe(result=GOOD_VIDEO)
-        with TestClient(build_local_app(tmp_path / "d", media_probe=probe)) as client:
+        with TestClient(
+            build_local_app(tmp_path / "d", media_probe=probe, security=TEST_SECURITY)
+        ) as client:
             stage(client, MP3, "video/mp4")
             body = video_body(schema_version=version)
             assert client.post("/v1/captures", json=body).status_code == 201
@@ -327,7 +338,9 @@ class TestOtherModalitiesAreUnchanged:
             "payload": {"type": "text", "mime_type": "text/plain", "text": "a note"},
             "context": {"captured_at": CAPTURED_AT},
         }
-        with TestClient(build_local_app(tmp_path / "d", media_probe=probe)) as client:
+        with TestClient(
+            build_local_app(tmp_path / "d", media_probe=probe, security=TEST_SECURITY)
+        ) as client:
             assert client.post("/v1/captures", json=body).status_code == 201
 
             assert client.post("/v1/captures", json=body).status_code == 200

@@ -32,6 +32,7 @@ from core.contracts.base import SCHEMA_VERSION
 from core.contracts.enums import ProvenanceSourceType, SegmentType
 from core.processing import OCR_METADATA_KEY
 from tests import ocr_support, pdfs
+from tests.api_auth import AUTH_HEADERS, token_path
 from tests.unit.ocr import fakes
 from unimem_api import DATABASE_FILENAME, RAW_DIRNAME
 
@@ -70,7 +71,7 @@ class Api:
 
     def __init__(self, base: str) -> None:
         self.base = base
-        self.client = httpx2.Client(timeout=HTTP_TIMEOUT)
+        self.client = httpx2.Client(timeout=HTTP_TIMEOUT, headers=AUTH_HEADERS)
 
     def close(self) -> None:
         self.client.close()
@@ -426,6 +427,8 @@ class TestStartupRefusalIsNotASkip:
                 "unimem_api",
                 "--data-dir",
                 str(data_dir),
+                "--token-file",
+                str(token_path(tmp_path)),
                 "--port",
                 str(ocr_support.free_port()),
                 "--pdf-ocr",

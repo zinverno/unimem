@@ -24,13 +24,14 @@ from typing import Any, Final
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 import unimem_api.__main__ as cli
 import unimem_ocr
 from core.contracts import SCHEMA_VERSION, ContentObject
 from core.processing import OCR_METADATA_KEY
 from tests import pdfs
+from tests.api_auth import TEST_SECURITY, token_path
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.processing.doubles import FakePdfPageOcr
 from unimem_api import build_local_app
 from unimem_ocr import OcrPrerequisiteError
@@ -82,6 +83,7 @@ def run_script(body: str, workspace: Path) -> dict[str, Any]:
     A subprocess rather than ``monkeypatch``, because what is under test is what a
     *process* imports. A non-zero exit is a failure carrying the child's stderr.
     """
+    token_path(workspace)
     script = workspace / "probe.py"
     script.write_text(body, encoding="utf-8")
     run = subprocess.run(
@@ -126,13 +128,15 @@ def recognizer() -> FakePdfPageOcr:
 
 @pytest.fixture
 def default_client(tmp_path: Path) -> Iterator[TestClient]:
-    with TestClient(build_local_app(tmp_path / "default")) as running:
+    with TestClient(build_local_app(tmp_path / "default", security=TEST_SECURITY)) as running:
         yield running
 
 
 @pytest.fixture
 def ocr_client(tmp_path: Path, recognizer: FakePdfPageOcr) -> Iterator[TestClient]:
-    with TestClient(build_local_app(tmp_path / "ocr", pdf_ocr=recognizer)) as running:
+    with TestClient(
+        build_local_app(tmp_path / "ocr", pdf_ocr=recognizer, security=TEST_SECURITY)
+    ) as running:
         yield running
 
 
@@ -167,7 +171,16 @@ class TestMainWiresTheRecognizerThrough:
         monkeypatch.setattr(unimem_ocr, "build_tesseract_ocr", lambda: recognizer)
         server = RecordingServer()
 
-        exit_code = cli.main(["--data-dir", str(tmp_path / "data"), "--pdf-ocr"], server=server)
+        exit_code = cli.main(
+            [
+                "--data-dir",
+                str(tmp_path / "data"),
+                "--pdf-ocr",
+                "--token-file",
+                str(token_path(tmp_path)),
+            ],
+            server=server,
+        )
 
         assert exit_code == 0
         with TestClient(server.calls[0][0]) as client:
@@ -180,7 +193,16 @@ class TestMainWiresTheRecognizerThrough:
         monkeypatch.setattr(unimem_ocr, "build_tesseract_ocr", lambda: recognizer)
         server = RecordingServer()
 
-        cli.main(["--data-dir", str(tmp_path / "data"), "--pdf-ocr"], server=server)
+        cli.main(
+            [
+                "--data-dir",
+                str(tmp_path / "data"),
+                "--pdf-ocr",
+                "--token-file",
+                str(token_path(tmp_path)),
+            ],
+            server=server,
+        )
 
         with TestClient(server.calls[0][0]) as client:
             submit(client, SCAN)
@@ -207,7 +229,10 @@ class TestMainWiresTheRecognizerThrough:
 
         monkeypatch.setattr(unimem_ocr, "build_tesseract_ocr", refuse)
 
-        cli.main(["--data-dir", str(tmp_path / "data")], server=RecordingServer())
+        cli.main(
+            ["--data-dir", str(tmp_path / "data"), "--token-file", str(token_path(tmp_path))],
+            server=RecordingServer(),
+        )
 
 
 class TestStartupRefusesWhenThePrerequisitesAreMissing:
@@ -221,7 +246,16 @@ class TestStartupRefusesWhenThePrerequisitesAreMissing:
         server = RecordingServer()
 
         with pytest.raises(SystemExit) as raised:
-            cli.main(["--data-dir", str(tmp_path / "data"), "--pdf-ocr"], server=server)
+            cli.main(
+                [
+                    "--data-dir",
+                    str(tmp_path / "data"),
+                    "--pdf-ocr",
+                    "--token-file",
+                    str(token_path(tmp_path)),
+                ],
+                server=server,
+            )
 
         assert "language data for rus is missing" in str(raised.value)
         assert server.calls == []
@@ -238,7 +272,16 @@ class TestStartupRefusesWhenThePrerequisitesAreMissing:
         )
 
         with pytest.raises(SystemExit):
-            cli.main(["--data-dir", str(data_dir), "--pdf-ocr"], server=RecordingServer())
+            cli.main(
+                [
+                    "--data-dir",
+                    str(data_dir),
+                    "--pdf-ocr",
+                    "--token-file",
+                    str(token_path(tmp_path)),
+                ],
+                server=RecordingServer(),
+            )
 
         assert not data_dir.exists()
 
@@ -254,7 +297,16 @@ class TestStartupRefusesWhenThePrerequisitesAreMissing:
         server = RecordingServer()
 
         with pytest.raises(SystemExit):
-            cli.main(["--data-dir", str(tmp_path), "--pdf-ocr"], server=server)
+            cli.main(
+                [
+                    "--data-dir",
+                    str(tmp_path),
+                    "--pdf-ocr",
+                    "--token-file",
+                    str(token_path(tmp_path)),
+                ],
+                server=server,
+            )
 
         assert server.calls == []
 
@@ -429,10 +481,14 @@ from fastapi.testclient import TestClient
 
 from core.contracts import SCHEMA_VERSION
 from unimem_api import build_local_app
+from unimem_api.security import ApiSecurity
 
-app = build_local_app(Path("data"))
+app = build_local_app(Path("data"), security=ApiSecurity("a" * 43))
 out = {}
-with TestClient(app) as client:
+with TestClient(
+    app, base_url="http://127.0.0.1:8765",
+    headers={"Authorization": "Bearer " + "a" * 43},
+) as client:
     for name, path in (("text", "text.pdf"), ("scan", "scan.pdf")):
         data = Path(path).read_bytes()
         upload = client.post(
@@ -474,7 +530,7 @@ def never(app, *, host, port):
 
 
 try:
-    main(["--data-dir", "data", "--pdf-ocr"], server=never)
+    main(["--data-dir", "data", "--pdf-ocr", "--token-file", "test-api.token"], server=never)
 except SystemExit as exit_request:
     print(json.dumps({"exit": str(exit_request)}))
 else:

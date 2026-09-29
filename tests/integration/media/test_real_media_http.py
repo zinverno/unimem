@@ -43,6 +43,7 @@ from core.processing.media import (
 )
 from tests import media_fixtures as fixtures
 from tests import media_support
+from tests.api_auth import AUTH_HEADERS
 from unimem_api import DATABASE_FILENAME, RAW_DIRNAME
 
 media_support.require_media_tooling()
@@ -97,7 +98,7 @@ class Api:
 
     def __init__(self, base: str) -> None:
         self.base = base
-        self.client = httpx2.Client(timeout=HTTP_TIMEOUT)
+        self.client = httpx2.Client(timeout=HTTP_TIMEOUT, headers=AUTH_HEADERS)
 
     def close(self) -> None:
         self.client.close()

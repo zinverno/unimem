@@ -21,7 +21,6 @@ from typing import Any, Final
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from core.contracts import SCHEMA_VERSION
 from core.processing import (
@@ -35,6 +34,8 @@ from core.processing import (
 )
 from core.storage import LocalRawObjectStore
 from tests import images
+from tests.api_auth import TEST_SECURITY, token_path
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.api.test_pdf_ocr_composition import BLOCK_NATIVE, RecordingServer, run_script
 from tests.unit.processing.doubles import FakeImageOcr, FakePdfPageOcr
 from unimem_api.__main__ import main, parse_args
@@ -192,6 +193,7 @@ class TestTheFourDeployments:
             tmp_path / "data",
             pdf_ocr=FakePdfPageOcr(),
             image_ocr=FakeImageOcr(text="HARBOUR") if image_ocr else None,
+            security=TEST_SECURITY,
         )
 
         assert stamped_processor(app) == expected
@@ -215,7 +217,7 @@ def capture_image(client: TestClient, data: bytes, capture_id: str = CAPTURE_ID)
 
 class TestTheDefaultDeploymentIsUnchanged:
     def test_an_image_still_captures_with_no_segments(self, tmp_path: Path) -> None:
-        app = build_local_app(tmp_path / "data")
+        app = build_local_app(tmp_path / "data", security=TEST_SECURITY)
 
         with TestClient(app) as client:
             response = capture_image(client, PNG)
@@ -225,7 +227,7 @@ class TestTheDefaultDeploymentIsUnchanged:
         assert content["segments"] == []
 
     def test_it_is_still_stamped_image_at_0_1(self, tmp_path: Path) -> None:
-        app = build_local_app(tmp_path / "data")
+        app = build_local_app(tmp_path / "data", security=TEST_SECURITY)
 
         with TestClient(app) as client:
             capture_image(client, PNG)
@@ -235,7 +237,7 @@ class TestTheDefaultDeploymentIsUnchanged:
 
     def test_it_records_no_image_ocr_metadata_at_all(self, tmp_path: Path) -> None:
         """Absence, which is how "OCR was never enabled here" stays readable."""
-        app = build_local_app(tmp_path / "data")
+        app = build_local_app(tmp_path / "data", security=TEST_SECURITY)
 
         with TestClient(app) as client:
             capture_image(client, PNG)
@@ -246,7 +248,9 @@ class TestTheDefaultDeploymentIsUnchanged:
     def test_the_same_image_gains_a_segment_in_an_ocr_enabled_deployment(
         self, tmp_path: Path
     ) -> None:
-        app = build_local_app(tmp_path / "data", image_ocr=FakeImageOcr(text="HARBOUR"))
+        app = build_local_app(
+            tmp_path / "data", image_ocr=FakeImageOcr(text="HARBOUR"), security=TEST_SECURITY
+        )
 
         with TestClient(app) as client:
             capture_image(client, PNG)
@@ -262,8 +266,10 @@ class TestTheDefaultDeploymentIsUnchanged:
         not a recognizer looked at it. Only the metadata differs, and only because
         one of them genuinely did look.
         """
-        default = build_local_app(tmp_path / "plain")
-        enriched = build_local_app(tmp_path / "ocr", image_ocr=FakeImageOcr(text=""))
+        default = build_local_app(tmp_path / "plain", security=TEST_SECURITY)
+        enriched = build_local_app(
+            tmp_path / "ocr", image_ocr=FakeImageOcr(text=""), security=TEST_SECURITY
+        )
 
         bodies = []
         for app in (default, enriched):
@@ -281,7 +287,7 @@ class TestTheDefaultDeploymentIsUnchanged:
 class TestNoRequestCanSwitchTheEngine:
     @pytest.fixture
     def default_client(self, tmp_path: Path) -> Any:
-        with TestClient(build_local_app(tmp_path / "data")) as client:
+        with TestClient(build_local_app(tmp_path / "data", security=TEST_SECURITY)) as client:
             yield client
 
     def test_an_unknown_payload_field_is_rejected_outright(self, default_client: Any) -> None:
@@ -332,7 +338,7 @@ class TestNoRequestCanSwitchTheEngine:
         self, tmp_path: Path
     ) -> None:
         recognizer = FakeImageOcr(text="words", settings={"languages": "fake+fake"})
-        app = build_local_app(tmp_path / "data", image_ocr=recognizer)
+        app = build_local_app(tmp_path / "data", image_ocr=recognizer, security=TEST_SECURITY)
 
         with TestClient(app) as client:
             capture_image(client, PNG)
@@ -354,7 +360,16 @@ class TestMainWiresTheRecognizerThrough:
         monkeypatch.setattr("unimem_api.__main__.build_image_ocr", build)
         server = RecordingServer()
 
-        main(["--data-dir", str(tmp_path / "data"), "--image-ocr"], server=server)
+        main(
+            [
+                "--data-dir",
+                str(tmp_path / "data"),
+                "--image-ocr",
+                "--token-file",
+                str(token_path(tmp_path)),
+            ],
+            server=server,
+        )
 
         assert built == ["built"]
 
@@ -366,7 +381,10 @@ class TestMainWiresTheRecognizerThrough:
 
         monkeypatch.setattr("unimem_api.__main__.build_image_ocr", explode)
 
-        main(["--data-dir", str(tmp_path / "data")], server=RecordingServer())
+        main(
+            ["--data-dir", str(tmp_path / "data"), "--token-file", str(token_path(tmp_path))],
+            server=RecordingServer(),
+        )
 
     def test_the_app_it_builds_uses_the_adapter_it_was_handed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -375,7 +393,16 @@ class TestMainWiresTheRecognizerThrough:
         monkeypatch.setattr("unimem_api.__main__.build_image_ocr", lambda: recognizer)
         server = RecordingServer()
 
-        main(["--data-dir", str(tmp_path / "data"), "--image-ocr"], server=server)
+        main(
+            [
+                "--data-dir",
+                str(tmp_path / "data"),
+                "--image-ocr",
+                "--token-file",
+                str(token_path(tmp_path)),
+            ],
+            server=server,
+        )
 
         with TestClient(server.calls[0][0]) as client:
             capture_image(client, PNG)
@@ -389,7 +416,16 @@ class TestMainWiresTheRecognizerThrough:
         """Two gates, and neither runs for the other's flag."""
         built = _recording_gates(monkeypatch)
 
-        main(["--data-dir", str(tmp_path / "data"), "--image-ocr"], server=RecordingServer())
+        main(
+            [
+                "--data-dir",
+                str(tmp_path / "data"),
+                "--image-ocr",
+                "--token-file",
+                str(token_path(tmp_path)),
+            ],
+            server=RecordingServer(),
+        )
 
         assert built == ["image"]
 
@@ -400,7 +436,14 @@ class TestMainWiresTheRecognizerThrough:
         built = _recording_gates(monkeypatch)
 
         main(
-            ["--data-dir", str(tmp_path / "data"), "--pdf-ocr", "--image-ocr"],
+            [
+                "--data-dir",
+                str(tmp_path / "data"),
+                "--pdf-ocr",
+                "--image-ocr",
+                "--token-file",
+                str(token_path(tmp_path)),
+            ],
             server=RecordingServer(),
         )
 
@@ -420,7 +463,16 @@ class TestStartupRefusesWhenThePrerequisitesAreMissing:
         server = RecordingServer()
 
         with pytest.raises(SystemExit) as raised:
-            main(["--data-dir", str(tmp_path / "data"), "--image-ocr"], server=server)
+            main(
+                [
+                    "--data-dir",
+                    str(tmp_path / "data"),
+                    "--image-ocr",
+                    "--token-file",
+                    str(token_path(tmp_path)),
+                ],
+                server=server,
+            )
 
         assert "--image-ocr" in str(raised.value)
         assert server.calls == []
@@ -437,7 +489,16 @@ class TestStartupRefusesWhenThePrerequisitesAreMissing:
         data_dir = tmp_path / "data"
 
         with pytest.raises(SystemExit):
-            main(["--data-dir", str(data_dir), "--image-ocr"], server=RecordingServer())
+            main(
+                [
+                    "--data-dir",
+                    str(data_dir),
+                    "--image-ocr",
+                    "--token-file",
+                    str(token_path(tmp_path)),
+                ],
+                server=RecordingServer(),
+            )
 
         assert not data_dir.exists()
 
@@ -454,7 +515,16 @@ class TestStartupRefusesWhenThePrerequisitesAreMissing:
         server = RecordingServer()
 
         with pytest.raises(SystemExit):
-            main(["--data-dir", str(tmp_path / "data"), "--image-ocr"], server=server)
+            main(
+                [
+                    "--data-dir",
+                    str(tmp_path / "data"),
+                    "--image-ocr",
+                    "--token-file",
+                    str(token_path(tmp_path)),
+                ],
+                server=server,
+            )
 
         assert server.calls == []
 
@@ -484,6 +554,7 @@ from fastapi.testclient import TestClient
 from core.contracts import SCHEMA_VERSION
 from core.processing.image_recognition import ImageOcrResult
 from unimem_api import build_local_app
+from unimem_api.security import ApiSecurity
 
 
 class Recognizer:
@@ -497,8 +568,11 @@ class Recognizer:
         )
 
 
-app = build_local_app(Path("data"), image_ocr=Recognizer())
-with TestClient(app) as client:
+app = build_local_app(Path("data"), image_ocr=Recognizer(), security=ApiSecurity("a" * 43))
+with TestClient(
+    app, base_url="http://127.0.0.1:8765",
+    headers={"Authorization": "Bearer " + "a" * 43},
+) as client:
     data = Path("photo.png").read_bytes()
     upload = client.post("/v1/uploads", files={"file": ("photo.png", data, "image/png")})
     envelope = {
@@ -644,8 +718,9 @@ original = subprocess.run
 subprocess.run = lambda *a, **k: calls.append(a) or original(*a, **k)
 
 from unimem_api import build_local_app
+from unimem_api.security import ApiSecurity
 
-build_local_app(Path("data"))
+build_local_app(Path("data"), security=ApiSecurity("a" * 43))
 print(json.dumps({"subprocesses": len(calls)}))
 """,
             tmp_path,

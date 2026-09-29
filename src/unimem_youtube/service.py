@@ -72,6 +72,7 @@ class YoutubeCaptureService:
         languages: tuple[str, ...],
         *,
         acquire: Callable[[str, tuple[str, ...]], CaptionArtifact] = acquire_captions,
+        capture_id: str | None = None,
     ) -> ContentObject:
         video_id = video_id_from_url(url)
         validate_languages(languages)
@@ -89,7 +90,7 @@ class YoutubeCaptureService:
                 "invalid_response", "Acquisition returned a different video or language."
             )
         raw = self.raw_store.store_bytes(data, mime_type=CAPTION_MIME)
-        capture_id = str(uuid4())
+        capture_id = capture_id if capture_id is not None else str(uuid4())
         envelope = CaptureEnvelope(
             id=capture_id,
             source=CaptureSource(

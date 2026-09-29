@@ -12,7 +12,6 @@ handlers, so what is asserted is what a client would actually receive.
 """
 
 import pytest
-from fastapi.testclient import TestClient
 
 from core.contracts import CaptureStatus
 from core.intake import (
@@ -49,6 +48,7 @@ from core.storage import (
     RawObjectStoreError,
     RawObjectWriteError,
 )
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.api.builders import CAPTURE_ID, text_envelope
 from tests.unit.api.conftest import build_stack
 from tests.unit.api.doubles import (
@@ -253,25 +253,21 @@ class TestSubclassesResolveThroughTheirBase:
         assert error["code"] == "processing_configuration_error"
 
 
-class TestUnmappedFailuresStayUnhandled:
-    """Nothing is adopted by a base class that happens to be nearby."""
+class TestUnmappedFailuresAreSafeInternalErrors:
+    """ADR-025 keeps bugs as 500 without leaking stacks through uvicorn."""
 
     @pytest.mark.parametrize(
         "exc",
         [ProcessingError("a bare processing error"), RuntimeError("a bug")],
         ids=lambda exc: type(exc).__name__,
     )
-    def test_an_unmapped_error_is_not_translated(self, exc: Exception) -> None:
-        """It propagates as an unhandled server error, which is what a bug is.
-
-        ``ProcessingError`` is the interesting one: its subclasses are mapped
-        and it is not, so an unmapped future subclass cannot silently inherit a
-        friendly 422.
-        """
+    def test_an_unmapped_error_remains_a_safe_500(self, exc: Exception) -> None:
         client = raising_client(exc)
 
-        with pytest.raises(type(exc)):
-            client.get(f"/v1/captures/{CAPTURE_ID}")
+        response = client.get(f"/v1/captures/{CAPTURE_ID}")
+        assert response.status_code == 500
+        assert response.json()["error"]["code"] == "internal_error"
+        assert str(exc) not in response.text
 
 
 class TestFailuresThroughTheRealPipeline:

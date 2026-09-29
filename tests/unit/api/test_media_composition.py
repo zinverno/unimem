@@ -20,12 +20,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 
 from core.intake import AUDIO_MIME_TYPES as INTAKE_AUDIO_MIME_TYPES
 from core.intake import VIDEO_MIME_TYPES as INTAKE_VIDEO_MIME_TYPES
 from core.processing import AUDIO_MIME_TYPES, VIDEO_MIME_TYPES, AudioProcessor, VideoProcessor
 from core.storage import LocalRawObjectStore, build_raw_ref
+from tests.api_auth import TEST_SECURITY
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.processing.doubles import (
     FakeMediaProbe,
     audio_stream,
@@ -83,7 +84,7 @@ class TestTheDefaultDeploymentHasNoMedia:
 
     @pytest.fixture
     def client(self, tmp_path: Path) -> Any:
-        with TestClient(build_local_app(tmp_path / "data")) as test_client:
+        with TestClient(build_local_app(tmp_path / "data", security=TEST_SECURITY)) as test_client:
             yield test_client
 
     @pytest.mark.parametrize(
@@ -120,7 +121,9 @@ class TestAMediaDeploymentEnablesBothTogether:
 
     @pytest.fixture
     def client(self, tmp_path: Path, probe: FakeMediaProbe) -> Any:
-        with TestClient(build_local_app(tmp_path / "data", media_probe=probe)) as test_client:
+        with TestClient(
+            build_local_app(tmp_path / "data", media_probe=probe, security=TEST_SECURITY)
+        ) as test_client:
             yield test_client
 
     def test_both_processors_are_registered(self, probe: FakeMediaProbe) -> None:
@@ -141,7 +144,9 @@ class TestAMediaDeploymentEnablesBothTogether:
         probe = FakeMediaProbe(
             result=probe_result(container_names=("mp4",), video_streams=(video_stream(index=0),))
         )
-        with TestClient(build_local_app(tmp_path / "data", media_probe=probe)) as client:
+        with TestClient(
+            build_local_app(tmp_path / "data", media_probe=probe, security=TEST_SECURITY)
+        ) as client:
             file_ref = stage(client, MP3, "video/mp4")
 
             response = client.post(

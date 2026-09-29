@@ -15,7 +15,6 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from core.intake import CaptureIntake
 from core.processing import (
@@ -26,6 +25,8 @@ from core.processing import (
     TextProcessor,
     WebpageProcessor,
 )
+from tests.api_auth import TEST_SECURITY
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.api.doubles import (
     FakeCaptureRecordStore,
     FakeContentObjectStore,
@@ -85,6 +86,7 @@ def build_stack(
         record_store=record_store,
         content_store=content_store,
         raw_store=raw_store,
+        security=TEST_SECURITY,
     )
     return Stack(app, TestClient(app), raw_store, record_store, content_store)
 

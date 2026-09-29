@@ -19,7 +19,8 @@ uvicorn, status codes, routing, and the command line all live here, on this side
 of the boundary, and the dependency points one way only.
 
 Four routes, and deliberately no fifth. There is no list, search, batch,
-re-process, or delete endpoint, and no authentication. Those become real work
+re-process, or delete endpoint. ADR-025 adds mandatory authentication and separate
+YouTube delivery operations. Other capabilities become real work
 when a connector produces a real requirement for them.
 
 The one requirement a connector *did* produce is the narrow completed replay in
