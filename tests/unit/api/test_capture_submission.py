@@ -8,10 +8,10 @@ about intake.
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 
 from core.contracts import CaptureStatus, ContentType, ProvenanceSourceType, SegmentType
 from core.processing import ProcessingInputError, TextProcessor
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.api.builders import (
     AWKWARD_TEXT,
     CAPTURE_ID,

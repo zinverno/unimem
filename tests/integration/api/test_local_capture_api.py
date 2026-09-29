@@ -17,7 +17,6 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from core.contracts import CaptureRecord, CaptureStatus, ContentObject
 from core.contracts.base import SCHEMA_VERSION
@@ -29,6 +28,8 @@ from core.processing import (
     TextProcessor,
 )
 from core.storage import LocalRawObjectStore
+from tests.api_auth import TEST_SECURITY
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.api.builders import AWKWARD_TEXT, CAPTURE_ID, CAPTURED_AT, TITLE, text_envelope
 from tests.unit.api.conftest import served_paths
 from unimem_api import DATABASE_FILENAME, RAW_DIRNAME, build_local_app, create_app
@@ -63,7 +64,7 @@ def data_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def client(data_dir: Path) -> Iterator[TestClient]:
-    with TestClient(build_local_app(data_dir)) as test_client:
+    with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as test_client:
         yield test_client
 
 
@@ -73,7 +74,7 @@ class TestLocalComposition:
     def test_it_creates_the_data_directory(self, data_dir: Path) -> None:
         assert not data_dir.exists()
 
-        build_local_app(data_dir)
+        build_local_app(data_dir, security=TEST_SECURITY)
 
         assert data_dir.is_dir()
 
@@ -81,7 +82,7 @@ class TestLocalComposition:
         data_dir.mkdir(parents=True)
         (data_dir / "keep-me.txt").write_text("still here")
 
-        build_local_app(data_dir)
+        build_local_app(data_dir, security=TEST_SECURITY)
 
         assert (data_dir / "keep-me.txt").read_text() == "still here"
 
@@ -211,13 +212,13 @@ class TestSurvivingARestart:
     """
 
     def test_the_capture_and_its_content_outlive_the_app(self, data_dir: Path) -> None:
-        with TestClient(build_local_app(data_dir)) as first:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as first:
             created = first.post("/v1/captures", json=text_envelope()).json()
             record_before = first.get(f"/v1/captures/{CAPTURE_ID}").json()
             content_before = first.get(f"/v1/captures/{CAPTURE_ID}/content").json()
 
         # A genuinely new application object over the same directory.
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             record_after = second.get(f"/v1/captures/{CAPTURE_ID}")
             content_after = second.get(f"/v1/captures/{CAPTURE_ID}/content")
 
@@ -230,11 +231,11 @@ class TestSurvivingARestart:
         assert content_after.json()["id"] == created["content_id"]
 
     def test_the_canonical_content_is_byte_identical_after_a_restart(self, data_dir: Path) -> None:
-        with TestClient(build_local_app(data_dir)) as first:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as first:
             first.post("/v1/captures", json=text_envelope())
             before = first.get(f"/v1/captures/{CAPTURE_ID}/content").content
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             after = second.get(f"/v1/captures/{CAPTURE_ID}/content").content
 
         assert after == before
@@ -248,18 +249,18 @@ class TestSurvivingARestart:
         as the first one would: this request is not the request that made the
         capture, so it is still a conflict.
         """
-        with TestClient(build_local_app(data_dir)) as first:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as first:
             assert first.post("/v1/captures", json=text_envelope()).status_code == 201
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             conflicting = text_envelope(context={"captured_at": "2026-05-05T05:05:05+00:00"})
             assert second.post("/v1/captures", json=conflicting).status_code == 409
 
     def test_a_fresh_app_can_still_accept_new_captures(self, data_dir: Path) -> None:
-        with TestClient(build_local_app(data_dir)) as first:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as first:
             first.post("/v1/captures", json=text_envelope(id="cap_before"))
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             created = second.post("/v1/captures", json=text_envelope(id="cap_after"))
             assert created.status_code == 201
             assert second.get("/v1/captures/cap_before").status_code == 200
@@ -269,7 +270,7 @@ class TestCorruptionOverTheRealAdapter:
     """A row this build cannot read back is a safe 500, path and all withheld."""
 
     def test_a_damaged_record_is_a_safe_500(self, data_dir: Path) -> None:
-        with TestClient(build_local_app(data_dir)) as client:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as client:
             client.post("/v1/captures", json=text_envelope())
 
         database = data_dir / DATABASE_FILENAME
@@ -280,7 +281,7 @@ class TestCorruptionOverTheRealAdapter:
             CAPTURE_ID,
         )
 
-        with TestClient(build_local_app(data_dir)) as client:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as client:
             response = client.get(f"/v1/captures/{CAPTURE_ID}")
 
         assert response.status_code == 500
@@ -289,7 +290,7 @@ class TestCorruptionOverTheRealAdapter:
         assert DATABASE_FILENAME not in response.text
 
     def test_a_damaged_content_row_is_a_safe_500(self, data_dir: Path) -> None:
-        with TestClient(build_local_app(data_dir)) as client:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as client:
             client.post("/v1/captures", json=text_envelope())
 
         database = data_dir / DATABASE_FILENAME
@@ -300,7 +301,7 @@ class TestCorruptionOverTheRealAdapter:
             CAPTURE_ID,
         )
 
-        with TestClient(build_local_app(data_dir)) as client:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as client:
             response = client.get(f"/v1/captures/{CAPTURE_ID}/content")
 
         assert response.status_code == 500
@@ -312,7 +313,7 @@ class TestStorageOutageOverTheRealAdapter:
     """A database the adapter cannot use is a 503 that names nothing."""
 
     def test_an_unusable_database_is_a_safe_503(self, data_dir: Path) -> None:
-        app = build_local_app(data_dir)
+        app = build_local_app(data_dir, security=TEST_SECURITY)
         database = data_dir / DATABASE_FILENAME
         # Not a SQLite file any more. The adapter's own error names this path.
         database.write_bytes(b"this is not a sqlite database" * 64)
@@ -372,8 +373,9 @@ def test_create_app_and_build_local_app_serve_the_same_routes(data_dir: Path) ->
         record_store=record_store,
         content_store=content_store,
         raw_store=raw_store,
+        security=TEST_SECURITY,
     )
 
-    composed = build_local_app(data_dir)
+    composed = build_local_app(data_dir, security=TEST_SECURITY)
 
     assert served_paths(manual) == served_paths(composed)

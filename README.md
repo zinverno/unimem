@@ -202,9 +202,10 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for scope and invariants.
 
 ## Quick start
 
-Run the local capture server:
+Initialize a private local credential, then run the capture server:
 
 ```bash
+python -m unimem_api --data-dir ./data --init-token
 python -m unimem_api --data-dir ./data
 ```
 
@@ -217,7 +218,7 @@ It binds `127.0.0.1:8765` by default and creates `./data` if it is missing:
 
 That is the **default deployment**, and it needs nothing beyond the Python
 package: no rasterizer, no imaging library, no OCR engine, and no media tooling.
-There are three optional capabilities, each off unless you ask for it and each
+There are four optional capabilities, each off unless you ask for it and each
 independent of the others:
 
 | flag | what it adds | what it needs |
@@ -225,22 +226,27 @@ independent of the others:
 | `--pdf-ocr` | recognizes scanned PDF pages that carry no embedded text | the `ocr` extra (a rasterizer and an imaging library) **plus** a system Tesseract with `eng` and `rus` |
 | `--image-ocr` | recognizes text in staged PNG and JPEG images | a system Tesseract with `eng` and `rus`, and **no Python extra at all** |
 | `--media` | accepts audio and video captures and describes their container structure | a system FFmpeg providing `ffprobe`, and **no Python extra at all** |
+| `--youtube` | durable YouTube caption operations and read-only Markdown delivery | the optional `youtube` extra |
 
-Any combination — all three, some, or none — is a valid deployment. See
+Any combination is a valid deployment. See
 [Scanned PDFs](#scanned-pdfs-opt-in-local-ocr),
 [Images](#images-opt-in-local-ocr) and
 [Audio and video](#audio-and-video-opt-in-local-structural-probing) below. Every
 other behaviour described in this README is identical in every mode.
 
-> **This server has no authentication, authorization, or TLS.** Anyone who can
-> reach the port can submit captures and read everything stored. Keep the default
-> localhost binding, and do not expose it to an untrusted network.
+**All data routes require a bearer token.** Only `/health` is public liveness.
+The server binds loopback only and checks Host/Origin; CORS is not authorization.
+Before using the examples below, define the `ucurl` helper from
+[local connection setup](docs/LOCAL_DELIVERY.md#install-and-explicitly-connect).
+It sends the token from its private file without placing it in curl's arguments.
+Uploads now have a 512 MiB total-request limit; JSON bodies have an 8 MiB limit.
+See the guide for deadlines, queue bounds, token rotation and restart behavior.
 
 Submit a capture. The body is the canonical `CaptureEnvelope`, and the client
 picks the capture id:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8765/v1/captures \
+ucurl -sS -X POST http://127.0.0.1:8765/v1/captures \
   -H 'content-type: application/json' \
   -d '{
     "schema_version": "0.2",
@@ -265,14 +271,14 @@ Read the capture's authoritative lifecycle record — this is also how a failure
 after `POST` is inspected (`received`, `stored`, `processing`, `failed`):
 
 ```bash
-curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_01
+ucurl -sS http://127.0.0.1:8765/v1/captures/cap_readme_01
 ```
 
 Read the canonical `ContentObject` it normalized into (the canonical object
 itself, not a rendering):
 
 ```bash
-curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_01/content
+ucurl -sS http://127.0.0.1:8765/v1/captures/cap_readme_01/content
 ```
 
 Errors come back as `{"error": {"code": ..., "message": ...}}`.
@@ -328,7 +334,7 @@ print(json.dumps({
 }))
 PY
 
-curl -sS -X POST http://127.0.0.1:8765/v1/captures \
+ucurl -sS -X POST http://127.0.0.1:8765/v1/captures \
   -H 'content-type: application/json' \
   --data-binary @page-capture.json
 ```
@@ -350,7 +356,7 @@ paragraph is preserved as a real no-break space (U+00A0) rather than collapsed
 to an ordinary one:
 
 ```bash
-curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_web_01/content
+ucurl -sS http://127.0.0.1:8765/v1/captures/cap_readme_web_01/content
 ```
 
 A few things are worth being precise about:
@@ -397,7 +403,7 @@ the upload is not a capture.**
 Step one: stage the bytes.
 
 ```bash
-curl -sS -F 'file=@example.pdf;type=application/pdf' \
+ucurl -sS -F 'file=@example.pdf;type=application/pdf' \
   http://127.0.0.1:8765/v1/uploads
 ```
 
@@ -418,7 +424,7 @@ Step two: submit the capture, putting that `file_ref` into the existing
 canonical envelope.
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8765/v1/captures \
+ucurl -sS -X POST http://127.0.0.1:8765/v1/captures \
   -H 'content-type: application/json' \
   -d '{
     "schema_version": "0.2",
@@ -437,7 +443,7 @@ The response is the same `201` shape as every other capture. The content object
 comes back with `"type": "document"` and one text segment per nonblank page:
 
 ```bash
-curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_pdf_01/content
+ucurl -sS http://127.0.0.1:8765/v1/captures/cap_readme_pdf_01/content
 ```
 
 ```json
@@ -510,7 +516,7 @@ capture declares.
 Step one: stage the bytes.
 
 ```bash
-curl -sS \
+ucurl -sS \
   -F 'file=@example.docx;type=application/vnd.openxmlformats-officedocument.wordprocessingml.document' \
   http://127.0.0.1:8765/v1/uploads
 ```
@@ -530,7 +536,7 @@ Step two: submit the capture, naming that `file_ref` in the same canonical
 `document` envelope.
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8765/v1/captures \
+ucurl -sS -X POST http://127.0.0.1:8765/v1/captures \
   -H 'content-type: application/json' \
   -d '{
     "schema_version": "0.2",
@@ -549,7 +555,7 @@ The response is the same `201` shape as every other capture, and the content
 object comes back with `"type": "document"`:
 
 ```bash
-curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_docx_01/content
+ucurl -sS http://127.0.0.1:8765/v1/captures/cap_readme_docx_01/content
 ```
 
 For a document that reads *paragraph, 2x2 table, paragraph*:
@@ -690,12 +696,12 @@ no new MIME type, and nothing in a request can enable, disable, or configure
 recognition:
 
 ```bash
-curl -sS -F 'file=@scan.pdf;type=application/pdf' \
+ucurl -sS -F 'file=@scan.pdf;type=application/pdf' \
   http://127.0.0.1:8765/v1/uploads
 ```
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8765/v1/captures \
+ucurl -sS -X POST http://127.0.0.1:8765/v1/captures \
   -H 'content-type: application/json' \
   -d '{
     "schema_version": "0.2",
@@ -717,7 +723,7 @@ Read the content object and look at three fields — `type`, `provenance`, and
 was a scan, page three was blank.
 
 ```bash
-curl -sS http://127.0.0.1:8765/v1/captures/cap_readme_scan_01/content
+ucurl -sS http://127.0.0.1:8765/v1/captures/cap_readme_scan_01/content
 ```
 
 ```json
@@ -775,7 +781,7 @@ stays `failed` with no content, and there is no reprocessing or migration step.
 
 ```bash
 # the same file_ref, a different capture id
-curl -sS -X POST http://127.0.0.1:8765/v1/captures \
+ucurl -sS -X POST http://127.0.0.1:8765/v1/captures \
   -H 'content-type: application/json' \
   -d '{"schema_version": "0.2", "id": "cap_readme_scan_retry", … }'
 ```
@@ -994,10 +1000,10 @@ probed or executed.
 Stage the bytes and submit an envelope, exactly as for a PDF or an image:
 
 ```bash
-file_ref=$(curl -sS -X POST http://127.0.0.1:8765/v1/uploads \
+file_ref=$(ucurl -sS -X POST http://127.0.0.1:8765/v1/uploads \
   -F 'file=@talk.mp4;type=video/mp4' | python -c 'import json,sys; print(json.load(sys.stdin)["file_ref"])')
 
-curl -sS -X POST http://127.0.0.1:8765/v1/captures \
+ucurl -sS -X POST http://127.0.0.1:8765/v1/captures \
   -H 'content-type: application/json' \
   -d "{
     \"schema_version\": \"0.3\",
@@ -1096,6 +1102,14 @@ export leaves a completed capture available for another render. These are explic
 staging directories, not an Obsidian vault. See [installation, error semantics,
 limits and live evidence](docs/YOUTUBE_CAPTIONS.md).
 
+## Durable YouTube HTTP delivery
+
+[Local delivery setup and demonstration](docs/LOCAL_DELIVERY.md) covers protected
+submit → disconnect → status → stored content/Markdown with a client-known
+operation ID. A new POST returns 202 only after durable acceptance; retries of
+the same request return its existing operation. Capture completion and Obsidian
+import remain distinct; this server slice never imports into a vault.
+
 ## Browser capture
 
 **Primary target for the next browser release: Zen Browser on Linux.** Firefox
@@ -1107,7 +1121,13 @@ milestone for agreed Obsidian note import through Veynrel/Companion. See the
 [implementation tasks](tasks/todo.md). GitHub is a later source alongside
 multimedia, not part of either immediate slice.
 
-The current client saves either selected text or the current page. These are
+**Compatibility notice:** the installed connector does not yet send the new
+mandatory token and receives 401. Its connection UI and Zen port are B2–B4;
+the development instructions below describe the earlier unauthenticated browser
+acceptance, not a working connection to the protected server. HTTP harnesses
+supply explicit credentials; no anonymous fallback is available.
+
+The existing client implements selected-text and current-page capture. These are
 **Chromium development-install instructions**, not Zen installation or a
 daily-use extension distribution:
 
@@ -1206,7 +1226,7 @@ All deliberate for this phase:
   still work, but this connector targets the documented default.
 - **Only `http://` and `https://` pages.** Acting on `chrome://`, extension, or
   `file://` pages fails locally and sends nothing.
-- **No server authentication.** Keep the API on localhost.
+- **Mandatory server authentication.** The connector needs the next slice’s explicit connection UI; its old anonymous requests receive 401.
 - **No general retry policy — one bounded resend.** A capture that gets any HTTP
   response is never sent again: the server answered, and that is the answer. Only
   a request that fails at the *network* layer, where the outcome is genuinely

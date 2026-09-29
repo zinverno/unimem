@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any, Final
 
 import pytest
-from fastapi.testclient import TestClient
 
 from core.contracts import SCHEMA_VERSION
 from core.processing import (
@@ -35,6 +34,8 @@ from core.processing import (
     ImageOcrLimitExceeded,
 )
 from tests import images
+from tests.api_auth import TEST_SECURITY
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.processing.doubles import FakeImageOcr
 from unimem_api.wiring import build_local_app
 
@@ -49,7 +50,7 @@ RECOGNIZED: Final = "  HARBOUR\n\n  pier 4  \n"
 
 
 def client_for(tmp_path: Path, recognizer: FakeImageOcr | None) -> Iterator[TestClient]:
-    app = build_local_app(tmp_path / "data", image_ocr=recognizer)
+    app = build_local_app(tmp_path / "data", image_ocr=recognizer, security=TEST_SECURITY)
     with TestClient(app) as running:
         yield running
 
@@ -265,7 +266,7 @@ class TestAResourcePolicySkipOverHttp:
         for running in client_for(tmp_path, self.refusing(ENCODED_PIXEL_LIMIT, 20_000_000)):
             submit(running)
 
-        with TestClient(build_local_app(tmp_path / "data")) as reopened:
+        with TestClient(build_local_app(tmp_path / "data", security=TEST_SECURITY)) as reopened:
             recorded = ocr_metadata(content_of(reopened))
 
         assert recorded[SKIPPED_REASON_KEY] == ENCODED_PIXEL_LIMIT

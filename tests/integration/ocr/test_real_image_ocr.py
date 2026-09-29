@@ -35,6 +35,7 @@ from core.processing import ImageOcrProcessor, read_png_header
 from core.processing.image_recognition import validate_image_ocr_result
 from core.storage import LocalRawObjectStore
 from tests import images, ocr_support
+from tests.api_auth import AUTH_HEADERS
 from tests.unit.processing.builders import make_capture
 
 ocr_support.require_engine_for_image_ocr()
@@ -240,7 +241,7 @@ def _upload(base: str, path: Path) -> str:
     request = urllib.request.Request(
         f"{base}/v1/uploads",
         data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        headers={**AUTH_HEADERS, "Content-Type": f"multipart/form-data; boundary={boundary}"},
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=120) as response:
@@ -261,7 +262,7 @@ def _submit(base: str, file_ref: str) -> int:
     request = urllib.request.Request(
         f"{base}/v1/captures",
         data=json.dumps(envelope).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={**AUTH_HEADERS, "Content-Type": "application/json"},
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=180) as response:

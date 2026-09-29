@@ -27,12 +27,13 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from core.contracts import CaptureRecord, CaptureStatus, ContentObject, ContentType
 from core.contracts.base import SCHEMA_VERSION
 from core.contracts.enums import AssetRole, CapturePayloadType
 from tests import images
+from tests.api_auth import TEST_SECURITY
+from tests.api_auth import AuthenticatedClient as TestClient
 from unimem_api import RAW_DIRNAME, build_local_app
 
 CAPTURE_ID = "cap_http_img_01"
@@ -56,7 +57,7 @@ def data_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def client(data_dir: Path) -> Iterator[TestClient]:
-    with TestClient(build_local_app(data_dir)) as running:
+    with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as running:
         yield running
 
 
@@ -435,11 +436,11 @@ class TestUploadingIsNotCapturing:
 class TestSurvivingARestart:
     def test_the_image_content_is_readable_from_a_rebuilt_application(self, data_dir: Path) -> None:
         """Durability, not a claim: the whole app is thrown away and rebuilt."""
-        with TestClient(build_local_app(data_dir)) as first:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as first:
             file_ref = stage(first)
             assert first.post("/v1/captures", json=image_envelope(file_ref)).status_code == 201
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             content = content_of(second)
 
             assert content.type is ContentType.IMAGE

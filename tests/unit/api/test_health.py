@@ -1,6 +1,6 @@
 """``GET /health`` — process liveness, and the promise that it claims nothing more."""
 
-from fastapi.testclient import TestClient
+from tests.api_auth import AuthenticatedClient as TestClient
 
 
 def test_health_returns_exactly_ok(client: TestClient) -> None:

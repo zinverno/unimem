@@ -4,6 +4,10 @@ Status: accepted (Phase 1, PR 1). Opens **Macro Phase 1 — Capture Surface**.
 [Phase 0 remains closed](ADR-010-canonical-content-persistence.md#phase-0-is-closed);
 nothing in it is reopened, revised, or renegotiated here.
 
+B1 update: [ADR-025](ADR-025-protected-local-youtube-delivery.md) supersedes the
+unauthenticated deployment and adds separate durable YouTube operations. The
+synchronous capture route retains this ADR's completion meanings.
+
 ## Context
 
 Phase 0 ended with a system that can do the whole job and has no way to be

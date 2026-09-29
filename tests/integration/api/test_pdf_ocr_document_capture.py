@@ -28,7 +28,6 @@ from pathlib import Path
 from typing import Any, Final
 
 import pytest
-from fastapi.testclient import TestClient
 
 from core.contracts import CaptureRecord, CaptureStatus, ContentObject, ContentType
 from core.contracts.base import SCHEMA_VERSION
@@ -36,6 +35,8 @@ from core.contracts.enums import ProvenanceSourceType, SegmentType
 from core.processing import OCR_METADATA_KEY
 from core.processing.ocr import PdfOcrExecutionError
 from tests import pdfs
+from tests.api_auth import TEST_SECURITY
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.processing.doubles import FakePdfPageOcr
 from unimem_api import DATABASE_FILENAME, RAW_DIRNAME, build_local_app
 
@@ -68,7 +69,7 @@ def data_dir(tmp_path: Path) -> Path:
 
 
 def app_over(data_dir: Path, ocr: FakePdfPageOcr) -> TestClient:
-    return TestClient(build_local_app(data_dir, pdf_ocr=ocr))
+    return TestClient(build_local_app(data_dir, pdf_ocr=ocr, security=TEST_SECURITY))
 
 
 @pytest.fixture
@@ -392,7 +393,9 @@ class TestALaterPageFailure:
                 raise PdfOcrExecutionError("the OCR engine did not finish page 2")
 
         engine = FailsPartWayThrough()
-        with TestClient(build_local_app(data_dir, pdf_ocr=engine)) as client:
+        with TestClient(
+            build_local_app(data_dir, pdf_ocr=engine, security=TEST_SECURITY)
+        ) as client:
             assert submit(client).status_code == 503
             assert client.get(f"/v1/captures/{CAPTURE_ID}/content").status_code == 404
 
@@ -404,10 +407,11 @@ class TestSurvivingARestart:
     """The application is thrown away and rebuilt over the same directory."""
 
     @pytest.fixture
-    def first(self, data_dir: Path) -> Iterator[ContentObject]:
+    def first(self, data_dir: Path) -> ContentObject:
         with app_over(data_dir, recognizer(2, SCAN_TEXTS)) as client:
             assert submit(client).status_code == 201
-            yield content_of(client)
+            content = content_of(client)
+        return content
 
     def test_everything_reads_back_identically(self, data_dir: Path, first: ContentObject) -> None:
         with app_over(data_dir, recognizer(2, SCAN_TEXTS)) as restarted:
@@ -428,7 +432,7 @@ class TestSurvivingARestart:
         self, data_dir: Path, first: ContentObject
     ) -> None:
         """Stored content is just canonical content; reading it needs no engine."""
-        with TestClient(build_local_app(data_dir)) as default:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as default:
             assert content_of(default) == first
 
     def test_nothing_is_reprocessed_on_restart(self, data_dir: Path, first: ContentObject) -> None:
@@ -443,7 +447,7 @@ class TestSurvivingARestart:
 class TestTheSameBytesUnderTwoCaptureIds:
     def test_a_previously_refused_document_is_ingested_under_a_new_id(self, data_dir: Path) -> None:
         """The migration story: a new capture id, never a revisit of the old record."""
-        with TestClient(build_local_app(data_dir)) as default:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as default:
             assert submit(default, id="cap_refused").status_code == 422
             assert record_of(default, "cap_refused").status is CaptureStatus.FAILED
 

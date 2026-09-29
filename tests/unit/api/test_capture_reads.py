@@ -8,11 +8,11 @@ anything if someone can look.
 import json
 
 import pytest
-from fastapi.testclient import TestClient
 
 from core.contracts import CaptureRecord, CaptureStatus, ContentObject
 from core.persistence import CaptureRecordPersistenceError
 from core.processing import ProcessingInputError
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.api.builders import CAPTURE_ID, text_envelope
 from tests.unit.api.conftest import Stack, build_stack
 from tests.unit.api.doubles import FailingProcessor, FakeCaptureRecordStore

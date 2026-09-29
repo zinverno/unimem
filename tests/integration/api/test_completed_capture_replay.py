@@ -42,9 +42,10 @@ from typing import Any
 
 import pytest
 from _pytest.outcomes import Failed, Skipped
-from fastapi.testclient import TestClient
 
 from core.contracts import CaptureRecord, CaptureStatus, ContentObject
+from tests.api_auth import TEST_SECURITY
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.integration.api.connector_support import (
     CONNECTOR_PORT,
     REPO_ROOT,
@@ -74,7 +75,7 @@ def data_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def client(data_dir: Path) -> Iterator[TestClient]:
-    with TestClient(build_local_app(data_dir)) as test_client:
+    with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as test_client:
         yield test_client
 
 
@@ -217,10 +218,10 @@ class TestTheLostResponse:
         between, changes nothing: the second app reads the same rows and reaches
         the same answer. This is also why no retry state is kept anywhere.
         """
-        with TestClient(build_local_app(data_dir)) as first:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as first:
             created = first.post("/v1/captures", json=envelope).json()
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             replayed = second.post("/v1/captures", json=envelope)
 
         assert replayed.status_code == 200

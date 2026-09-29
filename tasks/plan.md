@@ -1,9 +1,12 @@
 # YouTube CLI capture, then Zen/Linux delivery
 
-Updated: 2026-09-29. Block A is implemented on `feat/youtube-transcript-markdown`,
-in open [PR #31](https://github.com/zinverno/unimem/pull/31);
-verification and handoff evidence are tracked in [todo.md](todo.md) and the
-[CLI guide](../docs/YOUTUBE_CAPTIONS.md). Blocks B-D remain future work.
+Updated: 2026-09-29. Block A is implemented and merged in
+[PR #31](https://github.com/zinverno/unimem/pull/31). B1 implements protected local
+HTTP delivery on `feat/protected-youtube-delivery`; see
+[ADR-025](../docs/ADR/ADR-025-protected-local-youtube-delivery.md) and
+[connection/restart guide](../docs/LOCAL_DELIVERY.md). B2–B4 and C–D remain future
+work. Prior CLI verification remains in [todo.md](todo.md) and the
+[CLI guide](../docs/YOUTUBE_CAPTIONS.md).
 Tasks and acceptance gates: [todo.md](todo.md).
 
 ## Baseline and scope
@@ -13,7 +16,8 @@ Inspected local and remote `main` at
 There was no earlier plan in this checkout. The owner confirmed there are no
 additional requirements beyond the supplied addendum. That was the planning
 baseline; the owner subsequently authorized block A implementation and a PR.
-The implementation retains that documentation and adds only the authorized CLI slice.
+Block A retained that documentation and implemented the authorized CLI slice.
+B1 now adds only protected server delivery; the extension remains unchanged.
 
 The order is:
 
@@ -91,6 +95,9 @@ and refuses an existing file; offline `render` reads persisted content by ID.
 
 ## Extension audit at the inspected commit
 
+The table records the original planning baseline. B1 supersedes its API security
+and server-queue observations with ADR-025; extension-side gaps still apply.
+
 These are source observations and documented compatibility constraints, not a
 runtime result. The AST graph was refreshed locally without LLM/network calls;
 it covered 279 code files. Its bounded query was only a navigation aid; the
@@ -146,13 +153,11 @@ Documentation version thresholds are not tested-browser versions.
 
 ## Next browser slice: required gates, not current implementation
 
-First review and protect the local API before adding any browser YouTube route:
-explicit local pairing/authorization, safe credential storage, Host/Origin and
-request validation, bounded bodies/requests, and rejection of unauthorized
-webpage callers. Choose the smallest mechanism supported by a concrete threat
-model; CORS alone is insufficient. Keep any pairing secret out of injected
-scripts, URLs, page DOM and logs. Check existing upload/read/write routes too;
-protecting only the new route would leave the stored material exposed.
+B1 implements the server prerequisite in ADR-025: explicit local bearer-token
+setup/rotation, protection of all old/new routes, Host/Origin and bounded ingress,
+SQLite operation acceptance/replay and single-worker restart recovery. B2 must
+add the extension's explicit connection UI and keep the token out of injected
+scripts, URLs, page DOM and logs. No browser runtime has yet verified this policy.
 
 The subsequent action sends the exact user-selected video's URL to the shared
 application service. Server acceptance is durable before the UI reports
@@ -160,7 +165,8 @@ application service. Server acceptance is durable before the UI reports
 Status remains server-owned. Provide a way to rediscover the accepted capture
 and show pending, processing, complete, failed, partial (if supported), and
 unknown/unreachable truthfully. An ambiguous connection failure is not success.
-Do not invent `202` or a queue as a side effect of porting the browser.
+Use B1's separate operation `202` contract. The old capture client still treats
+202 as a protocol error; do not relax its 200/201 completion contract.
 
 The smallest candidate UI is an explicit YouTube action in the existing action
 menu plus persistent access to status, preserving left-click selection and
@@ -169,7 +175,7 @@ If a popup is used, it only submits/observes; closing it never cancels accepted
 server work. Keeping a minimal capture reference locally may be necessary for
 rediscovery, but it is not a second lifecycle database. Such a change needs an
 explicit extension to ADR-012 and invariant 18's current no-local-state rule;
-HTTP/auth/acceptance changes similarly require an ADR against ADR-011/013.
+HTTP/auth/acceptance changes are recorded in ADR-025 against ADR-011/013.
 
 ### Local installation and reproducible manual smoke
 

@@ -10,7 +10,9 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "pydantic>=2.9",
-    "fastapi>=0.115",
+    "fastapi>=0.141.1",
+    # Streaming total-body limits, including multipart, before parsing.
+    "starlette>=1.6,<2",
     "uvicorn>=0.30",
     # The document processor's PDF reader. Focused on reading and writing PDF
     # structure, pure Python, no system libraries, and no subprocess — which is

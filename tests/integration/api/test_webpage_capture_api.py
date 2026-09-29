@@ -20,12 +20,13 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from core.contracts import CaptureRecord, CaptureStatus, ContentObject, ContentType
 from core.contracts.base import SCHEMA_VERSION
 from core.contracts.enums import AssetRole, ProvenanceSourceType, SegmentType
 from core.processing import TextProcessor, WebpageProcessor
+from tests.api_auth import TEST_SECURITY
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.api.builders import (
     HTML_PAGE,
     HTML_PAGE_TEXT,
@@ -44,7 +45,7 @@ def data_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def client(data_dir: Path) -> Iterator[TestClient]:
-    with TestClient(build_local_app(data_dir)) as running:
+    with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as running:
         yield running
 
 
@@ -202,22 +203,22 @@ class TestSurvivingARestart:
 
     @staticmethod
     def submit(data_dir: Path) -> None:
-        with TestClient(build_local_app(data_dir)) as first:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as first:
             assert first.post("/v1/captures", json=webpage_envelope()).status_code == 201
 
     def test_the_capture_and_its_content_outlive_the_app(self, data_dir: Path) -> None:
         self.submit(data_dir)
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             assert record_of(second).status is CaptureStatus.COMPLETE
             assert content_of(second).type is ContentType.WEB
 
     def test_the_content_is_byte_identical_after_a_restart(self, data_dir: Path) -> None:
-        with TestClient(build_local_app(data_dir)) as first:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as first:
             first.post("/v1/captures", json=webpage_envelope())
             before = first.get(f"/v1/captures/{WEBPAGE_CAPTURE_ID}/content").text
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             after = second.get(f"/v1/captures/{WEBPAGE_CAPTURE_ID}/content").text
 
         assert after == before
@@ -225,7 +226,7 @@ class TestSurvivingARestart:
     def test_the_extracted_text_is_unchanged(self, data_dir: Path) -> None:
         self.submit(data_dir)
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             (segment,) = content_of(second).segments
 
         assert segment.text == HTML_PAGE_TEXT
@@ -233,7 +234,7 @@ class TestSurvivingARestart:
     def test_the_original_html_is_still_exact(self, data_dir: Path) -> None:
         self.submit(data_dir)
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             record = record_of(second)
         assert record.raw_object is not None
         digest = record.raw_object.sha256
@@ -244,7 +245,7 @@ class TestSurvivingARestart:
     def test_a_fresh_app_still_accepts_new_webpage_captures(self, data_dir: Path) -> None:
         self.submit(data_dir)
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             response = second.post("/v1/captures", json=webpage_envelope(id="cap_web_after"))
 
         assert response.status_code == 201

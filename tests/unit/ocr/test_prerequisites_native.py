@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from tests import ocr_support, pdfs
+from tests.api_auth import token_path
 
 ocr_support.require_rasterizer()
 
@@ -63,6 +64,7 @@ BLOCK_PDFIUM: Final = BLOCK.format(blocked=("pypdfium2", "pypdfium2_raw"))
 
 def run(body: str, workspace: Path) -> dict[str, Any]:
     """Run one script in a fresh interpreter and read the JSON it printed."""
+    token_path(workspace)
     script = workspace / "probe.py"
     script.write_text(body, encoding="utf-8")
     finished = subprocess.run(
@@ -213,7 +215,7 @@ def never(app, *, host, port):
 
 out = {}
 try:
-    main(["--data-dir", "data", "--pdf-ocr"], server=never)
+    main(["--data-dir", "data", "--pdf-ocr", "--token-file", "test-api.token"], server=never)
     out["outcome"] = "started"
 except SystemExit as exit_request:
     out["outcome"] = "exited"
@@ -242,11 +244,14 @@ import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from unimem_api.security import ApiSecurity
 
 from unimem_api import build_local_app
 
 out = {}
-with TestClient(build_local_app(Path("data"))) as client:
+app = build_local_app(Path("data"), security=ApiSecurity("a" * 43))
+with TestClient(app, base_url="http://127.0.0.1:8765",
+                headers={"Authorization": "Bearer " + "a" * 43}) as client:
     for name, path in (("text", "text.pdf"), ("scan", "scan.pdf")):
         data = Path(path).read_bytes()
         upload = client.post(

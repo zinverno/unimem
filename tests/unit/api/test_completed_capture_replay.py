@@ -21,7 +21,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 
 from core.contracts import (
     CaptureContext,
@@ -33,6 +32,7 @@ from core.contracts import (
 )
 from core.persistence import CaptureRecordNotFoundError, ContentObjectCorruptError
 from core.processing import TextProcessor
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.api.builders import CAPTURE_ID, CAPTURED_AT, TITLE, text_envelope
 from tests.unit.api.conftest import Stack, build_stack, served_paths
 from tests.unit.api.doubles import (

@@ -25,12 +25,13 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from core.contracts import CaptureRecord, CaptureStatus, ContentObject, ContentType
 from core.contracts.base import SCHEMA_VERSION
 from core.contracts.enums import AssetRole, CapturePayloadType, ProvenanceSourceType, SegmentType
 from tests import pdfs
+from tests.api_auth import TEST_SECURITY
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.api.builders import CAPTURE_ID as TEXT_CAPTURE_ID
 from tests.unit.api.builders import (
     WEBPAGE_CAPTURE_ID,
@@ -57,7 +58,7 @@ def data_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def client(data_dir: Path) -> Iterator[TestClient]:
-    with TestClient(build_local_app(data_dir)) as running:
+    with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as running:
         yield running
 
 
@@ -495,32 +496,32 @@ class TestSurvivingARestart:
     """The whole application is thrown away and rebuilt over the same directory."""
 
     def test_the_capture_record_is_still_complete(self, data_dir: Path) -> None:
-        with TestClient(build_local_app(data_dir)) as first:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as first:
             file_ref = stage(first)
             first.post("/v1/captures", json=document_envelope(file_ref))
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             assert record_of(second).status is CaptureStatus.COMPLETE
 
     def test_the_content_object_is_still_there(self, data_dir: Path) -> None:
-        with TestClient(build_local_app(data_dir)) as first:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as first:
             file_ref = stage(first)
             content_id = first.post("/v1/captures", json=document_envelope(file_ref)).json()[
                 "content_id"
             ]
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             reloaded = content_of(second)
 
         assert reloaded.id == content_id
         assert reloaded.type is ContentType.DOCUMENT
 
     def test_the_pages_are_still_there(self, data_dir: Path) -> None:
-        with TestClient(build_local_app(data_dir)) as first:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as first:
             file_ref = stage(first)
             first.post("/v1/captures", json=document_envelope(file_ref))
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             segments = content_of(second).segments
 
         assert [segment.text for segment in segments] == [
@@ -530,7 +531,7 @@ class TestSurvivingARestart:
         assert [segment.spatial.page for segment in segments] == [1, 3]  # type: ignore[union-attr]
 
     def test_the_original_pdf_is_still_retrievable(self, data_dir: Path) -> None:
-        with TestClient(build_local_app(data_dir)) as first:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as first:
             stage(first)
 
         assert raw_path(data_dir, DOCUMENT_DIGEST).read_bytes() == DOCUMENT
@@ -538,10 +539,10 @@ class TestSurvivingARestart:
     def test_the_same_pdf_uploaded_after_a_restart_returns_the_same_reference(
         self, data_dir: Path
     ) -> None:
-        with TestClient(build_local_app(data_dir)) as first:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as first:
             before = stage(first)
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             after = stage(second)
 
         assert before == after
@@ -550,10 +551,10 @@ class TestSurvivingARestart:
         self, data_dir: Path
     ) -> None:
         """The staged object is durable, so the two steps need not share a process."""
-        with TestClient(build_local_app(data_dir)) as first:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as first:
             file_ref = stage(first)
 
-        with TestClient(build_local_app(data_dir)) as second:
+        with TestClient(build_local_app(data_dir, security=TEST_SECURITY)) as second:
             response = second.post("/v1/captures", json=document_envelope(file_ref))
 
             assert response.status_code == 201

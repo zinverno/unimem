@@ -48,6 +48,7 @@ from typing import Any
 import pytest
 
 from core.contracts import SCHEMA_VERSION, CapturePayloadType, CaptureStatus, ContentType
+from tests.api_auth import AUTH_HEADERS
 from tests.integration.api.connector_support import (
     CONNECTOR_PORT,
     REPO_ROOT,
@@ -361,7 +362,7 @@ class TestTheWholePageLostResponse(WholePageAcceptance):
         request = urllib.request.Request(
             CAPTURES_URL,
             data=json.dumps(submitted).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={**AUTH_HEADERS, "Content-Type": "application/json"},
             method="POST",
         )
 

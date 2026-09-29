@@ -36,6 +36,8 @@ from typing import Any, Final, NoReturn
 
 import pytest
 
+from tests.api_auth import AUTH_HEADERS, TEST_SECURITY, TEST_TOKEN
+
 #: The repository root, for locating the connector's sources.
 REPO_ROOT: Final = Path(__file__).resolve().parents[3]
 
@@ -128,7 +130,10 @@ def serve(data_dir: Path) -> Iterator[str]:
         unavailable(f"port {CONNECTOR_PORT} is already in use")
 
     config = uvicorn.Config(
-        build_local_app(data_dir), host="127.0.0.1", port=CONNECTOR_PORT, log_level="error"
+        build_local_app(data_dir, security=TEST_SECURITY),
+        host="127.0.0.1",
+        port=CONNECTOR_PORT,
+        log_level="error",
     )
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
@@ -161,13 +166,19 @@ def run_driver(script: str, arguments: list[str], workspace: Path) -> dict[str, 
     proves nothing and its silence must not read as an empty result.
     """
     driver = workspace / "drive-connector.mjs"
-    driver.write_text(script, encoding="utf-8")
+    # The installed extension has no pairing UI yet. This harness alone attaches auth.
+    auth = (
+        "const nativeFetch = globalThis.fetch; globalThis.fetch = (url, options = {}) => "
+        "nativeFetch(url, {...options, headers: {...options.headers, "
+        "Authorization: 'Bearer ' + process.env.UNIMEM_TEST_TOKEN}});\n"
+    )
+    driver.write_text(auth + script, encoding="utf-8")
     run = subprocess.run(
         ["node", str(driver), *arguments],
         capture_output=True,
         text=True,
         timeout=60,
-        env=os.environ | {"NO_COLOR": "1"},
+        env=os.environ | {"NO_COLOR": "1", "UNIMEM_TEST_TOKEN": TEST_TOKEN},
     )
     assert run.returncode == 0, run.stderr
     printed: dict[str, Any] = json.loads(run.stdout)
@@ -210,7 +221,9 @@ def read_json(url: str) -> dict[str, Any]:
     ``TestClient`` would run the app in this process instead of talking to the
     one the connector talked to, which is the whole point of these assertions.
     """
-    with urllib.request.urlopen(url, timeout=10) as response:
+    with urllib.request.urlopen(
+        urllib.request.Request(url, headers=AUTH_HEADERS), timeout=10
+    ) as response:
         parsed: dict[str, Any] = json.loads(response.read())
     return parsed
 

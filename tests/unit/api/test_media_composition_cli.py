@@ -32,6 +32,7 @@ import unimem_api.__main__ as cli
 import unimem_media
 from core.processing import AudioProcessor, VideoProcessor
 from core.processing.media_probe import MediaProbe
+from tests.api_auth import token_path
 from tests.unit.processing.doubles import FakeMediaProbe, audio_stream, probe_result
 from unimem_api.wiring import _media_processors
 from unimem_media import MediaPrerequisiteError
@@ -147,7 +148,16 @@ def working_probe() -> FakeMediaProbe:
 def observe(tmp_path: Path, *flags: str) -> dict[str, Any]:
     """Start the CLI in a fresh interpreter and report what it loaded and ran."""
     completed = subprocess.run(
-        [sys.executable, "-c", OBSERVE_START, "--data-dir", str(tmp_path), *flags],
+        [
+            sys.executable,
+            "-c",
+            OBSERVE_START,
+            "--data-dir",
+            str(tmp_path),
+            "--token-file",
+            str(token_path(tmp_path)),
+            *flags,
+        ],
         capture_output=True,
         text=True,
         timeout=120,
@@ -223,7 +233,10 @@ class TestMainWiresTheProbeThrough:
 
         monkeypatch.setattr(cli, "build_media_probe", lambda: probe)
         monkeypatch.setattr(cli, "build_local_app", record)
-        cli.main(["--data-dir", str(tmp_path), "--media"], server=RecordingServer())
+        cli.main(
+            ["--data-dir", str(tmp_path), "--media", "--token-file", str(token_path(tmp_path))],
+            server=RecordingServer(),
+        )
 
         assert seen["media_probe"] is probe
 
@@ -234,7 +247,10 @@ class TestMainWiresTheProbeThrough:
             raise AssertionError("no probe may be built without --media")
 
         monkeypatch.setattr(cli, "build_media_probe", never)
-        cli.main(["--data-dir", str(tmp_path)], server=RecordingServer())
+        cli.main(
+            ["--data-dir", str(tmp_path), "--token-file", str(token_path(tmp_path))],
+            server=RecordingServer(),
+        )
 
     def test_without_the_flag_the_composition_root_gets_none(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -246,7 +262,10 @@ class TestMainWiresTheProbeThrough:
             return FastAPI()
 
         monkeypatch.setattr(cli, "build_local_app", record)
-        cli.main(["--data-dir", str(tmp_path)], server=RecordingServer())
+        cli.main(
+            ["--data-dir", str(tmp_path), "--token-file", str(token_path(tmp_path))],
+            server=RecordingServer(),
+        )
 
         assert seen["media_probe"] is None
 
@@ -259,7 +278,10 @@ class TestMainWiresTheProbeThrough:
         monkeypatch.setattr(cli, "build_pdf_ocr", lambda: built.append("pdf"))
         monkeypatch.setattr(cli, "build_image_ocr", lambda: built.append("image"))
         monkeypatch.setattr(cli, "build_local_app", lambda *a, **k: FastAPI())
-        cli.main(["--data-dir", str(tmp_path), "--media"], server=RecordingServer())
+        cli.main(
+            ["--data-dir", str(tmp_path), "--media", "--token-file", str(token_path(tmp_path))],
+            server=RecordingServer(),
+        )
 
         assert built == ["media"]
 
@@ -273,7 +295,15 @@ class TestMainWiresTheProbeThrough:
         monkeypatch.setattr(cli, "build_image_ocr", lambda: built.append("image"))
         monkeypatch.setattr(cli, "build_local_app", lambda *a, **k: FastAPI())
         cli.main(
-            ["--data-dir", str(tmp_path), "--media", "--pdf-ocr", "--image-ocr"],
+            [
+                "--data-dir",
+                str(tmp_path),
+                "--media",
+                "--pdf-ocr",
+                "--image-ocr",
+                "--token-file",
+                str(token_path(tmp_path)),
+            ],
             server=RecordingServer(),
         )
 
@@ -318,7 +348,16 @@ class TestStartupRefusesWhenThePrerequisiteIsMissing:
         server = RecordingServer()
 
         with pytest.raises(SystemExit) as caught:
-            cli.main(["--data-dir", str(tmp_path / "data"), "--media"], server=server)
+            cli.main(
+                [
+                    "--data-dir",
+                    str(tmp_path / "data"),
+                    "--media",
+                    "--token-file",
+                    str(token_path(tmp_path)),
+                ],
+                server=server,
+            )
 
         assert "--media was requested" in str(caught.value)
         assert server.calls == []
@@ -329,7 +368,16 @@ class TestStartupRefusesWhenThePrerequisiteIsMissing:
         self._missing(monkeypatch)
 
         with pytest.raises(SystemExit) as caught:
-            cli.main(["--data-dir", str(tmp_path / "data"), "--media"], server=RecordingServer())
+            cli.main(
+                [
+                    "--data-dir",
+                    str(tmp_path / "data"),
+                    "--media",
+                    "--token-file",
+                    str(token_path(tmp_path)),
+                ],
+                server=RecordingServer(),
+            )
 
         assert "could not be run" in str(caught.value)
 
@@ -341,7 +389,9 @@ class TestStartupRefusesWhenThePrerequisiteIsMissing:
         data_dir = tmp_path / "never-created"
 
         with pytest.raises(SystemExit):
-            cli.main(["--data-dir", str(data_dir), "--media"])
+            cli.main(
+                ["--data-dir", str(data_dir), "--media", "--token-file", str(token_path(tmp_path))]
+            )
 
         assert not data_dir.exists()
 
@@ -359,7 +409,16 @@ class TestStartupRefusesWhenThePrerequisiteIsMissing:
         monkeypatch.setattr(cli, "build_local_app", record)
 
         with pytest.raises(SystemExit):
-            cli.main(["--data-dir", str(tmp_path / "data"), "--media"], server=RecordingServer())
+            cli.main(
+                [
+                    "--data-dir",
+                    str(tmp_path / "data"),
+                    "--media",
+                    "--token-file",
+                    str(token_path(tmp_path)),
+                ],
+                server=RecordingServer(),
+            )
 
         assert built == []
 
@@ -369,7 +428,13 @@ class TestStartupRefusesWhenThePrerequisiteIsMissing:
         self._missing(monkeypatch)
         server = RecordingServer()
 
-        assert cli.main(["--data-dir", str(tmp_path)], server=server) == 0
+        assert (
+            cli.main(
+                ["--data-dir", str(tmp_path), "--token-file", str(token_path(tmp_path))],
+                server=server,
+            )
+            == 0
+        )
         assert len(server.calls) == 1
 
 

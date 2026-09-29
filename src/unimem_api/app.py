@@ -66,13 +66,14 @@ what makes those states observable, and that is the entire recovery story this
 phase offers — deliberately, because reconciliation needs a real requirement to
 be designed against and a connector has not asked for one yet.
 
-There is no authentication, authorization, API key, TLS, or CORS policy here.
-See :mod:`unimem_api.wiring` for why the CLI binds to localhost.
+ADR-025 adds mandatory authentication and bounded ingress around every route.
+The optional YouTube delivery routes have a separate durable operation lifecycle.
 """
 
 from typing import Annotated
 
 from fastapi import FastAPI, File, Response, UploadFile, status
+from starlette.types import Lifespan
 
 from core.contracts import CaptureEnvelope, CaptureRecord, ContentObject
 from core.intake import CaptureIntake
@@ -90,7 +91,11 @@ from unimem_api.models import (
     HealthResponse,
     UploadedObjectResponse,
 )
+from unimem_api.operations_http import install_operation_routes
 from unimem_api.replay import resolve_completed_replay
+from unimem_api.security import ApiSecurity, LocalApiSecurity
+from unimem_youtube.operations import OperationStore
+from unimem_youtube.service import YoutubeCaptureService
 
 #: Documented on every route, so a client generating from the OpenAPI schema
 #: sees one error shape rather than FastAPI's default ``{"detail": ...}``.
@@ -133,6 +138,11 @@ def create_app(
     record_store: CaptureRecordStore,
     content_store: ContentObjectStore,
     raw_store: RawObjectStore,
+    *,
+    security: ApiSecurity,
+    lifespan: Lifespan[FastAPI] | None = None,
+    operations: OperationStore | None = None,
+    youtube_service: YoutubeCaptureService | None = None,
 ) -> FastAPI:
     """Build the API over five already-constructed core services.
 
@@ -157,8 +167,14 @@ def create_app(
         title="UniMem capture API",
         version="0.1.0",
         summary="Local HTTP capture surface over the UniMem capture core.",
+        lifespan=lifespan,
     )
+    app.add_middleware(LocalApiSecurity, policy=security)
     install_error_handlers(app)
+    if operations is not None:
+        if youtube_service is None:
+            raise ValueError("YouTube operations require the capture service.")
+        install_operation_routes(app, operations, youtube_service)
 
     @app.get("/health", response_model=HealthResponse, summary="Process liveness")
     def health() -> HealthResponse:

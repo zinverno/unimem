@@ -16,11 +16,11 @@ two it just stored.
 import hashlib
 
 import pytest
-from fastapi.testclient import TestClient
 from httpx2 import Response
 
 from core.contracts import CaptureRecord, ContentObject, RawObjectRef
 from core.storage import RawObjectWriteError, build_raw_ref
+from tests.api_auth import AuthenticatedClient as TestClient
 from tests.docxs import paragraph_table_paragraph_docx, paragraphs_docx
 from tests.pdfs import one_page_pdf, two_page_pdf
 from tests.unit.api.conftest import Stack, build_stack

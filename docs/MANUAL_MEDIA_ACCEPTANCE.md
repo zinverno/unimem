@@ -1,5 +1,12 @@
 # Ручная приёмка медиа (Macro Phase 5A)
 
+> **Обновление B1:** HTTP теперь требует явный bearer token. Команды ниже
+> используют `ucurl` и приватный `$ACC/api.token`; настройки добавлены в `env.sh`.
+> Это обновление подключения, а не повторное открытие прежней ручной приёмки.
+> Исторические результаты остаются прежними. Лимиты: JSON 8 MiB,
+> весь multipart 512 MiB; [контракт защиты и восстановления](LOCAL_DELIVERY.md).
+
+
 Этот документ — исполняемый чек-лист для владельца. Он проверяет **то, что уже
 построено**: приём аудио и видео без интерпретации, с описанием структуры
 контейнера локальным `ffprobe` (Phase 5A, срезы 1–3).
@@ -101,7 +108,7 @@ FFmpeg вовсе.
 ### Порядок выполнения: три жизни сервера над одним каталогом данных
 
 ```
-① python -m unimem_api --data-dir "$ACC/data" --port 8793            → MED-A
+① python -m unimem_api --data-dir "$ACC/data" --token-file "$ACC/api.token" --port 8793            → MED-A
 ② остановить; тот же --data-dir, плюс --media                        → MED-B, MED-C, MED-D, MED-F
 ③ остановить; тот же --data-dir, СНОВА без --media                   → MED-E
 ```
@@ -338,6 +345,14 @@ export OGG="audio/ogg"
 export MP4="video/mp4"
 export WEBM="video/webm"
 EOF
+cat >> "$ACC/env.sh" <<'AUTH'
+export UNIMEM_TOKEN_FILE="$ACC/api.token"
+ucurl() {
+  printf 'header = "Authorization: Bearer %s"\n' "$(cat "$UNIMEM_TOKEN_FILE")" |
+    curl --config - "$@"
+}
+AUTH
+source "$ACC/env.sh"
 cat "$ACC/env.sh"
 echo
 echo "Строка для второго терминала (скопируйте её целиком):"
@@ -1024,14 +1039,15 @@ ls -l "$ACC/in/control-silent.mp4"
 
 ```bash
 source "$ACC/env.sh"; cd "$REPO"
-"$PY" -m unimem_api --data-dir "$ACC/data" --port 8793
+"$PY" -m unimem_api --data-dir "$ACC/data" --token-file "$ACC/api.token" --init-token
+"$PY" -m unimem_api --data-dir "$ACC/data" --token-file "$ACC/api.token" --port 8793
 ```
 
 Каталог `$ACC/data` сервер создаст сам. Оставьте терминал открытым — сервер
 живёт в нём. Вернитесь в первый терминал и проверьте, что он отвечает:
 
 ```bash
-curl -sS "$API/health"; echo
+ucurl -sS "$API/health"; echo
 ```
 
 Ожидается `{"status":"ok"}`. `GET /health` сообщает только о живости процесса и
@@ -1060,7 +1076,7 @@ curl -sS "$API/health"; echo
 медиа.
 
 ```bash
-curl -sS -F "file=@$ACC/in/control.wav;type=audio/wav" "$API/v1/uploads" \
+ucurl -sS -F "file=@$ACC/in/control.wav;type=audio/wav" "$API/v1/uploads" \
   -o "$ACC/out/a_upload.json" -w 'upload HTTP %{http_code}\n'
 REF_A=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/a_upload.json")
 echo "file_ref: $REF_A"
@@ -1069,7 +1085,7 @@ echo "file_ref: $REF_A"
 ```bash
 "$PY" "$ACC/bin/envelope.py" med_a1_audio_refused audio "$WAV" "$REF_A" \
   > "$ACC/out/a1_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/a1_envelope.json" \
   -o "$ACC/out/a1_capture.json" -w 'capture HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/a1_capture.json"
@@ -1078,7 +1094,7 @@ curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
 Записи быть не должно — ни в каком состоянии:
 
 ```bash
-curl -sS "$API/v1/captures/med_a1_audio_refused" \
+ucurl -sS "$API/v1/captures/med_a1_audio_refused" \
   -o "$ACC/out/a1_record.json" -w 'record HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/a1_record.json"
 ```
@@ -1098,12 +1114,12 @@ curl -sS "$API/v1/captures/med_a1_audio_refused" \
 ```bash
 "$PY" "$ACC/bin/envelope.py" med_a2_video_refused video "$MP4" "$REF_A" \
   > "$ACC/out/a2_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/a2_envelope.json" \
   -o "$ACC/out/a2_capture.json" -w 'capture HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/a2_capture.json"
 
-curl -sS -o /dev/null -w 'record HTTP %{http_code}\n' \
+ucurl -sS -o /dev/null -w 'record HTTP %{http_code}\n' \
   "$API/v1/captures/med_a2_video_refused"
 ```
 
@@ -1121,12 +1137,12 @@ echo "никогда не стажированная ссылка: $UNSTAGED"
 
 "$PY" "$ACC/bin/envelope.py" med_a3_unstaged_refused video "$MP4" "$UNSTAGED" \
   > "$ACC/out/a3_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/a3_envelope.json" \
   -o "$ACC/out/a3_capture.json" -w 'capture HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/a3_capture.json"
 
-curl -sS -o /dev/null -w 'record HTTP %{http_code}\n' \
+ucurl -sS -o /dev/null -w 'record HTTP %{http_code}\n' \
   "$API/v1/captures/med_a3_unstaged_refused"
 ```
 
@@ -1174,11 +1190,11 @@ curl -sS -o /dev/null -w 'record HTTP %{http_code}\n' \
 В терминале сервера остановите процесс (`Ctrl+C`) и запустите заново:
 
 ```bash
-"$PY" -m unimem_api --data-dir "$ACC/data" --port 8793 --media
+"$PY" -m unimem_api --data-dir "$ACC/data" --token-file "$ACC/api.token" --port 8793 --media
 ```
 
 ```bash
-curl -sS "$API/health"; echo
+ucurl -sS "$API/health"; echo
 ```
 
 Никакого набора `[media]` для этого **не нужно и не ставится**: Python-зависимости
@@ -1188,9 +1204,9 @@ curl -sS "$API/health"; echo
 процесс работает над тем же каталогом данных:
 
 ```bash
-curl -sS -o /dev/null -w 'A1 record %{http_code}\n' "$API/v1/captures/med_a1_audio_refused"
-curl -sS -o /dev/null -w 'A2 record %{http_code}\n' "$API/v1/captures/med_a2_video_refused"
-curl -sS -o /dev/null -w 'A3 record %{http_code}\n' "$API/v1/captures/med_a3_unstaged_refused"
+ucurl -sS -o /dev/null -w 'A1 record %{http_code}\n' "$API/v1/captures/med_a1_audio_refused"
+ucurl -sS -o /dev/null -w 'A2 record %{http_code}\n' "$API/v1/captures/med_a2_video_refused"
+ucurl -sS -o /dev/null -w 'A3 record %{http_code}\n' "$API/v1/captures/med_a3_unstaged_refused"
 ```
 
 Все три — `404`. Включение capability **не оживляет** отклонённые попытки: их
@@ -1229,19 +1245,19 @@ MY_AUDIO="$ACC/in/control.wav"    # или ваш путь; никуда не о
 MY_AUDIO_MIME="$WAV"              # $WAV | $MP3 | $OGG
 B_ID=med_b_control_audio          # для своего файла возьмите med_b_owner_audio
 
-curl -sS -F "file=@$MY_AUDIO;type=$MY_AUDIO_MIME" "$API/v1/uploads" \
+ucurl -sS -F "file=@$MY_AUDIO;type=$MY_AUDIO_MIME" "$API/v1/uploads" \
   -o "$ACC/out/b_upload.json" -w 'upload HTTP %{http_code}\n'
 REF_B=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/b_upload.json")
 
 "$PY" "$ACC/bin/envelope.py" "$B_ID" audio "$MY_AUDIO_MIME" "$REF_B" \
   > "$ACC/out/b_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/b_envelope.json" \
   -o "$ACC/out/b_capture.json" -w 'capture HTTP %{http_code}\n'
 
-curl -sS "$API/v1/captures/$B_ID" \
+ucurl -sS "$API/v1/captures/$B_ID" \
   -o "$ACC/out/b_record.json" -w 'record HTTP %{http_code}\n'
-curl -sS "$API/v1/captures/$B_ID/content" \
+ucurl -sS "$API/v1/captures/$B_ID/content" \
   -o "$ACC/out/b_content.json" -w 'content HTTP %{http_code}\n'
 ```
 
@@ -1321,19 +1337,19 @@ curl -sS "$API/v1/captures/$B_ID/content" \
 аудиодорожки. **Эта подпроверка обязана пройти.**
 
 ```bash
-curl -sS -F "file=@$ACC/in/control-silent.mp4;type=video/mp4" "$API/v1/uploads" \
+ucurl -sS -F "file=@$ACC/in/control-silent.mp4;type=video/mp4" "$API/v1/uploads" \
   -o "$ACC/out/c1_upload.json" -w 'upload HTTP %{http_code}\n'
 REF_C1=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/c1_upload.json")
 
 "$PY" "$ACC/bin/envelope.py" med_c_silent_control video "$MP4" "$REF_C1" \
   > "$ACC/out/c1_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/c1_envelope.json" \
   -o "$ACC/out/c1_capture.json" -w 'capture HTTP %{http_code}\n'
 
-curl -sS "$API/v1/captures/med_c_silent_control" \
+ucurl -sS "$API/v1/captures/med_c_silent_control" \
   -o "$ACC/out/c1_record.json" -w 'record HTTP %{http_code}\n'
-curl -sS "$API/v1/captures/med_c_silent_control/content" \
+ucurl -sS "$API/v1/captures/med_c_silent_control/content" \
   -o "$ACC/out/c1_content.json" -w 'content HTTP %{http_code}\n'
 
 "$PY" "$ACC/bin/show.py" record  "$ACC/out/c1_record.json"
@@ -1406,18 +1422,18 @@ REF_C1=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/c1_upload.json")
 
 "$PY" "$ACC/bin/envelope.py" med_d_mismatch audio "$MP3" "$REF_C1" \
   > "$ACC/out/d_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/d_envelope.json" \
   -o "$ACC/out/d_capture.json" -w 'capture HTTP %{http_code}\n'
 cat "$ACC/out/d_capture.json"; echo
 ```
 
 ```bash
-curl -sS "$API/v1/captures/med_d_mismatch" \
+ucurl -sS "$API/v1/captures/med_d_mismatch" \
   -o "$ACC/out/d_record.json" -w 'record HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/d_record.json"
 
-curl -sS "$API/v1/captures/med_d_mismatch/content" \
+ucurl -sS "$API/v1/captures/med_d_mismatch/content" \
   -o "$ACC/out/d_content.json" -w 'content HTTP %{http_code}\n'
 cat "$ACC/out/d_content.json"; echo
 
@@ -1540,19 +1556,19 @@ cp "$ACC/out/b_content.json" "$ACC/out/f_content.json"
 Иначе отправьте его как отдельную строку:
 
 ```bash
-curl -sS -F "file=@$MY;type=$MY_MIME" "$API/v1/uploads" \
+ucurl -sS -F "file=@$MY;type=$MY_MIME" "$API/v1/uploads" \
   -o "$ACC/out/f_upload.json" -w 'upload HTTP %{http_code}\n'
 REF_F=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/f_upload.json")
 
 "$PY" "$ACC/bin/envelope.py" "$F_ID" "$MY_TYPE" "$MY_MIME" "$REF_F" \
   > "$ACC/out/f_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/f_envelope.json" \
   -o "$ACC/out/f_capture.json" -w 'capture HTTP %{http_code}\n'
 
-curl -sS "$API/v1/captures/$F_ID" \
+ucurl -sS "$API/v1/captures/$F_ID" \
   -o "$ACC/out/f_record.json" -w 'record HTTP %{http_code}\n'
-curl -sS "$API/v1/captures/$F_ID/content" \
+ucurl -sS "$API/v1/captures/$F_ID/content" \
   -o "$ACC/out/f_content.json" -w 'content HTTP %{http_code}\n'
 ```
 
@@ -1706,7 +1722,7 @@ printf '%s\n' "${IDS[@]}"
 for id in "${IDS[@]}"; do
   for kind in "" "/content"; do
     name=$([ -z "$kind" ] && echo record || echo content)
-    code=$(curl -sS -o "$ACC/snap/before_${id}_${name}.json" \
+    code=$(ucurl -sS -o "$ACC/snap/before_${id}_${name}.json" \
                  -w '%{http_code}' "$API/v1/captures/$id$kind")
     echo "$code" > "$ACC/snap/before_${id}_${name}.status"
     echo "before $id $name $code"
@@ -1730,11 +1746,11 @@ done
 и запустите заново **тем же** `--data-dir` и **без** `--media`:
 
 ```bash
-"$PY" -m unimem_api --data-dir "$ACC/data" --port 8793
+"$PY" -m unimem_api --data-dir "$ACC/data" --token-file "$ACC/api.token" --port 8793
 ```
 
 ```bash
-curl -sS "$API/health"; echo
+ucurl -sS "$API/health"; echo
 ```
 
 Никаких `--media`, `--pdf-ocr`, `--image-ocr` и другого каталога данных. Каталог
@@ -1749,7 +1765,7 @@ curl -sS "$API/health"; echo
 for id in "${IDS[@]}"; do
   for kind in "" "/content"; do
     name=$([ -z "$kind" ] && echo record || echo content)
-    code=$(curl -sS -o "$ACC/snap/after_${id}_${name}.json" \
+    code=$(ucurl -sS -o "$ACC/snap/after_${id}_${name}.json" \
                  -w '%{http_code}' "$API/v1/captures/$id$kind")
     echo "$code" > "$ACC/snap/after_${id}_${name}.status"
     echo "after  $id $name $code"
@@ -1774,10 +1790,10 @@ done
 отклониться: сборка без `--media` снова ничего не принимает.
 
 ```bash
-curl -sS "$API/v1/captures/med_d_mismatch" \
+ucurl -sS "$API/v1/captures/med_d_mismatch" \
   -o "$ACC/out/e_d_record.json" -w 'MED-D record HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/e_d_record.json"
-curl -sS -o /dev/null -w 'MED-D content HTTP %{http_code}\n' \
+ucurl -sS -o /dev/null -w 'MED-D content HTTP %{http_code}\n' \
   "$API/v1/captures/med_d_mismatch/content"
 ```
 
@@ -1785,11 +1801,11 @@ curl -sS -o /dev/null -w 'MED-D content HTTP %{http_code}\n' \
 REF_A=$("$PY" "$ACC/bin/show.py" ref "$ACC/out/a_upload.json")
 "$PY" "$ACC/bin/envelope.py" med_e_refused_after_restart audio "$WAV" "$REF_A" \
   > "$ACC/out/e_envelope.json"
-curl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
+ucurl -sS -X POST "$API/v1/captures" -H 'content-type: application/json' \
   --data-binary @"$ACC/out/e_envelope.json" \
   -o "$ACC/out/e_capture.json" -w 'capture HTTP %{http_code}\n'
 "$PY" "$ACC/bin/show.py" record "$ACC/out/e_capture.json"
-curl -sS -o /dev/null -w 'record HTTP %{http_code}\n' \
+ucurl -sS -o /dev/null -w 'record HTTP %{http_code}\n' \
   "$API/v1/captures/med_e_refused_after_restart"
 ```
 
