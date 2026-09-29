@@ -54,7 +54,7 @@ describe("feedback is scoped to the clicked tab", () => {
 
     applyFeedback(action, TAB, { outcome: OUTCOME.COMPLETE });
 
-    assert.deepEqual(action.titles, [{ title: "UniMem: saved", tabId: 7 }]);
+    assert.deepEqual(action.titles, [{ title: "UniMem: сохранено", tabId: 7 }]);
   });
 
   it("scopes the busy report too, so `...` does not appear on other tabs", () => {
@@ -164,7 +164,7 @@ describe("an unexpected failure still reaches the user", () => {
 
     applyFeedback(action, TAB, { outcome: OUTCOME.UNEXPECTED_ERROR });
 
-    assert.equal(action.titles[0].title, "UniMem: capture failed");
+    assert.equal(action.titles[0].title, "UniMem: не удалось сохранить");
   });
 
   it("says nothing about what threw", () => {

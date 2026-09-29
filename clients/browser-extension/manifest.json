@@ -1,15 +1,47 @@
 {
   "manifest_version": 3,
+  "minimum_chrome_version": "121",
   "name": "UniMem browser capture",
-  "version": "0.2.0",
-  "description": "Save selected text or the current page to your local UniMem capture API.",
-  "permissions": ["activeTab", "scripting", "contextMenus"],
-  "host_permissions": ["http://127.0.0.1/*"],
+  "version": "0.3.0",
+  "description": "Сохранение текста, страниц и субтитров YouTube в локальный UniMem.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "contextMenus",
+    "storage",
+    "downloads"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
   "background": {
+    "scripts": [
+      "service-worker.js"
+    ],
     "service_worker": "service-worker.js",
     "type": "module"
   },
   "action": {
-    "default_title": "Save selected text to UniMem"
+    "default_title": "Сохранить выделенный текст в UniMem"
+  },
+  "options_ui": {
+    "page": "manage.html",
+    "open_in_tab": true
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "unimem@zinverno.github.io",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": [
+          "websiteContent",
+          "browsingActivity",
+          "authenticationInfo"
+        ]
+      }
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src http://127.0.0.1:8765"
   }
 }

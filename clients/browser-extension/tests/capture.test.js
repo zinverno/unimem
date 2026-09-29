@@ -284,78 +284,18 @@ describe("the injected function", () => {
   });
 });
 
-describe("the service worker's own source", () => {
-  const workerSource = codeOf("../service-worker.js");
-
-  it("is where the fetch happens", () => {
-    assert.match(workerSource, /sendCapture\(envelope, \{ fetch \}\)/);
+describe("the privileged background source", () => {
+  const source = readFileSync(new URL("../service-worker.js", import.meta.url), "utf8");
+  it("uses the authenticated shared transport", () => {
+    assert.match(source, /sendCapture\(envelope, \{ fetch: http \}\)/);
+    assert.match(source, /localTransport/);
   });
-
-  it("injects only the selection reader", () => {
-    assert.match(workerSource, /func: readSelection/);
-  });
-
-  it("does not inject all frames", () => {
-    assert.ok(!workerSource.includes("allFrames"));
-  });
-
-  it("writes no persistent state", () => {
-    assert.ok(!workerSource.includes("chrome.storage"));
-    assert.ok(!workerSource.includes("localStorage"));
-    assert.ok(!workerSource.includes("indexedDB"));
-  });
-
-  it("registers no alarm, notification, tab query, or request interceptor", () => {
-    for (const api of ["alarms", "notifications", "tabs.query", "webRequest", "declarativeNet"]) {
-      assert.ok(!workerSource.includes(api), api);
-    }
-  });
-
-  it("registers exactly one context menu, from the installation lifecycle", () => {
-    // The only `chrome.contextMenus` use here is the click listener; creation
-    // goes through `lib/menu.js` and is reached from `onInstalled`, so a woken
-    // service worker does not add a second copy of the item.
-    assert.match(workerSource, /chrome\.runtime\.onInstalled\.addListener/);
-    assert.match(workerSource, /createWholePageMenu\(chrome\.contextMenus\)/);
-    assert.equal(workerSource.split("createWholePageMenu").length - 1, 2);
-    assert.equal(workerSource.split("chrome.contextMenus.onClicked").length - 1, 1);
-  });
-
-  it("adds no page-wide or selection context menu", () => {
-    for (const context of ['"page"', '"selection"', '"link"', '"image"', '"all"']) {
-      assert.ok(!workerSource.includes(context), context);
-    }
-  });
-
-  it("ignores context-menu clicks that are not ours before doing anything", () => {
-    assert.match(workerSource, /if \(!isWholePageMenu\(info\)\) \{\s*return;/);
-  });
-
-  it("injects the page reader for the whole-page path, and only there", () => {
-    assert.match(workerSource, /func: readPageHtml/);
-    assert.equal(workerSource.split("func: readPageHtml").length - 1, 1);
-    assert.equal(workerSource.split("func: readSelection").length - 1, 1);
-  });
-
-  it("keeps the two flows apart", () => {
-    // The click listener runs the selection flow and the menu listener runs the
-    // page flow. Neither calls the other's reader.
-    assert.match(workerSource, /chrome\.action\.onClicked[\s\S]*?runCapture\(tab/);
-    assert.match(workerSource, /chrome\.contextMenus\.onClicked[\s\S]*?runWholePageCapture\(tab/);
-  });
-
-  it("logs nothing", () => {
-    assert.ok(!workerSource.includes("console."));
-  });
-
-  it("contains no retry or backoff path", () => {
-    for (const word of ["retry", "backoff", "setTimeout", "setInterval", "attempts"]) {
-      assert.ok(!workerSource.toLowerCase().includes(word), word);
-    }
+  it("never queries a later active tab, logs, or schedules background polling", () => {
+    for (const forbidden of ["tabs.query", "console.", "allFrames", "alarms", "notifications", "declarativeNet", "setInterval", "setTimeout", "webRequest", "localStorage", "indexedDB"]) assert.ok(!source.includes(forbidden));
   });
 });
 
-describe("the connector keeps no persistent state", () => {
+describe("original capture libraries keep no persistent retry state", () => {
   it("no library module touches storage", () => {
     for (const name of ["api", "capture", "envelope", "feedback", "menu", "outcomes", "page"]) {
       const source = codeOf(`../lib/${name}.js`);

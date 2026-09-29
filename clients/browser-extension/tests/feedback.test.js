@@ -67,19 +67,19 @@ describe("badges", () => {
 
 describe("titles", () => {
   it("says saved on success", () => {
-    assert.equal(feedbackFor({ outcome: OUTCOME.COMPLETE }).title, "UniMem: saved");
+    assert.equal(feedbackFor({ outcome: OUTCOME.COMPLETE }).title, "UniMem: сохранено");
   });
 
   it("distinguishes a capture confirmed after a network error", () => {
     const title = feedbackFor({ outcome: OUTCOME.COMPLETE, probed: true }).title;
-    assert.match(title, /saved/);
-    assert.match(title, /confirmed/);
+    assert.match(title, /сохранено/);
+    assert.match(title, /подтверждено/);
   });
 
   it("says saved for a capture the server replayed", () => {
     const title = feedbackFor({ outcome: OUTCOME.COMPLETE, confirmedBy: "replay" }).title;
 
-    assert.equal(title, "UniMem: saved (confirmed retry)");
+    assert.equal(title, "UniMem: сохранено (подтверждено повторным запросом)");
   });
 
   it("shows OK for a replay, because a replay is a saved capture", () => {
@@ -91,7 +91,7 @@ describe("titles", () => {
      * suggest a failure, a duplicate, or something needing their attention. */
     const title = feedbackFor({ outcome: OUTCOME.COMPLETE, confirmedBy: "replay" }).title;
 
-    assert.match(title, /saved/);
+    assert.match(title, /сохранено/);
     for (const alarming of [/error/i, /fail/i, /duplicate/i, /conflict/i, /warning/i, /409/]) {
       assert.doesNotMatch(title, alarming);
     }
@@ -104,31 +104,31 @@ describe("titles", () => {
   });
 
   it("still says saved for a success it has no vocabulary for", () => {
-    assert.equal(feedbackFor({ outcome: OUTCOME.COMPLETE }).title, "UniMem: saved");
-    assert.equal(feedbackFor({ outcome: OUTCOME.COMPLETE, confirmedBy: "new-thing" }).title, "UniMem: saved");
+    assert.equal(feedbackFor({ outcome: OUTCOME.COMPLETE }).title, "UniMem: сохранено");
+    assert.equal(feedbackFor({ outcome: OUTCOME.COMPLETE, confirmedBy: "new-thing" }).title, "UniMem: сохранено");
   });
 
   it("asks for a selection when there was none", () => {
     assert.equal(
       feedbackFor({ outcome: OUTCOME.BLANK_SELECTION }).title,
-      "UniMem: select some text first",
+      "UniMem: сначала выделите текст",
     );
   });
 
   it("says the service is unavailable on a network failure", () => {
-    assert.equal(feedbackFor({ outcome: OUTCOME.UNAVAILABLE }).title, "UniMem: service unavailable");
+    assert.equal(feedbackFor({ outcome: OUTCOME.UNAVAILABLE }).title, "UniMem: сервер недоступен");
   });
 
   it("admits the outcome is unknown when even the probe failed", () => {
     const title = feedbackFor({ outcome: OUTCOME.UNAVAILABLE, probed: true }).title;
-    assert.match(title, /unavailable/);
-    assert.match(title, /unknown/);
+    assert.match(title, /недоступен/);
+    assert.match(title, /неизвестен/);
   });
 
   it("says a capture is still processing", () => {
     assert.equal(
       feedbackFor({ outcome: OUTCOME.DURABLE_STATE, status: "processing" }).title,
-      "UniMem: capture is still processing",
+      "UniMem: обработка продолжается",
     );
   });
 
@@ -136,20 +136,20 @@ describe("titles", () => {
     assert.equal(
       feedbackFor({ outcome: OUTCOME.SERVER_ERROR, status: 409, code: "capture_already_exists" })
         .title,
-      "UniMem: that capture already exists",
+      "UniMem: такой захват уже существует",
     );
   });
 
   it("falls back to a status for an unknown server error code", () => {
     assert.equal(
       feedbackFor({ outcome: OUTCOME.SERVER_ERROR, status: 418, code: "teapot" }).title,
-      "UniMem: capture failed (418)",
+      "UniMem: не удалось сохранить (418)",
     );
   });
 
   it("never presents a non-complete outcome as saved", () => {
     for (const result of ALL_RESULTS.filter((r) => r.outcome !== OUTCOME.COMPLETE)) {
-      assert.ok(!/\bsaved\b/.test(feedbackFor(result).title), JSON.stringify(result));
+      assert.ok(!/сохранено/.test(feedbackFor(result).title), JSON.stringify(result));
     }
   });
 
@@ -169,7 +169,7 @@ describe("titles", () => {
 
 describe("the vocabulary is covered", () => {
   it("has a title for every outcome the connector can produce", () => {
-    // A new outcome with no wording falls through to "UniMem: capture failed",
+    // A new outcome with no wording falls through to "UniMem: не удалось сохранить",
     // which is a truthful answer but rarely the useful one. This is the test
     // that makes adding one a deliberate act.
     const described = new Set(ALL_RESULTS.map((result) => result.outcome));
@@ -186,7 +186,7 @@ describe("whole-page wording", () => {
     const { badge, title } = feedbackFor({ outcome: OUTCOME.PAGE_CAPTURE_FAILED });
 
     assert.equal(badge, BADGE_FAIL);
-    assert.equal(title, "UniMem: could not read this page");
+    assert.equal(title, "UniMem: не удалось прочитать страницу");
   });
 
   it("never tells someone who asked to save a page to select some text", () => {
@@ -197,13 +197,13 @@ describe("whole-page wording", () => {
   });
 
   it("says it is saving a page while a page capture is in flight", () => {
-    assert.deepEqual(busyFeedback("page"), { badge: BADGE_BUSY, title: "UniMem: saving page..." });
+    assert.deepEqual(busyFeedback("page"), { badge: BADGE_BUSY, title: "UniMem: сохранение страницы…" });
   });
 
   it("still says it is saving a selection for the selection flow", () => {
     assert.deepEqual(busyFeedback("selection"), {
       badge: BADGE_BUSY,
-      title: "UniMem: saving selection...",
+      title: "UniMem: сохранение выделенного текста…",
     });
   });
 
@@ -214,7 +214,7 @@ describe("whole-page wording", () => {
 
   it("reports a confirmed page capture with the same OK the selection gets", () => {
     assert.equal(feedbackFor({ outcome: OUTCOME.COMPLETE, confirmedBy: "post" }).badge, BADGE_OK);
-    assert.equal(feedbackFor({ outcome: OUTCOME.COMPLETE, confirmedBy: "post" }).title, "UniMem: saved");
+    assert.equal(feedbackFor({ outcome: OUTCOME.COMPLETE, confirmedBy: "post" }).title, "UniMem: сохранено");
   });
 
   it("never puts page markup in the title", () => {

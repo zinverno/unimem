@@ -2714,11 +2714,12 @@ reach the decision.
     identifier, and no route writes lifecycle state.
 
 18. A connector submits captures and observes them; it never owns lifecycle.
-    Implemented in Phase 1's browser connector: it builds the canonical
-    envelope, POSTs it exactly once, resolves an ambiguous network outcome with
-    one read-only probe rather than a retry, keeps no durable state of its own,
-    and never converts a server failure into a local success. Captured content
-    reaches it exactly as the source produced it.
+    ADR-013 bounds synchronous text/page delivery to two identical POSTs and one
+    read. ADR-026 permits credential settings and up to 50 local YouTube operation
+    references/observations, persisted before submission. These are not a second
+    lifecycle: the server owns state, and client errors never turn it into failed
+    or complete. Explicit retry preserves identity and parameters. Captured content
+    reaches the connector exactly as the source produced it.
 
 19. A processor asserts only what it observed or produced, and absence of
     interpretation is represented by absence rather than by placeholder content.
@@ -2938,3 +2939,17 @@ The rules that depend on a version live beside them as explicit named sets —
 `CAPTURE_METADATA_SCHEMA_VERSIONS`, `AUDIO_SCHEMA_VERSIONS` — with their
 complements derived, so adding a version is a deliberate reviewed act and cannot
 silently reinterpret an older one.
+
+
+## Recoverable Zen/Linux browser delivery (B2/B3)
+
+[ADR-026](ADR/ADR-026-recoverable-browser-delivery.md) adds a shared Gecko event
+page / Chromium service worker manifest, protected original captures, trusted
+connection/settings page and YouTube operation references. All network calls use
+a fixed-origin, no-redirect bearer transport in background. The options page owns
+explicit credential input and Blob export; token values never use runtime messages.
+The background alone serializes minimal history writes before POST. The server's
+B1 operation/capture state remains authoritative. Manual reads and Markdown do not
+acquire captions. A page reopen or background restart never automatically submits.
+There is no vault import, new caption pipeline or server implementation change.
+See [installation](BROWSER_DELIVERY.md) and [evidence](BROWSER_VERIFICATION.md).

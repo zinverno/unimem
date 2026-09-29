@@ -1,8 +1,9 @@
 # Protected local YouTube delivery (B1)
 
-Server-side delivery is implemented. Zen/Linux remains the required next browser
-target; **Zen runtime acceptance: NOT RUN**. No extension connection UI, browser
-port, Obsidian/Companion integration or vault writes are included here.
+Server-side delivery is implemented. The B2/B3 extension now connects with an
+explicit credential and restores YouTube operations; see the
+[browser guide](BROWSER_DELIVERY.md) and separate [runtime evidence](BROWSER_VERIFICATION.md).
+This B1 page records the server contract and its original acceptance. No vault import.
 
 ## Install and explicitly connect
 
@@ -22,7 +23,7 @@ With the flag but without the extra, startup fails rather than claiming readines
 `/health` only reports process liveness, not YouTube network availability.
 
 The token is generated locally, random, and 0600. Initialization never overwrites
-an existing token. For the future extension's explicit connection settings, show
+an existing token. For the extension's explicit connection settings, show
 it only when needed; no HTTP endpoint returns it:
 
 ```bash
@@ -50,10 +51,9 @@ invalid Host returns 400. No Origin is acceptable for CLI clients **with** the
 credential. The extension-origin policy and threat model are in
 [ADR-025](ADR/ADR-025-protected-local-youtube-delivery.md).
 
-**Old clients:** the installed Chromium connector does not send a token and will
-receive 401. It has not acquired a connection UI or Zen support in this PR. Its
-existing text/page HTTP contracts are preserved; Python/Node integration harnesses
-now explicitly inject test authorization. Do not disable auth to use an old UI.
+**Browser clients:** extension 0.3.0 sends the configured token on old and new
+routes. Older installed extensions without settings still receive 401. Follow the
+[browser setup](BROWSER_DELIVERY.md); never disable server auth for an old client.
 
 ## Submit, close the client, recover status and Markdown
 

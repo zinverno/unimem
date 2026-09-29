@@ -14,3 +14,7 @@ build/
 # Graphify knowledge-graph output. Generated locally by `graphify update .`
 # (AST-only, no API cost) and rebuilt on demand; ~17MB, so it is never committed.
 graphify-out/
+
+# Browser development tools and artifacts
+node_modules/
+web-ext-artifacts/

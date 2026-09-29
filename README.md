@@ -1112,158 +1112,52 @@ import remain distinct; this server slice never imports into a vault.
 
 ## Browser capture
 
-**Primary target for the next browser release: Zen Browser on Linux.** Firefox
-is the related development platform; Chromium compatibility remains desirable.
-The existing connector below is Chromium-only and has not been ported or
-accepted in Zen. The CLI slice above is followed by Zen delivery, then a separate
-milestone for agreed Obsidian note import through Veynrel/Companion. See the
-[plan and extension audit](tasks/plan.md) and
-[implementation tasks](tasks/todo.md). GitHub is a later source alongside
-multimedia, not part of either immediate slice.
+The 0.3.0 development extension targets **Zen/Linux**, using one shared MV3
+manifest for Gecko event pages and Chromium service workers. It now connects to
+the protected B1 API with an explicit token. [Install/connect instructions,
+recovery limits and manual acceptance](docs/BROWSER_DELIVERY.md),
+[measured browser evidence](docs/BROWSER_VERIFICATION.md).
 
-**Compatibility notice:** the installed connector does not yet send the new
-mandatory token and receives 401. Its connection UI and Zen port are B2–B4;
-the development instructions below describe the earlier unauthenticated browser
-acceptance, not a working connection to the protected server. HTTP harnesses
-supply explicit credentials; no anonymous fallback is available.
-
-The existing client implements selected-text and current-page capture. These are
-**Chromium development-install instructions**, not Zen installation or a
-daily-use extension distribution:
-
-1. Start the UniMem API:
-
-   ```bash
-   python -m unimem_api --data-dir ./data
-   ```
-
-2. Open `chrome://extensions`.
-3. Enable **Developer mode**.
-4. Choose **Load unpacked**.
-5. Select `clients/browser-extension`.
-6. Pin the extension if you want it visible in the toolbar.
-
-### Saving a selection
-
-1. Open an ordinary `http://` or `https://` page.
-2. Select some text.
-3. **Left-click** the UniMem toolbar icon.
-4. `OK` means the server confirmed a complete capture.
-
-### Saving a whole page
-
-1. Open an ordinary `http://` or `https://` page.
-2. **Right-click** the UniMem toolbar icon.
-3. Choose **Save whole page to UniMem**.
-4. `OK` means the server confirmed a complete capture.
-
-**What "whole page" means, precisely.** The extension submits
-`document.documentElement.outerHTML`: the browser's serialization of the
-document's current top-level DOM, as it is at the moment you choose the menu
-item. **It is not the original network source and not "view source".** It
-includes changes JavaScript has already made to the page, and it differs from
-what the server sent because the browser parsed the document and serialized it
-back. It does not include a doctype, shadow DOM, iframe contents, stylesheets,
-images, or any other resource — those are referenced, not contained. What UniMem
-guarantees is the narrow, true thing: the exact string the extension submitted is
-what is stored, byte for byte, and stays retrievable.
-
-Left-click is still selection capture, and right-click is the only new
-interaction. There is no popup: the click *is* the permission — it grants
-`activeTab` for that one tab and that one gesture, which is why the extension
-holds standing access to no website at all.
-
-### The badge
-
-The badge is the whole UI, for both captures:
-
-| Badge | Meaning |
-| --- | --- |
-| `...` | sending |
-| `OK` | saved — the server confirmed a complete capture |
-| `!` | not saved, or not confirmed |
-
-Hover the toolbar icon for the detail (`UniMem: saved`, `UniMem: select some text
-first`, `UniMem: could not read this page`, `UniMem: service unavailable`, and so
-on). A capture confirmed after a lost response reads `UniMem: saved (confirmed
-retry)` or `UniMem: saved (confirmed after a network error)` — still one capture,
-and still `OK`.
-
-Either capture goes through the same path as any other client: it becomes a
-canonical `CaptureEnvelope`, is POSTed to `http://127.0.0.1:8765/v1/captures`,
-and is stored, normalized, and completed synchronously. Read it back with the
-same two `GET`s shown above.
-
-### Permissions
-
-```json
-"permissions": ["activeTab", "scripting", "contextMenus"],
-"host_permissions": ["http://127.0.0.1/*"]
+```bash
+npm ci --prefix clients/browser-extension
+npm test --prefix clients/browser-extension
+npm run lint --prefix clients/browser-extension
+npm run build --prefix clients/browser-extension
+npm run check-package --prefix clients/browser-extension
 ```
 
-That is the entire manifest's access story. `contextMenus` is what puts the item
-in the menu and grants access to no website; `host_permissions` names only the
-local API. There is no `<all_urls>`, no `tabs`, no `storage`, no `cookies`, no
-`webRequest`, and no content script — nothing touches a page until you ask.
+Temporary Zen/Firefox installation: `about:debugging#/runtime/this-firefox` →
+Load Temporary Add-on → `clients/browser-extension/dist/unimem-browser-0.3.0-dev.zip`.
+Chromium: Load unpacked → `clients/browser-extension/dist/unpacked/`.
+Use a separate test profile. Start B1 with `--youtube`, obtain the token with
+`--show-token`, then right-click the UniMem icon → **Открыть UniMem** → save the
+credential and check connection. Token defaults to session storage; explicit
+remembering uses unencrypted local storage. No arbitrary API endpoints.
 
-### Current limitations
+- Left-click saves selected text; **Сохранить всю страницу в UniMem** saves the
+  exact current top-level DOM serialization. Existing envelopes, 200/201 and
+  bounded replay remain intact; 202 is not successful text/page capture.
+- **YouTube → Markdown** freezes the selected video URL and ordered languages,
+  saves its operation reference before POST and opens status. Close the video/UI;
+  later **Открыть UniMem** reads the same ID. No acquisition on status or result.
+- **Получить Markdown** previews text; **Сохранить .md…** requests a browser save
+  dialog. No Obsidian/Companion import or vault writes.
+- Repeated selection opens the existing matching job. **Сохранить заново** explicitly
+  creates a new one. Unconfirmed delivery can explicitly reuse its original ID;
+  accepted-but-missing operations are never automatically recreated.
 
-All deliberate for this phase:
+History is capped at 50 references without automatic eviction; deleting a local
+link does not cancel/delete server work. Markdown and complete ContentObjects
+are not persisted by the extension. Original text/page sends still have no
+cross-unload recovery guarantee. Top-level document capture only; no iframe,
+shadow DOM or resource archive. Permissions remain `activeTab`, `scripting`,
+`contextMenus`, plus `storage` and explicit `downloads`; host access is loopback
+only. No cookies, browser history, static content scripts or broad website access.
 
-- **Current implementation: Chrome/Chromium MV3 only.** Zen/Linux is the required
-  next browser target; Zen runtime acceptance is **NOT RUN**. The
-  [plan](tasks/plan.md#local-installation-and-reproducible-manual-smoke) separates
-  temporary development installation from signed daily-use distribution.
-- **Top-level document only**, for both captures. A selection inside a
-  cross-origin iframe is not captured, and an iframe's contents are not part of a
-  page snapshot. Widening permissions to reach them is not a trade this connector
-  makes.
-- **A page snapshot is a DOM serialization**, with the consequences described
-  above. There is no reader mode, article extraction, screenshot, or resource
-  archiving.
-- **The API address is fixed** at `http://127.0.0.1:8765`. There is no options
-  page and no configurable host or port; the server's `--host`/`--port` flags
-  still work, but this connector targets the documented default.
-- **Only `http://` and `https://` pages.** Acting on `chrome://`, extension, or
-  `file://` pages fails locally and sends nothing.
-- **Mandatory server authentication.** The connector needs the next slice’s explicit connection UI; its old anonymous requests receive 401.
-- **No general retry policy — one bounded resend.** A capture that gets any HTTP
-  response is never sent again: the server answered, and that is the answer. Only
-  a request that fails at the *network* layer, where the outcome is genuinely
-  unknown, is resent — once, as the byte-identical envelope under the same
-  capture id. If that resend is also lost, or comes back as a conflict the
-  connector cannot interpret, it makes one read-only check and tells you what it
-  found. The hard limit for one gesture is two POSTs and one read; there is no
-  loop, no backoff, and no queue.
-- **A lost whole-page response costs that extra check.** Completed replay is
-  text-only, so a resent page capture is answered `409` and the connector
-  confirms the outcome with the read rather than guessing from the conflict.
-- **No extension history.** The extension stores nothing; the server is the only
-  record of what was captured.
-
-### Manual acceptance checklist
-
-The automated suites cover the flows, the envelopes, the network bounds, and the
-extension's real registration in Chromium. **They do not dispatch a real toolbar
-click or right-click** — that needs browser automation this phase deliberately
-does not add. Run these by hand, with the API started as above:
-
-| | Check | Expect |
-| --- | --- | --- |
-| **A** | Select text on an ordinary page, left-click the icon | `...` then `OK`; `GET /v1/captures/{id}/content` shows the selection exactly |
-| **B** | Right-click the icon, choose **Save whole page to UniMem** | `...` then `OK`; a `web` `ContentObject` with the page's visible text |
-| **C** | Do B on a page with `<script>` and `<style>` | Script and CSS text are absent from the canonical segment; the stored original still contains them |
-| **D** | Do B on a page you have changed with JavaScript first (expand a section, or edit the DOM in DevTools) | The snapshot reflects what is on screen now, not the original source |
-| **E** | Do B on `chrome://extensions` | `!` and `UniMem: cannot capture from this page`; no request is sent |
-| **F** | Stop the API, then do A and B | `!` and a service-unavailable tooltip; nothing is queued |
-| **G** | Restart the API on the same `--data-dir` and re-read the captures from A and B | Both are still `complete`, with their content and their exact originals |
-
-Nothing here is claimed to have passed automatically.
-
-**A–G were run by hand, against a real Chromium installation and a real local
-UniMem server, and all of them passed.** That is a human result and is recorded
-as one — the suites above still do not dispatch a click, and none of this was
-driven by CI. Macro Phase 2 closed on the strength of that run.
+Temporary installation, background unload while installed, and signed browser
+restart are separate gates. **Signed distribution: NOT RUN**; no signing or
+publication was performed. Earlier Phase-2 human Chromium A–G acceptance remains
+historical evidence for the then-unauthenticated connector, not evidence for B2/B3.
 
 ## Layout
 
