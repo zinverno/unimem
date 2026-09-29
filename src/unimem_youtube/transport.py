@@ -2,7 +2,7 @@
 
 from time import monotonic
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from requests import PreparedRequest, Response, Session
 from requests.adapters import HTTPAdapter
@@ -21,7 +21,8 @@ def allowed_destination(url: str, method: str) -> str:
     """Only the three endpoints used by the pinned library; reject every redirect."""
     parsed = urlsplit(url)
     if (
-        parsed.scheme != "https"
+        len(url) > 8192
+        or parsed.scheme != "https"
         or parsed.hostname != "www.youtube.com"
         or parsed.username is not None
         or parsed.password is not None
@@ -43,8 +44,9 @@ class BoundedSession(Session):
     timeouts bound network waits; this is not a hard deadline for OS DNS lookup.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, video_id: str) -> None:
         super().__init__()
+        self.video_id = video_id
         self.trust_env = False
         self.mount("https://", HTTPAdapter(max_retries=0))
         self.requests_made = 0
@@ -54,6 +56,12 @@ class BoundedSession(Session):
 
     def send(self, request: PreparedRequest, **kwargs: Any) -> Response:
         path = allowed_destination(request.url or "", request.method or "")
+        if path in {"/watch", "/api/timedtext"}:
+            query = parse_qs(urlsplit(request.url or "").query, keep_blank_values=True)
+            if query.get("v") != [self.video_id] or "tlang" in query:
+                raise AcquisitionError(
+                    "destination_denied", "Caption destination changed the video."
+                )
         if self.requests_made >= MAX_REQUESTS:
             raise AcquisitionError(
                 "request_limit", "Caption acquisition exceeded its request limit."

@@ -1074,14 +1074,36 @@ close the phase.
 
 `GET /health` reports process liveness only and checks nothing else.
 
+## YouTube captions through CLI
+
+The browser-independent caption slice stores a selected YouTube caption track
+through UniMem's existing pipeline, then exports Markdown with source, capture
+time, track facts and timed text. It does not download or analyse video/audio.
+
+```bash
+python -m pip install ".[youtube]"
+python -m unimem_youtube capture 'https://www.youtube.com/watch?v=jNQXAC9IVRw' \
+  --languages ru en --data-dir /tmp/unimem-youtube-demo/data \
+  --output-dir /tmp/unimem-youtube-demo/notes
+python -m unimem_youtube render CAPTURE_ID \
+  --data-dir /tmp/unimem-youtube-demo/data \
+  --output-dir /tmp/unimem-youtube-demo/rendered-again
+```
+
+Use the returned `capture_id` in the second command. `render` works without the
+retrieval extra or network. Output conflicts fail rather than overwrite; a failed
+export leaves a completed capture available for another render. These are explicit
+staging directories, not an Obsidian vault. See [installation, error semantics,
+limits and live evidence](docs/YOUTUBE_CAPTIONS.md).
+
 ## Browser capture
 
 **Primary target for the next browser release: Zen Browser on Linux.** Firefox
 is the related development platform; Chromium compatibility remains desirable.
 The existing connector below is Chromium-only and has not been ported or
-accepted in Zen. The next implementation starts with browser-independent
-YouTube captions → durable capture → Markdown through CLI, followed by Zen
-delivery. See the [plan and extension audit](tasks/plan.md) and
+accepted in Zen. The CLI slice above is followed by Zen delivery, then a separate
+milestone for agreed Obsidian note import through Veynrel/Companion. See the
+[plan and extension audit](tasks/plan.md) and
 [implementation tasks](tasks/todo.md). GitHub is a later source alongside
 multimedia, not part of either immediate slice.
 

@@ -9,7 +9,7 @@ from requests.adapters import HTTPAdapter
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import Timeout
 
-from tests.youtube_fixtures import URL, XML
+from tests.youtube_fixtures import URL, VIDEO_ID, XML
 from tests.youtube_http import FakeHttp, happy_http, player, track
 from unimem_youtube.errors import AcquisitionError
 from unimem_youtube.retrieval import acquire
@@ -109,12 +109,12 @@ def test_network_errors(monkeypatch: pytest.MonkeyPatch, error: type[Exception],
 
 def test_request_and_elapsed_budgets(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeHttp([(200, b"ok")] * 3).install(monkeypatch)
-    with BoundedSession() as session:
+    with BoundedSession(VIDEO_ID) as session:
         for _ in range(3):
             session.get(URL)
         with pytest.raises(AcquisitionError, match="request limit"):
             session.get(URL)
-    with BoundedSession() as session:
+    with BoundedSession(VIDEO_ID) as session:
         session.started -= 46
         with pytest.raises(AcquisitionError, match="elapsed-time"):
             session.get(URL)
@@ -122,8 +122,44 @@ def test_request_and_elapsed_budgets(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_no_environment_credentials_or_cookies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1")
-    with BoundedSession() as session:
+    with BoundedSession(VIDEO_ID) as session:
         assert session.trust_env is False
         session.cookies.set("CONSENT", "anything")
         with pytest.raises(AcquisitionError, match="cookies or login"):
             session.get(URL)
+
+
+@pytest.mark.parametrize(
+    "destination",
+    [
+        "https://www.youtube.com/api/timedtext?v=lmnopqrstuv",
+        f"https://www.youtube.com/api/timedtext?v={VIDEO_ID}&tlang=de",
+        f"http://www.youtube.com/api/timedtext?v={VIDEO_ID}",
+        f"https://www.youtube.com.evil.test/api/timedtext?v={VIDEO_ID}",
+        f"https://user@www.youtube.com/api/timedtext?v={VIDEO_ID}",
+        "https://www.youtube.com/videoplayback",
+    ],
+)
+def test_network_destination_is_closed(destination: str) -> None:
+    with BoundedSession(VIDEO_ID) as session, pytest.raises(AcquisitionError) as failure:
+        session.get(destination)
+    assert failure.value.code == "destination_denied"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"",
+        b"not XML",
+        b'<transcript><text start="1">broken',
+        b"\xff",
+        b'<transcript><text start="1">' + b"x" * (2 * 1024 * 1024) + b"</text></transcript>",
+    ],
+)
+def test_caption_response_errors(monkeypatch: pytest.MonkeyPatch, body: bytes) -> None:
+    http = happy_http(monkeypatch)
+    http.responses[-1] = (200, body)
+    with pytest.raises(AcquisitionError) as failure:
+        acquire(URL, ("ru",))
+    assert failure.value.code in {"invalid_response", "response_limit"}
+    assert len(http.requests) == 3

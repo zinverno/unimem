@@ -2,7 +2,8 @@
 
 Requirements, evidence and manual acceptance: [plan.md](plan.md).
 Unchecked items are future work, not claims that the existing implementation
-already provides the behaviour. Implement A before B; C is later scope.
+already provides the behaviour. Implement A before B, then C (Obsidian delivery);
+D holds subsequent sources and processors.
 
 ## Completed planning
 
@@ -18,12 +19,12 @@ already provides the behaviour. Implement A before B; C is later scope.
 
 Dependencies: none. Likely scope: source adapter, its tests, focused ADR.
 
-- [ ] Select and document a retrieval mechanism using current primary docs;
+- [x] Select and document a retrieval mechanism using current primary docs;
   no browser/profile/CDP, paid call or credential extraction required.
-- [ ] Specify the immutable caption artifact and track/cue metadata mapping
+- [x] Specify the immutable caption artifact and track/cue metadata mapping
   into existing source/provenance concepts; justify any necessary contract
   extension with actual fixtures, not future GitHub needs.
-- [ ] Verify URL/redirect validation and bounded network operations, with
+- [x] Verify URL/redirect validation and bounded network operations, with
   deterministic fixtures for unavailable/malformed/rate-limited tracks.
 
 ### A2 — Durable application operation
@@ -31,22 +32,22 @@ Dependencies: none. Likely scope: source adapter, its tests, focused ADR.
 Dependencies: A1. Likely scope: application composition, caption normalization
 processor/intake path if required, persistence integration checks.
 
-- [ ] Compose acquisition → intake → processing → canonical persistence using
+- [x] Compose acquisition → intake → processing → canonical persistence using
   existing owners; callable without HTTP or CLI and without browser types.
-- [ ] Preserve actual source/track evidence and timed cues where supplied;
+- [x] Preserve actual source/track evidence and timed cues where supplied;
   record only observed work, with no audio/video interpretation claims.
-- [ ] Verify original bytes, provenance, read-after-restart and failure-state
+- [x] Verify serialized caption-artifact bytes, provenance, read-after-restart and failure-state
   truthfulness using temporary stores; no route/CLI lifecycle writes.
 
 ### A3 — Thin CLI and reproducible Markdown export
 
 Dependencies: A2. Likely scope: CLI entry, pure export boundary, focused tests/docs.
 
-- [ ] Expose capture/status/result identifiers and explicit exit codes; export
+- [x] Expose capture/status/result identifiers and explicit exit codes; export
   durable content to stdout or a selected non-vault path.
-- [ ] Decide required source links/cue presentation without silently changing
+- [x] Decide required source links/cue presentation without silently changing
   ADR-005's existing renderer contract or requiring YouTube fields everywhere.
-- [ ] Verify end-to-end fixture capture, restart, network-free re-export by ID,
+- [x] Verify end-to-end fixture capture, restart, network-free re-export by ID,
   export failure without capture loss, and ordinary non-YouTube export.
 
 ### A4 — First PR acceptance and handoff
@@ -55,7 +56,7 @@ Dependencies: A1–A3. Likely scope: tests, instructions, PR evidence.
 
 - [ ] Run focused suites, then `ruff check .`, `ruff format --check .`, `mypy`,
   and `pytest --cov=core --cov=unimem_api`; retain the 90% coverage floor.
-- [ ] Provide a reproducible CLI smoke using temporary storage; report fixture
+- [x] Provide a reproducible CLI smoke using temporary storage; report fixture
   vs live evidence separately, and any external prerequisite as unverified.
 - [ ] Review diff/ADRs; hand off the three-part browser-independence/Zen-work/
   actual-Zen-evidence report. No extension port, GitHub ingestion or merge.
@@ -113,12 +114,24 @@ distribution metadata/artifact preparation.
 - [ ] Mark Zen `NOT RUN`/`BLOCKED` if unavailable; provide the local procedure
   and do not claim support from Firefox, Chromium or Python/Node tests.
 
-## C — Later sources and processing
+## C — Core user flow: agreed Obsidian note import
+
+Dependencies: B4. This is the next milestone after the Zen browser scenario,
+not part of the current CLI PR.
+
+- [ ] Implement Zen → UniMem → note preview and agreed import through the existing
+  Veynrel/Companion integration boundaries; no direct-write bypass.
+- [ ] Show target note, content, status and conflicts before the explicit import
+  decision; report success only from the established delivery owner.
+- [ ] Verify the complete browser-to-Obsidian path using synthetic vaults and
+  document installation/recovery. Real-vault acceptance requires explicit scope.
+
+## D — Later sources and processing
 
 - [ ] Plan audio/voice transcription, image processing and video visual
   interpretation as distinct capabilities, preserving existing originals.
 - [ ] Plan public GitHub file/fragment selection with one pinned commit,
   source links, faithful Markdown/code, request/size/file bounds and explicit
   partial results; no repository execution or implicit full download.
-- [ ] Treat private GitHub access and Obsidian/Companion delivery as separate
-  explicit integrations. Do not implement C as part of A or B.
+- [ ] Treat private GitHub access as a separate explicit read-only connection.
+  Do not implement D as part of A, B or C.

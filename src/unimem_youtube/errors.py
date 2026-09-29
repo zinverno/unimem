@@ -11,3 +11,12 @@ class AcquisitionError(Exception):
 
 class ExportError(Exception):
     """Export failed; the canonical capture is unaffected."""
+
+
+class CapturePipelineError(Exception):
+    """An identified capture attempt did not confirm completion; no invented status."""
+
+    def __init__(self, capture_id: str, code: str) -> None:
+        super().__init__("Capture pipeline did not complete; stored state remains authoritative.")
+        self.capture_id = capture_id
+        self.code = code

@@ -1,6 +1,8 @@
 # YouTube CLI capture, then Zen/Linux delivery
 
-Updated: 2026-09-29. Status: implementation plan, not shipped capabilities.
+Updated: 2026-09-29. Block A is implemented on `feat/youtube-transcript-markdown`;
+verification and handoff evidence are tracked in [todo.md](todo.md) and the
+[CLI guide](../docs/YOUTUBE_CAPTIONS.md). Blocks B-D remain future work.
 Tasks and acceptance gates: [todo.md](todo.md).
 
 ## Baseline and scope
@@ -8,9 +10,9 @@ Tasks and acceptance gates: [todo.md](todo.md).
 Inspected local and remote `main` at
 `582f4594ad4ee1d1282c52154c20b4017884e406`; GitHub returned no open PRs.
 There was no earlier plan in this checkout. The owner confirmed there are no
-additional requirements beyond the supplied addendum. “Current PR” below means
-the planned first implementation slice, not an existing PR or completed work.
-The current change is documentation only.
+additional requirements beyond the supplied addendum. That was the planning
+baseline; the owner subsequently authorized block A implementation and a PR.
+The implementation retains that documentation and adds only the authorized CLI slice.
 
 The order is:
 
@@ -19,7 +21,10 @@ The order is:
    understandable processing status and result.** Zen is the required primary
    browser target; Firefox is a development/checking platform. Preserve existing
    Chromium behaviour where possible, but it cannot substitute for Zen acceptance.
-3. Further sources and processing: audio/voice, images, the visual part of video,
+3. **Zen → UniMem → agreed note import into Obsidian**, using the existing
+   Veynrel/Companion boundaries. Preview/approval and synthetic-vault acceptance
+   are part of this milestone; direct vault writes and bypasses are not.
+4. Further sources and processing: audio/voice, images, the visual part of video,
    and GitHub. GitHub neither replaces multimedia nor makes UniMem a code-only app.
 
 No paid calls, real-vault writes, Companion bypass, automatic merge or release,
@@ -53,21 +58,20 @@ times belong to that source/result; they are never mandatory for other sources
 or for general Markdown export. Do not put derived transcript results in an
 input envelope or pretend a stored caption document is the original video.
 
-Before implementing caption normalization, settle what exact fetched caption
-artifact is the immutable original and how its track metadata and timed cues
-reach canonical content. Existing intake rejects URL-only payloads: a `URL`
-enum member is not an implemented downloader. Do not send a URL to the current
-capture route and assume it will acquire captions. Keep network acquisition
-outside the kernel and use one narrowly supported artifact path, with an ADR
-for any real contract/intake extension. No speculative schema fields.
+The concrete format and mapping are decided in
+[ADR-024](../docs/ADR/ADR-024-youtube-caption-artifact-and-cli.md):
+`unimem.youtube-captions/1`, a JSON serialization of selected track metadata
+and the fetched UTF-8 XML caption body. It is external input and its stored
+original is this artifact, not video bytes or a byte-exact network response.
+Future UniMem speech recognition instead derives text from a separate audio
+original. Retrieval uses optional `youtube-transcript-api==1.2.4` with a bounded,
+cookie-free transport outside core; normalization uses the existing Processor
+port and opt-in staged FILE intake. Schema 0.3 is unchanged.
 
-Inspect candidate caption retrieval tools against their current primary docs
-before choosing one. Ordinary retrieval must need neither CDP, a Chrome profile,
-Chromium startup, browser cookies, hidden credentials, nor a paid provider.
-Use bounded requests, timeouts and response sizes; validate redirects and URLs
-at the network boundary. Unavailable captions, denied access, rate limits,
-language mismatch and malformed input are explicit outcomes, not triggers for
-an unrequested transcription or browser-automation fallback.
+Ordinary retrieval needs neither CDP, a Chrome profile, Chromium startup,
+browser cookies, hidden credentials, nor a paid provider. Caption absence,
+access blocks, timeouts, language mismatch and malformed responses have distinct
+error codes. There is no transcription or browser-automation fallback.
 
 CLI scope is argument parsing, service construction/call, status/exit code,
 and output delivery. Preserve source/track evidence durably before reporting
@@ -78,12 +82,11 @@ generic connector framework, new job framework or interface family is justified.
 
 The existing `MarkdownRenderer` (`markdown/0.1`, ADR-005) emits only title and
 segment text; it deliberately omits source links, metadata and timestamps.
-Do not claim those appear today. Decide explicitly which source/cue details the
-first export requires and cover that projection with fixtures. If the export
-needs richer semantics, record the narrow renderer/export decision and its
-version without silently changing the existing `markdown/0.1` contract or
-making all exports require YouTube fields. Markdown stays derived, never the
-system's source of truth.
+That contract is unchanged. The new pure `youtube-caption-markdown/1` projection
+includes source/capture/track metadata and timed cue text, without requiring
+YouTube fields in general renderers. Markdown stays derived, never the system's
+source of truth. The CLI writes exclusively into the explicit output directory
+and refuses an existing file; offline `render` reads persisted content by ID.
 
 ## Extension audit at the inspected commit
 

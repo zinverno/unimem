@@ -36,7 +36,7 @@ def acquire(url: str, languages: tuple[str, ...]) -> CaptionArtifact:
     video_id = video_id_from_url(url)
     validate_languages(languages)
     try:
-        with BoundedSession() as session:
+        with BoundedSession(video_id) as session:
             tracks = list(YouTubeTranscriptApi(http_client=session).list(video_id))
             if not tracks:
                 raise AcquisitionError(
