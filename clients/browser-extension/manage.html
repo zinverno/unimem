@@ -17,5 +17,9 @@
 <div class="actions"><button id="refresh">Обновить статус</button><button id="send">Отправить</button><button id="retry">Повторить доставку</button><button id="again">Сохранить заново</button><button id="remove">Удалить локальную ссылку</button></div>
 <p>«Повторить доставку» проверяет прежний ID и отправляет те же параметры только при неподтверждённом приёме. «Сохранить заново» создаёт новый ID и новый захват. Удаление ссылки не отменяет работу и не удаляет серверный capture.</p>
 <h3>Результат</h3><div class="actions"><button id="preview">Получить Markdown</button><button id="download" disabled>Сохранить .md…</button></div><p id="export-state" role="status"></p><pre id="markdown" tabindex="0" aria-label="Markdown как текст"></pre>
-<p>Это результат в UniMem. Импорт в Obsidian в этой версии не выполняется.</p></div></section>
+<h3>Obsidian</h3><p>Создать одну новую заметку через самостоятельный UniMem Connector. Папка задаётся в плагине. Доставка начнётся только после нажатия кнопки.</p>
+<label for="destination">Назначение</label><select id="destination"><option value="">Не загружено</option></select>
+<p id="delivery-filename"></p><p id="delivery-state" role="status"></p>
+<div class="actions"><button id="obsidian-send" disabled>Отправить в Obsidian</button><button id="obsidian-refresh">Обновить статус доставки</button></div>
+</div></section>
 </main><script type="module" src="manage.js"></script></body></html>

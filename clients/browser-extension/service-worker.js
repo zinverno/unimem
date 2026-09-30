@@ -11,12 +11,14 @@ import { settingsStore } from "./lib/settings.js";
 import { localTransport } from "./lib/transport.js";
 import { youtubeClient, validId, safeError } from "./lib/youtube.js";
 import { jobsController } from "./lib/jobs.js";
+import { obsidianClient, validDestination } from "./lib/obsidian.js";
 
 const api = getExtension();
 const settings = settingsStore(api.storage);
 const http = localTransport({ getToken: () => settings.getToken(),
   hasPermission: () => api.permissions.contains({ origins: ["http://127.0.0.1/*"] }) });
 const client = youtubeClient(http);
+const obsidian = obsidianClient(http);
 const jobs = jobsController({ local: api.storage.local, client, settings });
 const open = (id = "") => api.tabs.create({ url: api.runtime.getURL(`manage.html${id ? `#${id}` : ""}`) });
 const report = (tab, result) => applyFeedback(api.action, tab, result);
@@ -69,18 +71,26 @@ export function trustedMessage(message, sender) {
   page.hash = "";
   if (sender?.id !== api.runtime.id || page.href !== api.runtime.getURL("manage.html") || sender.frameId > 0) return false;
   if (!message || Object.getPrototypeOf(message) !== Object.prototype) return false;
-  const noId = ["list", "check"];
+  const noId = ["list", "check", "destinations"];
   const withId = ["refresh", "retry", "again", "markdown", "remove", "send"];
   return (noId.includes(message.type) && Object.keys(message).length === 1) ||
+    (["obsidian-send", "obsidian-status"].includes(message.type) && validId(message.id) &&
+      validDestination(message.destination_id) && Object.keys(message).length === 3) ||
     (withId.includes(message.type) && validId(message.id) && Object.keys(message).length === 2);
 }
 api.runtime.onMessage.addListener((message, sender, respond) => {
   let trusted = false;
   try { trusted = trustedMessage(message, sender); } catch { /* Invalid sender URL. */ }
   if (!trusted) { respond({ ok: false, error: { code: "invalid_message", status: null } }); return false; }
-  Promise.resolve().then(() => {
+  Promise.resolve().then(async () => {
     if (message.type === "check") return client.check();
     if (message.type === "list") return jobs.list();
+    if (message.type === "destinations") return obsidian.destinations();
+    if (["obsidian-send", "obsidian-status"].includes(message.type)) {
+      const job = (await jobs.list()).find(j => j.operation_id === message.id);
+      if (!job?.observed?.result_available) throw new Error("Result not ready");
+      return obsidian[message.type === "obsidian-send" ? "send" : "status"](job.observed.capture_id, message.destination_id);
+    }
     return jobs[message.type](message.id);
   }).then((value) => respond({ ok: true, value }), (error) => respond({ ok: false, error: safeError(error) }));
   return true; // Async sendResponse on both engines; never returns a credential.

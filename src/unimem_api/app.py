@@ -91,6 +91,8 @@ from unimem_api.models import (
     HealthResponse,
     UploadedObjectResponse,
 )
+from unimem_api.obsidian_http import install_obsidian_routes
+from unimem_api.obsidian_store import ObsidianStore
 from unimem_api.operations_http import install_operation_routes
 from unimem_api.replay import resolve_completed_replay
 from unimem_api.security import ApiSecurity, LocalApiSecurity
@@ -143,6 +145,7 @@ def create_app(
     lifespan: Lifespan[FastAPI] | None = None,
     operations: OperationStore | None = None,
     youtube_service: YoutubeCaptureService | None = None,
+    obsidian: ObsidianStore | None = None,
 ) -> FastAPI:
     """Build the API over five already-constructed core services.
 
@@ -169,8 +172,10 @@ def create_app(
         summary="Local HTTP capture surface over the UniMem capture core.",
         lifespan=lifespan,
     )
-    app.add_middleware(LocalApiSecurity, policy=security)
+    app.add_middleware(LocalApiSecurity, policy=security, receivers=obsidian)
     install_error_handlers(app)
+    if obsidian is not None:
+        install_obsidian_routes(app, obsidian, record_store, content_store)
     if operations is not None:
         if youtube_service is None:
             raise ValueError("YouTube operations require the capture service.")

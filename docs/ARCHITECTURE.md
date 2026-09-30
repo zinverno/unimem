@@ -652,7 +652,13 @@ the default HTTP composition, routes and `markdown/0.1` renderer are unchanged.
 `render` reads saved canonical content without retrieval dependencies or network.
 See the [operator guide and evidence](YOUTUBE_CAPTIONS.md).
 
-## Planned next slices (not implemented)
+## Historical CLI roadmap and current delivery decision
+
+The following paragraph records the CLI-era plan. B2/B3 are now merged; actual
+Zen evidence is in [BROWSER_VERIFICATION.md](BROWSER_VERIFICATION.md). Its proposed
+Veynrel/Companion delivery channel was superseded by ADR-027: the official current
+path is **Browser → UniMem → UniMem Connector → Obsidian**. See the standalone
+delivery section below. Historical proposal text is retained for provenance.
 
 The [implementation plan](../tasks/plan.md) orders browser-independent YouTube
 caption acquisition, durable capture and CLI Markdown export before a required
@@ -710,7 +716,8 @@ takes an envelope to a stored capture record, and Phase 0H's
 completed capture. Since Phase 0I that content object is durable — stored
 before the capture is marked `complete` — so everything up to and including
 canonical content survives a restart. Rendered representations are still
-derived on demand and persisted nowhere.
+derived on demand. ADR-027 additionally persists a frozen Markdown snapshot for
+an explicitly submitted outbound delivery, without changing canonical content.
 
 ## The canonical ContentObject
 
@@ -2719,7 +2726,9 @@ reach the decision.
     references/observations, persisted before submission. These are not a second
     lifecycle: the server owns state, and client errors never turn it into failed
     or complete. Explicit retry preserves identity and parameters. Captured content
-    reaches the connector exactly as the source produced it.
+    reaches the connector exactly as the source produced it. ADR-027 permits a
+    separate Obsidian plugin import journal and destination-scoped delivery
+    receipts; these track delivery only and never own capture lifecycle.
 
 19. A processor asserts only what it observed or produced, and absence of
     interpretation is represented by absence rather than by placeholder content.
@@ -2953,3 +2962,25 @@ B1 operation/capture state remains authoritative. Manual reads and Markdown do n
 acquire captions. A page reopen or background restart never automatically submits.
 There is no vault import, new caption pipeline or server implementation change.
 See [installation](BROWSER_DELIVERY.md) and [evidence](BROWSER_VERIFICATION.md).
+
+## Standalone Obsidian delivery (C)
+
+[ADR-027](ADR/ADR-027-standalone-obsidian-connector.md) establishes the independent
+UniMem Connector as the official delivery owner in Obsidian. Veynrel and Companion
+have no role in this channel. Browser action submits a capture/destination pair;
+`obsidian_http.py` snapshots the existing renderer result, `obsidian_store.py`
+commits immutable UTF-8 Markdown/digest and owns the separate delivery lifecycle.
+The receiver credential can only inspect/claim/acknowledge its own destination.
+
+The HTTP-client plugin in `clients/obsidian-plugin` writes through Vault.create,
+reads back through Vault.read and ACKs only a matching digest. Its own persistent
+journal plus an enrolled installation ID, 120-second claim and server receipt
+support conservative crash recovery. No direct server filesystem access to the
+vault, overwrite, automatic suffix or post-ACK repair. Ambiguous creation stays
+needs-review. The plugin opens no port and launches no Python/MCP/Companion.
+
+Browser polling is explicit status refresh; plugin polling is bounded and can be
+disabled. Settings changes require saving and read-only verification before
+reenabling reception. Physical symlink/race limits and the lack of a distributed
+exactly-once transaction are explicit in the ADR. Setup, routes and measured
+native/automated evidence: [OBSIDIAN_DELIVERY.md](OBSIDIAN_DELIVERY.md).

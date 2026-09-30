@@ -388,4 +388,14 @@ class TestNoNewSurface:
             "/v1/captures",
             "/v1/captures/{capture_id}",
             "/v1/captures/{capture_id}/content",
+            # ADR-027 adds outbound delivery; no webpage-specific ingestion route.
+            "/v1/destinations",
+            "/v1/destinations/{destination_id}/captures/{capture_id}/delivery",
+            "/v1/deliveries",
+            "/v1/receiver/destination",
+            "/v1/receiver/deliveries/next",
+            "/v1/receiver/deliveries/{delivery_id}",
+            "/v1/receiver/deliveries/{delivery_id}/claim",
+            "/v1/receiver/deliveries/{delivery_id}/ack",
+            "/v1/receiver/deliveries/{delivery_id}/fail",
         }

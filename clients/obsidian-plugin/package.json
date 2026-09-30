@@ -1,0 +1,10 @@
+{
+  "name": "unimem-connector", "version": "0.1.0", "private": true,
+  "description": "Create-only delivery from local UniMem into Obsidian",
+  "type": "module", "main": "main.js",
+  "scripts": {
+    "build": "tsc --noEmit && node build.mjs",
+    "test": "node build.mjs test && node --test tests/*.test.mjs"
+  },
+  "devDependencies": {"@types/node": "22.15.17", "esbuild": "0.25.5", "obsidian": "1.13.1", "typescript": "5.8.3"}
+}

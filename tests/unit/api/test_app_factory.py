@@ -411,16 +411,18 @@ class TestTheOptionalOcrAdapterStaysOptional:
 
 
 class TestTheApiDoesNotRender:
-    """``core.rendering`` is a derived-representation layer, and this API is not it."""
+    """Capture routes remain renderer-free; ADR-027 explicitly snapshots exports."""
 
-    def test_no_api_module_imports_a_renderer(self) -> None:
+    def test_only_outbound_delivery_imports_the_existing_renderer(self) -> None:
         offenders = {
             name: sorted(imported for imported in names if "rendering" in imported)
             for name, names in imported_modules(unimem_api).items()
             if any("rendering" in imported for imported in names)
         }
 
-        assert offenders == {}
+        assert offenders == {
+            "unimem_api.obsidian_http": ["core.rendering", "core.rendering.MarkdownRenderer"]
+        }
 
     def test_no_renderer_runs_during_the_whole_request_cycle(
         self, stack: Stack, monkeypatch: pytest.MonkeyPatch
