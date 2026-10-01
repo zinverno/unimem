@@ -1,13 +1,19 @@
 # YouTube CLI capture, then Zen/Linux delivery
 
-Updated: 2026-09-29. A and B1 are merged (PR #31/#32). B2/B3 implement the
-protected shared browser extension, connection UI, durable operation references
-and Markdown preview/download on `feat/zen-browser-youtube-capture`.
+Updated: 2026-10-01. A, B1 and B2/B3 are merged (PR #31/#32/#33).
+The standalone Obsidian delivery slice is implemented on `feat/obsidian-connector`:
+**Browser → UniMem → UniMem Connector → Obsidian**. See
+[ADR-027](../docs/ADR/ADR-027-standalone-obsidian-connector.md) and
+[delivery acceptance](../docs/OBSIDIAN_VERIFICATION.md).
+The protected shared browser extension provides connection UI, durable operation
+references and Markdown preview/download.
 [ADR-026](../docs/ADR/ADR-026-recoverable-browser-delivery.md),
 [installation](../docs/BROWSER_DELIVERY.md),
 [measured evidence and remaining B4 gates](../docs/BROWSER_VERIFICATION.md).
 The audit below is the historical planning baseline; its gaps are superseded by
-ADR-026 where implemented. C–D remain future work. Signed distribution remains NOT RUN.
+ADR-026 where implemented. The former Veynrel/Companion delivery proposal is
+superseded by ADR-027; D remains future work. B4 remains partial, including signed
+distribution NOT RUN; it is not retroactively closed by delivery acceptance.
 Tasks and acceptance gates: [todo.md](todo.md).
 
 ## Baseline and scope
@@ -27,15 +33,16 @@ The order is:
    understandable processing status and result.** Zen is the required primary
    browser target; Firefox is a development/checking platform. Preserve existing
    Chromium behaviour where possible, but it cannot substitute for Zen acceptance.
-3. **Zen → UniMem → agreed note import into Obsidian**, using the existing
-   Veynrel/Companion boundaries. Preview/approval and synthetic-vault acceptance
-   are part of this milestone; direct vault writes and bypasses are not.
+3. **Zen → UniMem → UniMem Connector → Obsidian**, using a standalone create-only
+   plugin, immutable snapshots, separate destination credentials, claims and an
+   import journal. The server never opens a vault. Explicit browser action starts
+   delivery; only receiver ACK proves import. No Veynrel/Companion dependency.
 4. Further sources and processing: audio/voice, images, the visual part of video,
    and GitHub. GitHub neither replaces multimedia nor makes UniMem a code-only app.
 
-No paid calls, real-vault writes, Companion bypass, automatic merge or release,
-or claims of unverified support. Markdown output uses a temporary directory or
-explicit non-vault destination; later Obsidian delivery respects Companion.
+No paid calls, personal-vault writes, automatic merge or release, or claims of
+unverified support. CLI Markdown output uses a non-vault destination; Obsidian
+delivery uses only the standalone plugin's official Vault API calls.
 Existing Phase 5A owner acceptance remains open; this plan does not close it or
 silently supersede accepted ADRs.
 

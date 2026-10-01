@@ -92,6 +92,7 @@ from core.processing.media_probe import MediaProbe
 from core.processing.ocr import PdfPageOcr
 from core.storage import LocalRawObjectStore
 from unimem_api.app import create_app
+from unimem_api.obsidian_store import ObsidianStore
 from unimem_api.security import ApiSecurity
 from unimem_api.worker import DeliveryWorker, ServerLease
 from unimem_youtube.operations import OperationStore
@@ -307,6 +308,7 @@ def build_local_app(
         lifespan=lifespan,
         operations=operations,
         youtube_service=youtube_service,
+        obsidian=ObsidianStore(data_dir / "obsidian-delivery.sqlite3"),
     )
 
 

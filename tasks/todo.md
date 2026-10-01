@@ -2,8 +2,9 @@
 
 Requirements, evidence and manual acceptance: [plan.md](plan.md).
 Unchecked items are future work, not claims that the existing implementation
-already provides the behaviour. Implement A before B, then C (Obsidian delivery);
-D holds subsequent sources and processors.
+already provides the behaviour. A and B2/B3 are merged; C is the standalone
+Obsidian delivery slice. Remaining B4 gates stay separate. D holds subsequent
+sources and processors.
 
 ## Completed planning
 
@@ -70,7 +71,8 @@ modules skipped); the built wheel also rendered persisted content in a new
 process without those dependencies. [Live evidence](../docs/YOUTUBE_CAPTIONS.md#opt-in-live-acceptance)
 is a separate PASS on one public video. Zen runtime acceptance remains NOT RUN.
 CI's final status is reported against the actual PR head at handoff, not inferred
-from these local results. B2/B3 implementation and available B4 evidence are recorded below; C–D remain future work.
+from these local results. B2/B3 implementation, available B4 evidence and the
+subsequent standalone C slice are recorded below; D remains future work.
 
 ## B — Next PR: Zen/Linux browser delivery
 
@@ -134,17 +136,25 @@ the exact PR head at handoff, separately from these local measurements.
 - [ ] Signed installation, permission prompts after normal installation, browser
   restart and updates. No signed package; no submission/publication authorized.
 
-## C — Core user flow: agreed Obsidian note import
+## C — Standalone UniMem Connector delivery
 
-Dependencies: B4. This is the next milestone after the Zen browser scenario,
-not part of the current B1 server PR.
+Depends on merged B2/B3 (PR #33). Owner explicitly authorized C while remaining
+B4 gates stay open. ADR-027 supersedes the former Veynrel/Companion delivery plan.
 
-- [ ] Implement Zen → UniMem → note preview and agreed import through the existing
-  Veynrel/Companion integration boundaries; no direct-write bypass.
-- [ ] Show target note, content, status and conflicts before the explicit import
-  decision; report success only from the established delivery owner.
-- [ ] Verify the complete browser-to-Obsidian path using synthetic vaults and
-  document installation/recovery. Real-vault acceptance requires explicit scope.
+- [x] Independent `clients/obsidian-plugin` package, build, settings and commands.
+- [x] Destination UUID and separately scoped receiver credential; operator pairing.
+- [x] Durable immutable snapshot, digest, idempotent submission, claim/lease and ACK.
+- [x] Create-only Vault API importer with persistent journal, verification and safe paths.
+- [x] Explicit browser send, destination/filename/status and restored server receipts.
+- [x] Automated auth, lease, crash recovery and cross-language fixture checks.
+- [x] Native synthetic Zen → API → standalone plugin → isolated vault acceptance.
+- [x] Dev installation, protocol, boundaries and measured evidence documentation.
+- [ ] Fresh live-caption browser → Obsidian acceptance (separate from synthetic delivery).
+- [ ] Native Windows/macOS filesystem validation (desktop manifest does not prove it).
+
+Evidence and current limits: [OBSIDIAN_VERIFICATION.md](../docs/OBSIDIAN_VERIFICATION.md).
+No Community publication, release or merge. B4 distribution and earlier Phase 5A
+owner gates remain open.
 
 ## D — Later sources and processing
 

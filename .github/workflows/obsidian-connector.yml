@@ -1,0 +1,33 @@
+name: Obsidian Connector
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  connector:
+    name: Standalone Obsidian build, journal and contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e '.[dev]'
+      - run: npm ci --prefix clients/obsidian-plugin
+      - run: npm test --prefix clients/obsidian-plugin
+      - run: npm run build --prefix clients/obsidian-plugin
+      - name: Deterministic dev artifact and allowlist
+        run: |
+          cp clients/obsidian-plugin/dist/SHA256SUMS /tmp/first-plugin-sha256
+          npm run build --prefix clients/obsidian-plugin
+          cmp /tmp/first-plugin-sha256 clients/obsidian-plugin/dist/SHA256SUMS
+          python - <<'PY'
+          from pathlib import Path
+          root = Path('clients/obsidian-plugin/dist/unimem-connector')
+          assert {p.name for p in root.iterdir()} == {'main.js', 'manifest.json'}
+          PY
+      - run: pytest tests/unit/api/test_obsidian_delivery.py -q

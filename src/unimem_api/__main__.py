@@ -7,6 +7,7 @@ No reload or multiple workers: lifespan owns the data-directory process lease.
 """
 
 import argparse
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,8 @@ from core.processing.image_recognition import ImageOcr
 from core.processing.media_probe import MediaProbe
 from core.processing.ocr import PdfPageOcr
 from unimem_api.credentials import issue_token, read_token
+from unimem_api.obsidian_contract import DeliveryError
+from unimem_api.obsidian_store import ObsidianStore
 from unimem_api.security import ApiSecurity
 from unimem_api.wiring import build_local_app
 
@@ -50,6 +53,7 @@ class Options:
     init_token: bool = False
     rotate_token: bool = False
     show_token: bool = False
+    create_destination: str | None = None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -138,6 +142,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="explicitly print the secret for local connection setup, then exit",
     )
+    credentials.add_argument(
+        "--create-destination",
+        metavar="NAME",
+        help="create destination and print its receiver secret ONCE, then exit",
+    )
     return parser
 
 
@@ -156,6 +165,7 @@ def parse_args(argv: Sequence[str] | None = None) -> Options:
         init_token=namespace.init_token,
         rotate_token=namespace.rotate_token,
         show_token=namespace.show_token,
+        create_destination=namespace.create_destination,
     )
 
 
@@ -288,6 +298,17 @@ def main(
     options = parse_args(argv)
     token_file = options.token_file or options.data_dir / "api.token"
     try:
+        if options.create_destination is not None:
+            options.data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            destination, receiver_token = ObsidianStore(
+                options.data_dir / "obsidian-delivery.sqlite3"
+            ).create_destination(options.create_destination)
+            print(
+                json.dumps(
+                    {"destination_id": destination.destination_id, "receiver_token": receiver_token}
+                )
+            )
+            return 0
         if options.init_token or options.rotate_token:
             issue_token(token_file, rotate=options.rotate_token)
             return 0
@@ -295,7 +316,7 @@ def main(
             print(read_token(token_file))
             return 0
         security = ApiSecurity(read_token(token_file), port=options.port)
-    except ValueError as exc:
+    except (ValueError, DeliveryError) as exc:
         raise SystemExit(str(exc)) from None
     try:
         app = build_local_app(

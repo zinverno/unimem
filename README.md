@@ -7,6 +7,14 @@ for a universal multimodal capture and ingestion layer. Canonical contracts are 
 version **0.3**; `0.1` and `0.2` documents remain readable, and each keeps its own version
 when read back or advanced through the lifecycle.
 
+**Obsidian delivery:** [UniMem Connector](clients/obsidian-plugin/README.md) is a
+standalone create-only desktop plugin. The current channel is Browser → UniMem →
+UniMem Connector → Obsidian, with separate receiver credentials, an immutable
+delivery queue and an import journal. Veynrel and Companion are not dependencies
+and do not participate. See [setup](docs/OBSIDIAN_DELIVERY.md),
+[ADR-027](docs/ADR/ADR-027-standalone-obsidian-connector.md) and
+[actual acceptance evidence](docs/OBSIDIAN_VERIFICATION.md).
+
 Implemented so far:
 
 - **Phase 0A — domain contracts.** The stable domain language:

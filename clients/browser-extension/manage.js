@@ -1,10 +1,12 @@
 import { getExtension } from "./lib/browser.js";
 import { settingsStore } from "./lib/settings.js";
 import { errorText, jobSummary, downloadMarkdown } from "./lib/presentation.js";
+import { deliveryStates } from "./lib/obsidian.js";
 const api = getExtension();
 const settings = settingsStore(api.storage);
 const $ = (id) => document.getElementById(id);
 let rows = [], selected = location.hash.slice(1), markdown = null, busy = false;
+let deliveryLoaded = false, deliveryExists = false, deliveryRead = 0;
 const downloads = new Map();
 function notice(text, error = false) { $("notice").textContent = text; $("notice").className = error ? "error" : ""; }
 async function message(type, id) {
@@ -26,6 +28,9 @@ function renderButtons() {
   $("retry").disabled = busy || !job || job.accepted;
   $("preview").disabled = busy || !job?.observed?.result_available;
   $("download").disabled = busy || markdown === null;
+  $("destination").disabled = busy;
+  $("obsidian-send").disabled = busy || !job?.observed?.result_available || !deliveryLoaded || deliveryExists;
+  $("obsidian-refresh").disabled = busy || !job?.observed?.result_available;
 }
 function render() {
   const picker = $("jobs"); picker.replaceChildren();
@@ -55,7 +60,41 @@ async function load() {
     clearPreview();
   }
   render();
+  await loadDelivery();
 }
+async function deliveryMessage(type) {
+  const answer = await api.runtime.sendMessage({ type, id: selected, destination_id: $("destination").value });
+  if (!answer?.ok) throw answer?.error ?? { code: "invalid_response" };
+  return answer.value;
+}
+async function loadDelivery() {
+  const read = ++deliveryRead, id = selected;
+  deliveryLoaded = false; deliveryExists = false; renderButtons();
+  if (!rows.find(j => j.operation_id === id)?.observed?.result_available) {
+    $("delivery-state").textContent = "Доступно после завершения обработки."; $("delivery-filename").textContent = ""; return;
+  }
+  try {
+    const destinations = await message("destinations");
+    if (read !== deliveryRead || selected !== id) return;
+    const picker = $("destination"), previous = picker.value; picker.replaceChildren();
+    for (const d of destinations) picker.add(new Option(d.display_name, d.destination_id));
+    if (destinations.some(d => d.destination_id === previous)) picker.value = previous;
+    if (!destinations.length) { $("delivery-state").textContent = "Сначала создайте destination командой UniMem --create-destination."; return; }
+    const result = await deliveryMessage("obsidian-status");
+    if (read !== deliveryRead || selected !== id) return;
+    $("delivery-filename").textContent = `Имя файла: ${result.suggested_filename}`;
+    $("delivery-state").textContent = result.delivery ? deliveryStates[result.delivery.state] : "Ещё не отправлено";
+    deliveryExists = Boolean(result.delivery); deliveryLoaded = true;
+  } catch (e) {
+    if (read === deliveryRead) $("delivery-state").textContent = `Статус не получен: ${errorText(e)}`;
+  } finally { if (read === deliveryRead) renderButtons(); }
+}
+$("destination").onchange = () => act(loadDelivery);
+$("obsidian-refresh").onclick = () => act(loadDelivery);
+$("obsidian-send").onclick = () => act(async () => {
+  if (!deliveryLoaded || deliveryExists) return;
+  await deliveryMessage("obsidian-send"); await loadDelivery();
+});
 async function credential() { const state = await settings.read(); $("languages").value = state.languages.join(","); $("remember").checked = state.remembered; $("credential-state").textContent = state.hasToken ? `Токен задан: ${state.remembered ? "постоянное хранение" : "до завершения сеанса браузера"}.` : "Токен не задан."; }
 function clearPreview() { markdown = null; $("markdown").textContent = ""; $("export-state").textContent = ""; }
 $("settings-form").addEventListener("submit", (event) => { event.preventDefault(); act(async () => {

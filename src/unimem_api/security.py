@@ -11,6 +11,9 @@ from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from unimem_api.obsidian_contract import DeliveryError
+from unimem_api.obsidian_store import ObsidianStore
+
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{43}\Z")
 EXTENSION_ORIGIN = re.compile(
     r"(?:moz-extension://[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
@@ -51,8 +54,11 @@ def refusal(status: int, code: str) -> JSONResponse:
 
 
 class LocalApiSecurity:
-    def __init__(self, app: ASGIApp, policy: ApiSecurity) -> None:
+    def __init__(
+        self, app: ASGIApp, policy: ApiSecurity, receivers: ObsidianStore | None = None
+    ) -> None:
         self.policy = policy
+        self.receivers = receivers
         self.app = app
         self.json_app = RequestBodyLimitMiddleware(app, policy.json_bytes)
         self.upload_app = RequestBodyLimitMiddleware(app, policy.upload_bytes)
@@ -124,7 +130,33 @@ class LocalApiSecurity:
                 return
         elif not (scope["path"] == "/health" and scope["method"] == "GET"):
             values = headers.getlist("authorization")
-            if len(values) != 1 or not secrets.compare_digest(
+            if scope["path"].startswith("/v1/receiver/"):
+                destination = None
+                if (
+                    self.receivers
+                    and len(values) == 1
+                    and values[0].startswith("Bearer ")
+                    and TOKEN_PATTERN.fullmatch(values[0][7:])
+                    and origin is None
+                ):
+                    # Reserve ingress capacity before yielding to credential IO.
+                    self.active += 1
+                    try:
+                        destination = await asyncio.to_thread(
+                            self.receivers.authenticate, values[0][7:]
+                        )
+                    except DeliveryError:
+                        await refusal(503, "delivery_storage_unavailable")(
+                            scope, receive, safe_send
+                        )
+                        return
+                    finally:
+                        self.active -= 1
+                if destination is None:
+                    code, status = "unauthorized", 401
+                else:
+                    scope.setdefault("state", {})["destination_id"] = destination
+            elif len(values) != 1 or not secrets.compare_digest(
                 values[0].encode("latin-1"), f"Bearer {self.policy.token}".encode()
             ):
                 code, status = "unauthorized", 401

@@ -10,7 +10,7 @@ export function localTransport({ getToken, fetch: fetchImpl = globalThis.fetch,
   return async (url, options = {}) => {
     const target = new URL(url);
     if (target.origin !== API_ORIGIN || target.username || target.password || target.search || target.hash ||
-        !/^\/(health|v1\/captures(?:\/[A-Za-z0-9_-]+)?|v1\/youtube\/operations(?:\/[A-Za-z0-9_-]+(?:\/markdown)?)?)$/.test(target.pathname)) {
+        !/^\/(health|v1\/captures(?:\/[A-Za-z0-9_-]+)?|v1\/youtube\/operations(?:\/[A-Za-z0-9_-]+(?:\/markdown)?)?|v1\/deliveries|v1\/destinations(?:\/[0-9a-f-]{36}\/captures\/[A-Za-z0-9_-]+\/delivery)?)$/.test(target.pathname)) {
       throw new ClientError("invalid_destination");
     }
     if (!await hasPermission()) throw new ClientError("permission_denied");
@@ -59,7 +59,8 @@ export async function httpError(response) {
   // No upstream message, HTML, stack or arbitrary code ever reaches storage/UI.
   const known = new Set(["operation_not_found", "operation_conflict", "queue_full", "operation_history_full",
     "markdown_unavailable", "result_not_ready", "unauthorized", "origin_denied", "request_limit",
-    "operation_storage_unavailable", "operation_corrupt", "invalid_url", "invalid_languages"]);
+    "operation_storage_unavailable", "operation_corrupt", "invalid_url", "invalid_languages",
+    "markdown_too_large", "delivery_history_full", "destination_not_found", "delivery_storage_unavailable"]);
   try {
     const body = await jsonBody(response);
     if (known.has(body?.error?.code)) code = body.error.code;

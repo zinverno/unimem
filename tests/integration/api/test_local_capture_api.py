@@ -33,6 +33,7 @@ from tests.api_auth import AuthenticatedClient as TestClient
 from tests.unit.api.builders import AWKWARD_TEXT, CAPTURE_ID, CAPTURED_AT, TITLE, text_envelope
 from tests.unit.api.conftest import served_paths
 from unimem_api import DATABASE_FILENAME, RAW_DIRNAME, build_local_app, create_app
+from unimem_api.obsidian_store import ObsidianStore
 
 
 def table_names(database: Path) -> set[str]:
@@ -374,6 +375,7 @@ def test_create_app_and_build_local_app_serve_the_same_routes(data_dir: Path) ->
         content_store=content_store,
         raw_store=raw_store,
         security=TEST_SECURITY,
+        obsidian=ObsidianStore(data_dir / "obsidian-delivery.sqlite3"),
     )
 
     composed = build_local_app(data_dir, security=TEST_SECURITY)
