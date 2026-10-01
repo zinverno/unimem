@@ -110,6 +110,10 @@ native synthetic and separate live-source evidence. Synthetic captions do not
 establish live YouTube retrieval. Existing B4 signed-install/restart/update,
 normal Linux save chooser and other-browser gaps stay open.
 
+[Persistence follow-up](OBSIDIAN_PERSIST_VERIFICATION.md) records the queue/save
+failure regressions, updated artifact hashes and the real YouTube attempt that
+ended in acquisition timeout.
+
 The API never opens a vault directory. Only the plugin creates notes via the
 official Vault API. Journal + pinned installation + lease + receipts provide
 practical idempotency, not a distributed exactly-once transaction. Back up the

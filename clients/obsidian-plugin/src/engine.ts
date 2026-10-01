@@ -67,6 +67,12 @@ export class Receiver {
     private save: () => Promise<void>, private notify: (code: string) => void) {}
 
   private live() { if (this.stopped) throw new SafeError("stopped"); }
+  private async update(change: () => void) {
+    const before: Data = JSON.parse(JSON.stringify(this.data));
+    change();
+    try { await this.save(); }
+    catch (error) { Object.assign(this.data, before); throw error; }
+  }
   private async request(path: string, body?: object) {
     this.live(); const result = await this.http(`/v1/receiver/${path}`, body, this.controller.signal);
     this.live(); return result;
@@ -88,12 +94,15 @@ export class Receiver {
     const s = this.data.settings;
     if ((s.destination_id && d.destination_id !== s.destination_id) ||
         (d.receiver_id !== null && d.receiver_id !== this.data.receiver_id)) throw new SafeError("receiver_mismatch");
-    s.destination_id = d.destination_id; s.destination_name = d.display_name;
     this.status = "Подключено"; this.error = "";
+    return d;
   }
   check(): Promise<void> {
     return this.exclusive(async () => {
-      await this.verify(); this.live(); this.data.settings.verified = true; await this.save();
+      const d = await this.verify(); this.live();
+      await this.update(() => { Object.assign(this.data.settings, {
+        destination_id: d.destination_id, destination_name: d.display_name, verified: true,
+      }); });
     });
   }
   start() {
@@ -125,9 +134,10 @@ export class Receiver {
       if (recovering && d.delivery_id !== recovering.delivery_id) throw new SafeError("invalid_response");
       if (!["pending", "claimed"].includes(d.state)) {
         if (recovering) {
-          recovering.acked = true;
-          if (d.state === "imported") this.data.lastImport = { path: recovering.path, time: new Date().toISOString() };
-          await this.save();
+          await this.update(() => {
+            recovering.acked = true;
+            if (d.state === "imported") this.data.lastImport = { path: recovering.path, time: new Date().toISOString() };
+          });
         }
         return;
       }
@@ -143,15 +153,16 @@ export class Receiver {
         if (this.data.journal.length >= 1000) throw new SafeError("journal_full");
         j = { delivery_id: d.delivery_id, destination_id: s.destination_id, server: s.server, inbox: s.inbox,
           path, expected_digest: d.markdown_sha256, state: "prepared", error: null, time: new Date().toISOString(), acked: false };
-        this.data.journal.push(j); await this.save(); this.live();
+        const prepared = j;
+        await this.update(() => { this.data.journal.push(prepared); }); this.live();
       }
       const record = j;
       const fail = async (error: Failure) => {
         this.live();
-        record.state = "error"; record.error = error; await this.save(); this.live();
+        await this.update(() => { record.state = "error"; record.error = error; }); this.live();
         const result = delivery(await this.request(`deliveries/${d.delivery_id}/fail`, { ...claim, error_code: error }), s.destination_id);
         if (result.delivery_id !== d.delivery_id || result.error_code !== error) throw new SafeError("invalid_response");
-        record.acked = true; await this.save();
+        await this.update(() => { record.acked = true; });
         this.notify(error); this.error = error;
       };
       if (record.path !== path || record.inbox !== s.inbox || record.expected_digest !== d.markdown_sha256) {
@@ -166,13 +177,14 @@ export class Receiver {
         try { await this.vault.mkdir(s.inbox, () => this.live()); } catch { await fail("write_failed"); return; }
         this.live();
         // Persist intent BEFORE create: a crash cannot cause a blind retry.
-        record.state = "creating"; await this.save(); this.live();
+        await this.update(() => { record.state = "creating"; }); this.live();
         // Refuse to begin a new write near/after expiry. Recovery gets a new lease.
         if (Date.parse(d.lease_expires_at!) - Date.now() < 15000) throw new SafeError("lease_expired");
+        await this.vault.guard(path); this.live();
+        if (await this.vault.exists(path)) { await fail("file_exists"); return; }
+        this.live();
         try {
-          await this.vault.guard(path); this.live();
-          if (await this.vault.exists(path)) { await fail("file_exists"); return; }
-          this.live(); await this.vault.create(path, d.markdown);
+          await this.vault.create(path, d.markdown);
         } catch (e) {
           if (this.stopped) throw e;
           await fail("write_ambiguous"); return;
@@ -183,12 +195,14 @@ export class Receiver {
       try { actual = await this.vault.read(path); } catch { await fail("write_ambiguous"); return; }
       this.live();
       if (digest(actual) !== record.expected_digest) { await fail("digest_mismatch"); return; }
-      record.state = "written"; record.time = new Date().toISOString(); await this.save(); this.live();
+      await this.update(() => { record.state = "written"; record.time = new Date().toISOString(); }); this.live();
       const confirmed = delivery(await this.request(`deliveries/${d.delivery_id}/ack`,
         { ...claim, markdown_sha256: record.expected_digest }), s.destination_id);
       if (confirmed.delivery_id !== d.delivery_id || confirmed.state !== "imported") throw new SafeError("invalid_response");
-      record.acked = true; this.data.lastImport = { path, time: new Date().toISOString() };
-      await this.save(); this.lastNotice = ""; this.notify("imported");
+      await this.update(() => {
+        record.acked = true; this.data.lastImport = { path, time: new Date().toISOString() };
+      });
+      this.lastNotice = ""; this.notify("imported");
     });
   }
 }

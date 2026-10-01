@@ -21,6 +21,8 @@ export default class UniMemConnector extends Plugin {
   receiver: Receiver | null = null;
   private saving = Promise.resolve();
   private closing = false;
+  private changingSettings = false;
+  settingsError = "";
   async onload() {
     try {
       this.data = loadData(await this.loadData());
@@ -41,8 +43,9 @@ export default class UniMemConnector extends Plugin {
   onunload() { this.closing = true; void this.receiver?.stop(); }
   persist() {
     const snapshot = JSON.parse(JSON.stringify(this.data));
-    this.saving = this.saving.then(() => this.saveData(snapshot));
-    return this.saving;
+    const saved = this.saving.then(() => this.saveData(snapshot));
+    this.saving = saved.catch(() => {}); // Recover the queue, not this caller's result.
+    return saved;
   }
   connect() {
     if (this.closing) return;
@@ -87,24 +90,35 @@ export default class UniMemConnector extends Plugin {
       if (!this.closing) new Notice(`UniMem: ${notices[code] ?? code}`);
     });
   }
-  async configure(draft: Settings) {
+  private async saveSettings(next: Settings) {
+    if (this.changingSettings) throw new SafeError("settings_busy");
+    this.changingSettings = true;
+    try {
+      await this.receiver?.stop();
+      if (this.closing) return;
+      const previous = this.data.settings;
+      this.data.settings = next;
+      try { await this.persist(); }
+      catch (error) {
+        this.data.settings = previous;
+        this.settingsError = "Не удалось сохранить настройки. Приём остановлен; повторите сохранение.";
+        throw error;
+      }
+      this.settingsError = "";
+      if (this.closing) return;
+      this.connect();
+      if (next.enabled) this.receiver?.start();
+    } finally { this.changingSettings = false; }
+  }
+  configure(draft: Settings) {
     folder(draft.inbox, this.app.vault.configDir);
     const server = serverAddress(draft.server);
     if (!/^[A-Za-z0-9_-]{43}$/.test(draft.token)) throw new SafeError("invalid_settings");
-    await this.receiver?.stop();
-    if (this.closing) return;
-    this.data.settings = { ...draft, server, enabled: false, verified: false, destination_id: "", destination_name: "" };
-    await this.persist(); this.connect();
+    return this.saveSettings({ ...draft, server, enabled: false, verified: false, destination_id: "", destination_name: "" });
   }
-  async setReceiving(enabled: boolean) {
+  setReceiving(enabled: boolean) {
     if (!this.data.settings.verified) throw new SafeError("invalid_settings");
-    await this.receiver?.stop();
-    if (this.closing) return;
-    this.data.settings.enabled = enabled;
-    await this.persist();
-    if (this.closing) return;
-    this.connect();
-    if (enabled) this.receiver?.start();
+    return this.saveSettings({ ...this.data.settings, enabled });
   }
 }
 
@@ -115,7 +129,8 @@ class ConnectorSettings extends PluginSettingTab {
     const plugin = this.plugin, s = plugin.data.settings;
     const draft = { ...s };
     const status = el.createEl("p", { attr: { role: "status" } });
-    status.setText(`Сервер: ${plugin.receiver?.status}. Назначение: ${s.destination_name || "не связано"} (${s.destination_id || "—"}). Приём: ${s.enabled ? "включён" : "выключен"}.`);
+    status.setText(`Сервер: ${plugin.receiver?.status}. Назначение: ${s.destination_name || "не связано"} (${s.destination_id || "—"}). Сохранённый приём: ${s.enabled ? "включён" : "выключен"}.`);
+    if (plugin.settingsError) el.createEl("p", { text: plugin.settingsError, attr: { role: "alert" } });
     el.createEl("p", { text: `Последний импорт: ${plugin.data.lastImport?.time ?? "ещё не было"}. Последняя ошибка: ${plugin.receiver?.error || plugin.data.journal[plugin.data.journal.length - 1]?.error || "нет"}.` });
     new Setting(el).setName("Адрес локального UniMem").addText(t => t.setValue(s.server).onChange(v => { draft.server = v; }));
     new Setting(el).setName("Credential получателя").setDesc("Отдельный receiver token. Пустое поле сохраняет прежний. Хранится в data.json без шифрования.")
@@ -126,7 +141,7 @@ class ConnectorSettings extends PluginSettingTab {
       .addButton(b => b.setButtonText("Сохранить").onClick(async () => {
         b.setDisabled(true);
         try { await plugin.configure(draft); this.display(); }
-        catch { status.setText("Не удалось сохранить конфигурацию. Проверьте адрес, credential и папку."); b.setDisabled(false); }
+        catch { status.setText(plugin.settingsError || "Не удалось сохранить конфигурацию. Проверьте адрес, credential и папку."); b.setDisabled(false); }
       }));
     new Setting(el).setName("Проверить подключение").setDesc("Использует сохранённые настройки. Не создаёт файлы.")
       .addButton(b => b.setButtonText("Проверить подключение").onClick(async () => {
@@ -134,7 +149,10 @@ class ConnectorSettings extends PluginSettingTab {
       }));
     new Setting(el).setName("Принимать материалы").setDesc("Требует сохранённой и проверенной конфигурации.")
       .addToggle(t => t.setValue(s.enabled).setDisabled(!s.verified).onChange(async enabled => {
-        await plugin.setReceiving(enabled); this.display();
+        t.setDisabled(true);
+        try { await plugin.setReceiving(enabled); }
+        catch { new Notice(plugin.settingsError || "Не удалось сохранить настройки приёма."); }
+        this.display();
       }));
     new Setting(el).setName("Получить сейчас").addButton(b => b.setButtonText("Получить сейчас").setDisabled(!s.enabled).onClick(async () => {
       b.setDisabled(true); await plugin.receiver?.poll(); this.display();
