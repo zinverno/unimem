@@ -174,7 +174,7 @@ source checker passed (27 shipped files); no credentials/absolute build paths.
 
 | Artifact | Version | SHA-256 |
 | --- | --- | --- |
-| `clients/browser-extension/dist/unimem-browser-0.6.0-dev.zip` | 0.6.0 | `193a8faea49ae0ae833af2964a6a47bcc40319a2af4be30cdb074e9bffac7607` |
+| `clients/browser-extension/dist/unimem-browser-0.6.0-dev.zip` | 0.6.0 | `a264c14f18718b6601c6e03dc040704cd2eed439cd6e57071c3689f58b8e81fd` |
 | `clients/obsidian-plugin/dist/unimem-connector/main.js` | 0.3.0 | `edc08970ec2ee68b2a105f3a2e611f39f135a31a411810cf7b4921c14bc96a27` |
 | `clients/obsidian-plugin/dist/unimem-connector/manifest.json` | 0.3.0 | `8d235945f9e104ee852c348ce46e0838174dafda2d8a3b84b1cd62563672bf7b` |
 

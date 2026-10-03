@@ -87,5 +87,8 @@
     "onnxruntime": "1.30.0",
     "numpy": "2.5.3"
   },
-  "cpu": "AMD Ryzen 5 5500U with Radeon Graphics"
+  "cpu": "AMD Ryzen 5 5500U with Radeon Graphics",
+  "native_browser_package_sha256": "193a8faea49ae0ae833af2964a6a47bcc40319a2af4be30cdb074e9bffac7607",
+  "handoff_browser_package_sha256": "a264c14f18718b6601c6e03dc040704cd2eed439cd6e57071c3689f58b8e81fd",
+  "package_difference": "One trailing blank line removed from shared file-jobs.js after native acceptance; runtime behavior unchanged."
 }

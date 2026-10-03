@@ -63,4 +63,3 @@ export function fileJobs({ local, client, key, maxBytes, select, validateJob, va
     remove(id) { return lock(async () => save((await list()).filter(j => j.operation_id !== id))); },
   };
 }
-
