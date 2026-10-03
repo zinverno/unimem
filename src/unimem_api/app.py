@@ -93,7 +93,7 @@ from unimem_api.models import (
 )
 from unimem_api.obsidian_http import install_obsidian_routes
 from unimem_api.obsidian_store import ObsidianStore
-from unimem_api.operations_http import install_operation_routes
+from unimem_api.operations_http import install_operation_errors, install_operation_routes
 from unimem_api.replay import resolve_completed_replay
 from unimem_api.security import ApiSecurity, LocalApiSecurity
 from unimem_youtube.operations import OperationStore
@@ -174,6 +174,7 @@ def create_app(
     )
     app.add_middleware(LocalApiSecurity, policy=security, receivers=obsidian)
     install_error_handlers(app)
+    install_operation_errors(app)
     if obsidian is not None:
         install_obsidian_routes(app, obsidian, record_store, content_store)
     if operations is not None:

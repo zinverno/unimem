@@ -40,6 +40,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+asr = [
+    "faster-whisper==1.2.1",
+    "ctranslate2==4.8.2",
+    "av==16.1.0",
+]
 youtube = [
     # The transport policy is verified against these exact endpoint semantics.
     "youtube-transcript-api==1.2.4",
@@ -110,7 +115,7 @@ dev = [
 # provides. A Python extra would suggest `pip` could supply that, which it cannot.
 # Leaving the package out would mean `--media` failed with "no such module" on a
 # machine that had FFmpeg installed and everything it needs. See ADR-023.
-packages = ["src/core", "src/unimem_api", "src/unimem_ocr", "src/unimem_media", "src/unimem_youtube"]
+packages = ["src/core", "src/unimem_api", "src/unimem_ocr", "src/unimem_media", "src/unimem_youtube", "src/unimem_asr", "src/unimem_delivery"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -206,3 +211,9 @@ ignore_missing_imports = true
 [tool.pydantic-mypy]
 init_typed = true
 warn_required_dynamic_aliases = true
+
+# Optional ASR native wheels are absent from the base installation. faster-whisper
+# and onnxruntime do not publish usable typing; keep this exception at their boundary.
+[[tool.mypy.overrides]]
+module = ["faster_whisper.*", "onnxruntime.*", "av.*", "numpy.*", "huggingface_hub.*"]
+ignore_missing_imports = true

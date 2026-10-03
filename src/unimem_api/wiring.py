@@ -92,9 +92,13 @@ from core.processing.media_probe import MediaProbe
 from core.processing.ocr import PdfPageOcr
 from core.storage import LocalRawObjectStore
 from unimem_api.app import create_app
+from unimem_api.audio_http import install_audio_routes
+from unimem_api.audio_operations import AudioOperationStore
+from unimem_api.audio_worker import AudioWorker
 from unimem_api.obsidian_store import ObsidianStore
 from unimem_api.security import ApiSecurity
 from unimem_api.worker import DeliveryWorker, ServerLease
+from unimem_asr.service import AudioCaptureService
 from unimem_youtube.operations import OperationStore
 from unimem_youtube.service import YoutubeCaptureService
 
@@ -178,6 +182,8 @@ def build_local_app(
     *,
     security: ApiSecurity,
     youtube: bool = False,
+    audio_model: Path | None = None,
+    audio_worker_command: tuple[str, ...] | None = None,
     worker_command: tuple[str, ...] | None = None,
     pdf_ocr: PdfPageOcr | None = None,
     image_ocr: ImageOcr | None = None,
@@ -256,6 +262,17 @@ def build_local_app(
     """
     if youtube:
         require_youtube()
+    if audio_model is not None:
+        from unimem_asr.model import require_engine, verify_model
+        from unimem_asr.policy import AsrError
+
+        try:
+            require_engine()
+            verify_model(audio_model)
+        except AsrError:
+            raise ValueError(
+                "Local ASR unavailable. Install .[asr] and explicitly prepare the model."
+            ) from None
     data_dir.mkdir(parents=True, exist_ok=True)
     database = data_dir / DATABASE_FILENAME
 
@@ -281,6 +298,7 @@ def build_local_app(
 
     operations = OperationStore(database) if youtube else None
     youtube_service = YoutubeCaptureService(data_dir) if youtube else None
+    audio_operations = AudioOperationStore(database) if audio_model is not None else None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -292,13 +310,24 @@ def build_local_app(
             )
             if worker:
                 worker.start()
+            audio_worker = (
+                AudioWorker(
+                    data_dir, audio_operations, lease.fd, audio_model, command=audio_worker_command
+                )
+                if audio_operations is not None and audio_model is not None
+                else None
+            )
+            if audio_worker:
+                audio_worker.start()
             try:
                 yield
             finally:
                 if worker:
                     await asyncio.to_thread(worker.stop)
+                if audio_worker:
+                    await asyncio.to_thread(audio_worker.stop)
 
-    return create_app(
+    app = create_app(
         intake=intake,
         orchestrator=orchestrator,
         record_store=record_store,
@@ -310,6 +339,9 @@ def build_local_app(
         youtube_service=youtube_service,
         obsidian=ObsidianStore(data_dir / "obsidian-delivery.sqlite3"),
     )
+    if audio_operations is not None:
+        install_audio_routes(app, audio_operations, AudioCaptureService(data_dir))
+    return app
 
 
 def require_youtube() -> None:
