@@ -2656,6 +2656,12 @@ reach the decision.
 
 ## Architectural invariants
 
+Explicit local audio transcription is composed outside core as described in
+[ADR-028](ADR/ADR-028-local-audio-transcription.md). It preserves structural
+`--media`, immutable originals and schema 0.3; model-produced TRANSCRIPT segments
+belong to one new AUDIO ContentObject. `unimem_delivery.operations` shares the
+existing B1 receipts between separate YouTube and audio tables/routes.
+
 1. `ContentObject` is the canonical normalized representation.
 2. Markdown is not a source of truth. Implemented in Phase 0D: the Markdown
    projection is lossy by design and nothing parses it back.
@@ -2729,6 +2735,9 @@ reach the decision.
     reaches the connector exactly as the source produced it. ADR-027 permits a
     separate Obsidian plugin import journal and destination-scoped delivery
     receipts; these track delivery only and never own capture lifecycle.
+    ADR-028 permits up to 50 audio operation references/observations, with the
+    transient upload bytes confined to the extension page and never persisted
+    in browser storage. Confirmed acceptance is the background-execution boundary.
 
 19. A processor asserts only what it observed or produced, and absence of
     interpretation is represented by absence rather than by placeholder content.

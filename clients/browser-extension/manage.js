@@ -2,6 +2,7 @@ import { getExtension } from "./lib/browser.js";
 import { settingsStore } from "./lib/settings.js";
 import { errorText, jobSummary, downloadMarkdown } from "./lib/presentation.js";
 import { deliveryStates } from "./lib/obsidian.js";
+import { mountAudioUi } from "./lib/audio-ui.js";
 const api = getExtension();
 const settings = settingsStore(api.storage);
 const $ = (id) => document.getElementById(id);
@@ -21,7 +22,7 @@ async function act(work) {
   finally { busy = false; renderButtons(); }
 }
 function renderButtons() {
-  document.querySelectorAll("button").forEach((b) => { b.disabled = busy; });
+  document.querySelectorAll("button").forEach((b) => { if (!b.closest("#audio-section")) b.disabled = busy; });
   $("jobs").disabled = busy;
   const job = rows.find((j) => j.operation_id === selected);
   $("send").disabled = busy || !job || job.accepted || job.delivery !== "not_sent";
@@ -145,6 +146,7 @@ function finishDownload(delta) {
   $("export-state").textContent = delta.state.current === "complete" ? "Файл сохранён." : errorText({ code: "download_failed" });
 }
 api.downloads.onChanged.addListener(finishDownload);
+mountAudioUi(api, settings);
 api.storage.onChanged.addListener((changes, area) => { if (area === "local" && changes.youtubeJobs) load().catch(() => notice(errorText({ code: "storage_or_internal_error" }), true)); });
 act(async () => {
   const initialError = location.hash.startsWith("#error-") ? location.hash.slice(7) : null;

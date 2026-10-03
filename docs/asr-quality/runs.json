@@ -1,0 +1,1076 @@
+[
+  {
+    "sample": "en-prose",
+    "candidate": "base",
+    "language": "en",
+    "raw_segments": [
+      {
+        "text": " Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel.",
+        "start": 0.18,
+        "end": 5.52
+      }
+    ],
+    "network_attempts": 0,
+    "imports_seconds": 0.09047178400214761,
+    "verification_seconds": 0.0965291780012194,
+    "decode_seconds": 0.007542562991147861,
+    "model_load_seconds": 0.3757118729990907,
+    "pcm": {
+      "samples": 93680,
+      "rate": 16000,
+      "channels": 1,
+      "duration": 5.855,
+      "peak": 0.387939453125,
+      "rms": 0.0619380809366703,
+      "clipped_samples": 0,
+      "exact_original": true,
+      "sha256": "22d472b40f913206b6917115d136306be88df3b278e77f68be5910423250fa4d"
+    },
+    "transcript": {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration": 5.855,
+      "selected_language": "en",
+      "detected_language": "en",
+      "language_probability": 0.9979009628295898,
+      "outcome": "transcribed",
+      "segments": [
+        {
+          "text": "Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel.",
+          "start": 0.18,
+          "end": 5.52
+        }
+      ],
+      "model_sha256": {
+        "config.json": "56a6d8110d311f19c8f0471e562832c7527f146b567275bfca59fcf7c184da9a",
+        "model.bin": "d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9",
+        "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+        "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      },
+      "versions": {
+        "faster-whisper": "1.2.1",
+        "ctranslate2": "4.8.2",
+        "av": "16.1.0",
+        "onnxruntime": "1.30.0",
+        "numpy": "2.5.3"
+      },
+      "elapsed_seconds": 2.70945642402512,
+      "peak_rss_bytes": 375373824
+    },
+    "status": "ok",
+    "recognition_seconds": 2.2169663259992376,
+    "total_seconds": 2.8189831739873625,
+    "peak_rss_bytes": 375373824,
+    "process_seconds": 3.0936938819941133,
+    "monitored_peak_rss_bytes": 365830144,
+    "returncode": 0,
+    "killed": null,
+    "hypothesis": "Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel.",
+    "score": {
+      "N": 17,
+      "S": 1,
+      "D": 0,
+      "I": 0,
+      "WER": 0.058823529411764705
+    }
+  },
+  {
+    "sample": "ru-literary",
+    "candidate": "base",
+    "language": "ru",
+    "raw_segments": [
+      {
+        "text": " Для вас тушимая царицы, красавицы, для вас одних, времен минувших не полиции в часы досугов золотых подшоп от старинной болтливой рукой верно я писал.",
+        "start": 0.0,
+        "end": 11.0
+      }
+    ],
+    "network_attempts": 0,
+    "imports_seconds": 0.6091597820050083,
+    "verification_seconds": 1.0689128719968721,
+    "decode_seconds": 0.011851616989588365,
+    "model_load_seconds": 0.5443236220162362,
+    "pcm": {
+      "samples": 181600,
+      "rate": 16000,
+      "channels": 1,
+      "duration": 11.35,
+      "peak": 0.42401123046875,
+      "rms": 0.03926096484065056,
+      "clipped_samples": 0,
+      "exact_original": true,
+      "sha256": "e907bc4b4a1b53ec4326e62c861760a92204d760cd60e48d8b28e588bacc3f56"
+    },
+    "transcript": {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration": 11.35,
+      "selected_language": "ru",
+      "detected_language": "ru",
+      "language_probability": 0.9580099582672119,
+      "outcome": "transcribed",
+      "segments": [
+        {
+          "text": "Для вас тушимая царицы, красавицы, для вас одних, времен минувших не полиции в часы досугов золотых подшоп от старинной болтливой рукой верно я писал.",
+          "start": 0.0,
+          "end": 11.0
+        }
+      ],
+      "model_sha256": {
+        "config.json": "56a6d8110d311f19c8f0471e562832c7527f146b567275bfca59fcf7c184da9a",
+        "model.bin": "d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9",
+        "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+        "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      },
+      "versions": {
+        "faster-whisper": "1.2.1",
+        "ctranslate2": "4.8.2",
+        "av": "16.1.0",
+        "onnxruntime": "1.30.0",
+        "numpy": "2.5.3"
+      },
+      "elapsed_seconds": 4.461630717996741,
+      "peak_rss_bytes": 379666432
+    },
+    "status": "ok",
+    "recognition_seconds": 2.7832579470123164,
+    "total_seconds": 5.0861795830132905,
+    "peak_rss_bytes": 379666432,
+    "process_seconds": 5.37102471999242,
+    "monitored_peak_rss_bytes": 375545856,
+    "returncode": 0,
+    "killed": null,
+    "hypothesis": "Для вас тушимая царицы, красавицы, для вас одних, времен минувших не полиции в часы досугов золотых подшоп от старинной болтливой рукой верно я писал.",
+    "score": {
+      "N": 24,
+      "S": 7,
+      "D": 1,
+      "I": 1,
+      "WER": 0.375
+    }
+  },
+  {
+    "sample": "ru-name",
+    "candidate": "base",
+    "language": "ru",
+    "raw_segments": [
+      {
+        "text": " Солю позвоню Владимиру Петровичу.",
+        "start": 0.0,
+        "end": 2.0
+      }
+    ],
+    "network_attempts": 0,
+    "imports_seconds": 0.10433143601403572,
+    "verification_seconds": 0.6605513269896619,
+    "decode_seconds": 0.006435830990085378,
+    "model_load_seconds": 0.6063229040009901,
+    "pcm": {
+      "samples": 36714,
+      "rate": 16000,
+      "channels": 1,
+      "duration": 2.294625,
+      "peak": 0.01324462890625,
+      "rms": 0.002148390980437398,
+      "clipped_samples": 0,
+      "exact_original": true,
+      "sha256": "d62e96d25136e81db2df32974885714f0b07978e1d867d7a69f971fc8f3dbb95"
+    },
+    "transcript": {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration": 2.294625,
+      "selected_language": "ru",
+      "detected_language": "ru",
+      "language_probability": 0.9449001550674438,
+      "outcome": "transcribed",
+      "segments": [
+        {
+          "text": "Солю позвоню Владимиру Петровичу.",
+          "start": 0.0,
+          "end": 2.0
+        }
+      ],
+      "model_sha256": {
+        "config.json": "56a6d8110d311f19c8f0471e562832c7527f146b567275bfca59fcf7c184da9a",
+        "model.bin": "d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9",
+        "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+        "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      },
+      "versions": {
+        "faster-whisper": "1.2.1",
+        "ctranslate2": "4.8.2",
+        "av": "16.1.0",
+        "onnxruntime": "1.30.0",
+        "numpy": "2.5.3"
+      },
+      "elapsed_seconds": 3.318059032986639,
+      "peak_rss_bytes": 374333440
+    },
+    "status": "ok",
+    "recognition_seconds": 2.0318338889919687,
+    "total_seconds": 3.4347981070168316,
+    "peak_rss_bytes": 374333440,
+    "process_seconds": 3.67148631598684,
+    "monitored_peak_rss_bytes": 360660992,
+    "returncode": 0,
+    "killed": null,
+    "hypothesis": "Солю позвоню Владимиру Петровичу.",
+    "score": {
+      "N": 4,
+      "S": 2,
+      "D": 0,
+      "I": 0,
+      "WER": 0.5
+    }
+  },
+  {
+    "sample": "ru-negation",
+    "candidate": "base",
+    "language": "auto",
+    "raw_segments": [
+      {
+        "text": " Афина, я не хочу, чтобы сегодня звонил Гудвинник.",
+        "start": 0.0,
+        "end": 3.6
+      }
+    ],
+    "network_attempts": 0,
+    "imports_seconds": 0.12028803199063987,
+    "verification_seconds": 0.7012095730169676,
+    "decode_seconds": 0.0072732469998300076,
+    "model_load_seconds": 0.3458542180014774,
+    "pcm": {
+      "samples": 59004,
+      "rate": 16000,
+      "channels": 1,
+      "duration": 3.68775,
+      "peak": 0.020233154296875,
+      "rms": 0.002332021715119481,
+      "clipped_samples": 0,
+      "exact_original": true,
+      "sha256": "193a8c871000e1d85f67590b1cdf12a9602fe7e2acdaf9e103b4840cae1464f5"
+    },
+    "transcript": {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration": 3.68775,
+      "selected_language": "auto",
+      "detected_language": "ru",
+      "language_probability": 0.9575470089912415,
+      "outcome": "transcribed",
+      "segments": [
+        {
+          "text": "Афина, я не хочу, чтобы сегодня звонил Гудвинник.",
+          "start": 0.0,
+          "end": 3.6
+        }
+      ],
+      "model_sha256": {
+        "config.json": "56a6d8110d311f19c8f0471e562832c7527f146b567275bfca59fcf7c184da9a",
+        "model.bin": "d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9",
+        "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+        "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      },
+      "versions": {
+        "faster-whisper": "1.2.1",
+        "ctranslate2": "4.8.2",
+        "av": "16.1.0",
+        "onnxruntime": "1.30.0",
+        "numpy": "2.5.3"
+      },
+      "elapsed_seconds": 3.0642484049894847,
+      "peak_rss_bytes": 374710272
+    },
+    "status": "ok",
+    "recognition_seconds": 1.9986356319859624,
+    "total_seconds": 3.1980395169812255,
+    "peak_rss_bytes": 374710272,
+    "process_seconds": 3.4474821490002796,
+    "monitored_peak_rss_bytes": 375132160,
+    "returncode": 0,
+    "killed": null,
+    "hypothesis": "Афина, я не хочу, чтобы сегодня звонил Гудвинник.",
+    "score": {
+      "N": 8,
+      "S": 1,
+      "D": 0,
+      "I": 0,
+      "WER": 0.125
+    }
+  },
+  {
+    "sample": "ru-negation",
+    "candidate": "base",
+    "language": "ru",
+    "raw_segments": [
+      {
+        "text": " Афина, я не хочу, чтобы сегодня звонил Гудвинник.",
+        "start": 0.0,
+        "end": 3.6
+      }
+    ],
+    "network_attempts": 0,
+    "imports_seconds": 0.09604603500338271,
+    "verification_seconds": 0.09736727498238906,
+    "decode_seconds": 0.007523948006564751,
+    "model_load_seconds": 0.44751051199273206,
+    "pcm": {
+      "samples": 59004,
+      "rate": 16000,
+      "channels": 1,
+      "duration": 3.68775,
+      "peak": 0.020233154296875,
+      "rms": 0.002332021715119481,
+      "clipped_samples": 0,
+      "exact_original": true,
+      "sha256": "193a8c871000e1d85f67590b1cdf12a9602fe7e2acdaf9e103b4840cae1464f5"
+    },
+    "transcript": {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration": 3.68775,
+      "selected_language": "ru",
+      "detected_language": "ru",
+      "language_probability": 0.9575470089912415,
+      "outcome": "transcribed",
+      "segments": [
+        {
+          "text": "Афина, я не хочу, чтобы сегодня звонил Гудвинник.",
+          "start": 0.0,
+          "end": 3.6
+        }
+      ],
+      "model_sha256": {
+        "config.json": "56a6d8110d311f19c8f0471e562832c7527f146b567275bfca59fcf7c184da9a",
+        "model.bin": "d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9",
+        "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+        "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      },
+      "versions": {
+        "faster-whisper": "1.2.1",
+        "ctranslate2": "4.8.2",
+        "av": "16.1.0",
+        "onnxruntime": "1.30.0",
+        "numpy": "2.5.3"
+      },
+      "elapsed_seconds": 2.736607330996776,
+      "peak_rss_bytes": 374833152
+    },
+    "status": "ok",
+    "recognition_seconds": 2.1709998690057546,
+    "total_seconds": 2.8459254059998784,
+    "peak_rss_bytes": 374833152,
+    "process_seconds": 3.0933137869869824,
+    "monitored_peak_rss_bytes": 372445184,
+    "returncode": 0,
+    "killed": null,
+    "hypothesis": "Афина, я не хочу, чтобы сегодня звонил Гудвинник.",
+    "score": {
+      "N": 8,
+      "S": 1,
+      "D": 0,
+      "I": 0,
+      "WER": 0.125
+    }
+  },
+  {
+    "sample": "ru-transfer",
+    "candidate": "base",
+    "language": "ru",
+    "raw_segments": [
+      {
+        "text": " Сбир, привет! Передим они тысяч рублей!",
+        "start": 0.0,
+        "end": 3.0
+      }
+    ],
+    "network_attempts": 0,
+    "imports_seconds": 0.09904828798607923,
+    "verification_seconds": 0.09891679097199813,
+    "decode_seconds": 0.006615817022975534,
+    "model_load_seconds": 0.37508841397357173,
+    "pcm": {
+      "samples": 49691,
+      "rate": 16000,
+      "channels": 1,
+      "duration": 3.1056875,
+      "peak": 0.020355224609375,
+      "rms": 0.0025624395348131657,
+      "clipped_samples": 0,
+      "exact_original": true,
+      "sha256": "98d14ec207f456034c0154d181a9569229b3ff72994f4989761132f1afd8b575"
+    },
+    "transcript": {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration": 3.1056875,
+      "selected_language": "ru",
+      "detected_language": "ru",
+      "language_probability": 0.8535754084587097,
+      "outcome": "transcribed",
+      "segments": [
+        {
+          "text": "Сбир, привет! Передим они тысяч рублей!",
+          "start": 0.0,
+          "end": 3.0
+        }
+      ],
+      "model_sha256": {
+        "config.json": "56a6d8110d311f19c8f0471e562832c7527f146b567275bfca59fcf7c184da9a",
+        "model.bin": "d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9",
+        "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+        "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      },
+      "versions": {
+        "faster-whisper": "1.2.1",
+        "ctranslate2": "4.8.2",
+        "av": "16.1.0",
+        "onnxruntime": "1.30.0",
+        "numpy": "2.5.3"
+      },
+      "elapsed_seconds": 2.6152901489986107,
+      "peak_rss_bytes": 374693888
+    },
+    "status": "ok",
+    "recognition_seconds": 2.121421834017383,
+    "total_seconds": 2.726545501005603,
+    "peak_rss_bytes": 374693888,
+    "process_seconds": 2.993609227007255,
+    "monitored_peak_rss_bytes": 372420608,
+    "returncode": 0,
+    "killed": null,
+    "hypothesis": "Сбир, привет! Передим они тысяч рублей!",
+    "score": {
+      "N": 6,
+      "S": 4,
+      "D": 0,
+      "I": 0,
+      "WER": 0.6666666666666666
+    }
+  },
+  {
+    "sample": "silence",
+    "candidate": "base",
+    "language": "ru",
+    "raw_segments": [],
+    "network_attempts": 0,
+    "imports_seconds": 0.09776351999607868,
+    "verification_seconds": 0.09874763499828987,
+    "decode_seconds": 0.007761805987684056,
+    "model_load_seconds": 0.4006953079951927,
+    "pcm": {
+      "samples": 80000,
+      "rate": 16000,
+      "channels": 1,
+      "duration": 5.0,
+      "peak": 0.0,
+      "rms": 0.0,
+      "clipped_samples": 0,
+      "exact_original": true,
+      "sha256": "ac2878215ad33205d1732578c89f25ededaad1b676911c540825bcf4baa42d9b"
+    },
+    "transcript": {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration": 5.0,
+      "selected_language": "ru",
+      "detected_language": null,
+      "language_probability": null,
+      "outcome": "no_speech",
+      "segments": [],
+      "model_sha256": {
+        "config.json": "56a6d8110d311f19c8f0471e562832c7527f146b567275bfca59fcf7c184da9a",
+        "model.bin": "d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9",
+        "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+        "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      },
+      "versions": {
+        "faster-whisper": "1.2.1",
+        "ctranslate2": "4.8.2",
+        "av": "16.1.0",
+        "onnxruntime": "1.30.0",
+        "numpy": "2.5.3"
+      },
+      "elapsed_seconds": 0.5484245699772146,
+      "peak_rss_bytes": 375226368
+    },
+    "status": "ok",
+    "recognition_seconds": 0.027228867984376848,
+    "total_seconds": 0.6575883220066316,
+    "peak_rss_bytes": 375226368,
+    "process_seconds": 0.9121637390053365,
+    "monitored_peak_rss_bytes": 356126720,
+    "returncode": 0,
+    "killed": null,
+    "hypothesis": "",
+    "score": {
+      "N": 0,
+      "S": 0,
+      "D": 0,
+      "I": 0,
+      "WER": null
+    }
+  },
+  {
+    "sample": "en-prose",
+    "candidate": "small",
+    "language": "en",
+    "raw_segments": [
+      {
+        "text": " Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel.",
+        "start": 0.18,
+        "end": 5.46
+      }
+    ],
+    "network_attempts": 0,
+    "imports_seconds": 0.09479965499485843,
+    "verification_seconds": 0.3227001740015112,
+    "decode_seconds": 0.007888211024692282,
+    "model_load_seconds": 1.0171762380050495,
+    "pcm": {
+      "samples": 93680,
+      "rate": 16000,
+      "channels": 1,
+      "duration": 5.855,
+      "peak": 0.387939453125,
+      "rms": 0.0619380809366703,
+      "clipped_samples": 0,
+      "exact_original": true,
+      "sha256": "22d472b40f913206b6917115d136306be88df3b278e77f68be5910423250fa4d"
+    },
+    "transcript": {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration": 5.855,
+      "selected_language": "en",
+      "detected_language": "en",
+      "language_probability": 0.9955743551254272,
+      "outcome": "transcribed",
+      "segments": [
+        {
+          "text": "Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel.",
+          "start": 0.18,
+          "end": 5.46
+        }
+      ],
+      "model_sha256": {
+        "config.json": "b55496ac7940a7ae47d2c01eab40edfd8701feec1229d9cce3b40014383fb828",
+        "model.bin": "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671",
+        "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+        "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      },
+      "versions": {
+        "faster-whisper": "1.2.1",
+        "ctranslate2": "4.8.2",
+        "av": "16.1.0",
+        "onnxruntime": "1.30.0",
+        "numpy": "2.5.3"
+      },
+      "elapsed_seconds": 7.964162856980693,
+      "peak_rss_bytes": 677593088
+    },
+    "status": "ok",
+    "recognition_seconds": 6.614152891997946,
+    "total_seconds": 8.080666260008002,
+    "peak_rss_bytes": 677593088,
+    "process_seconds": 8.364209833991481,
+    "monitored_peak_rss_bytes": 674643968,
+    "returncode": 0,
+    "killed": null,
+    "hypothesis": "Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel.",
+    "score": {
+      "N": 17,
+      "S": 1,
+      "D": 0,
+      "I": 0,
+      "WER": 0.058823529411764705
+    }
+  },
+  {
+    "sample": "ru-literary",
+    "candidate": "small",
+    "language": "ru",
+    "raw_segments": [
+      {
+        "text": " Для вас, туши моей царицы, красавицы, для вас одних,",
+        "start": 0.0,
+        "end": 3.94
+      },
+      {
+        "text": " времен минувших небылицы, в часы до сугов золотых подшепот",
+        "start": 3.94,
+        "end": 8.08
+      },
+      {
+        "text": " старинный болтливый рукой верно я писал.",
+        "start": 8.08,
+        "end": 10.96
+      }
+    ],
+    "network_attempts": 0,
+    "imports_seconds": 0.09710478800116107,
+    "verification_seconds": 1.1469653740059584,
+    "decode_seconds": 0.01005668001016602,
+    "model_load_seconds": 1.55262322400813,
+    "pcm": {
+      "samples": 181600,
+      "rate": 16000,
+      "channels": 1,
+      "duration": 11.35,
+      "peak": 0.42401123046875,
+      "rms": 0.03926096484065056,
+      "clipped_samples": 0,
+      "exact_original": true,
+      "sha256": "e907bc4b4a1b53ec4326e62c861760a92204d760cd60e48d8b28e588bacc3f56"
+    },
+    "transcript": {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration": 11.35,
+      "selected_language": "ru",
+      "detected_language": "ru",
+      "language_probability": 0.9920694828033447,
+      "outcome": "transcribed",
+      "segments": [
+        {
+          "text": "Для вас, туши моей царицы, красавицы, для вас одних,",
+          "start": 0.0,
+          "end": 3.94
+        },
+        {
+          "text": "времен минувших небылицы, в часы до сугов золотых подшепот",
+          "start": 3.94,
+          "end": 8.08
+        },
+        {
+          "text": "старинный болтливый рукой верно я писал.",
+          "start": 8.08,
+          "end": 10.96
+        }
+      ],
+      "model_sha256": {
+        "config.json": "b55496ac7940a7ae47d2c01eab40edfd8701feec1229d9cce3b40014383fb828",
+        "model.bin": "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671",
+        "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+        "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      },
+      "versions": {
+        "faster-whisper": "1.2.1",
+        "ctranslate2": "4.8.2",
+        "av": "16.1.0",
+        "onnxruntime": "1.30.0",
+        "numpy": "2.5.3"
+      },
+      "elapsed_seconds": 10.805560168984812,
+      "peak_rss_bytes": 678137856
+    },
+    "status": "ok",
+    "recognition_seconds": 8.09077430400066,
+    "total_seconds": 10.922037028009072,
+    "peak_rss_bytes": 678137856,
+    "process_seconds": 11.206972638028674,
+    "monitored_peak_rss_bytes": 674082816,
+    "returncode": 0,
+    "killed": null,
+    "hypothesis": "Для вас, туши моей царицы, красавицы, для вас одних, времен минувших небылицы, в часы до сугов золотых подшепот старинный болтливый рукой верно я писал.",
+    "score": {
+      "N": 24,
+      "S": 9,
+      "D": 0,
+      "I": 0,
+      "WER": 0.375
+    }
+  },
+  {
+    "sample": "ru-name",
+    "candidate": "small",
+    "language": "ru",
+    "raw_segments": [
+      {
+        "text": " Салют позвони Владимиру Петровичу.",
+        "start": 0.0,
+        "end": 2.0
+      }
+    ],
+    "network_attempts": 0,
+    "imports_seconds": 0.12674365600105375,
+    "verification_seconds": 0.5694264549820218,
+    "decode_seconds": 0.007246006018249318,
+    "model_load_seconds": 1.2143665380135644,
+    "pcm": {
+      "samples": 36714,
+      "rate": 16000,
+      "channels": 1,
+      "duration": 2.294625,
+      "peak": 0.01324462890625,
+      "rms": 0.002148390980437398,
+      "clipped_samples": 0,
+      "exact_original": true,
+      "sha256": "d62e96d25136e81db2df32974885714f0b07978e1d867d7a69f971fc8f3dbb95"
+    },
+    "transcript": {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration": 2.294625,
+      "selected_language": "ru",
+      "detected_language": "ru",
+      "language_probability": 0.982962429523468,
+      "outcome": "transcribed",
+      "segments": [
+        {
+          "text": "Салют позвони Владимиру Петровичу.",
+          "start": 0.0,
+          "end": 2.0
+        }
+      ],
+      "model_sha256": {
+        "config.json": "b55496ac7940a7ae47d2c01eab40edfd8701feec1229d9cce3b40014383fb828",
+        "model.bin": "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671",
+        "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+        "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      },
+      "versions": {
+        "faster-whisper": "1.2.1",
+        "ctranslate2": "4.8.2",
+        "av": "16.1.0",
+        "onnxruntime": "1.30.0",
+        "numpy": "2.5.3"
+      },
+      "elapsed_seconds": 7.890093750000233,
+      "peak_rss_bytes": 676712448
+    },
+    "status": "ok",
+    "recognition_seconds": 6.09851909201825,
+    "total_seconds": 8.040988316002768,
+    "peak_rss_bytes": 676712448,
+    "process_seconds": 8.331056068011094,
+    "monitored_peak_rss_bytes": 658583552,
+    "returncode": 0,
+    "killed": null,
+    "hypothesis": "Салют позвони Владимиру Петровичу.",
+    "score": {
+      "N": 4,
+      "S": 0,
+      "D": 0,
+      "I": 0,
+      "WER": 0.0
+    }
+  },
+  {
+    "sample": "ru-negation",
+    "candidate": "small",
+    "language": "auto",
+    "raw_segments": [
+      {
+        "text": " Афина, я не хочу, чтобы сегодня звонил будильник.",
+        "start": 0.0,
+        "end": 3.6
+      }
+    ],
+    "network_attempts": 0,
+    "imports_seconds": 0.14549555000849068,
+    "verification_seconds": 0.7429749989823904,
+    "decode_seconds": 0.007189459021901712,
+    "model_load_seconds": 1.026207778020762,
+    "pcm": {
+      "samples": 59004,
+      "rate": 16000,
+      "channels": 1,
+      "duration": 3.68775,
+      "peak": 0.020233154296875,
+      "rms": 0.002332021715119481,
+      "clipped_samples": 0,
+      "exact_original": true,
+      "sha256": "193a8c871000e1d85f67590b1cdf12a9602fe7e2acdaf9e103b4840cae1464f5"
+    },
+    "transcript": {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration": 3.68775,
+      "selected_language": "auto",
+      "detected_language": "ru",
+      "language_probability": 0.9509735703468323,
+      "outcome": "transcribed",
+      "segments": [
+        {
+          "text": "Афина, я не хочу, чтобы сегодня звонил будильник.",
+          "start": 0.0,
+          "end": 3.6
+        }
+      ],
+      "model_sha256": {
+        "config.json": "b55496ac7940a7ae47d2c01eab40edfd8701feec1229d9cce3b40014383fb828",
+        "model.bin": "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671",
+        "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+        "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      },
+      "versions": {
+        "faster-whisper": "1.2.1",
+        "ctranslate2": "4.8.2",
+        "av": "16.1.0",
+        "onnxruntime": "1.30.0",
+        "numpy": "2.5.3"
+      },
+      "elapsed_seconds": 7.825718236010289,
+      "peak_rss_bytes": 676589568
+    },
+    "status": "ok",
+    "recognition_seconds": 6.041508780006552,
+    "total_seconds": 7.994932710018475,
+    "peak_rss_bytes": 676589568,
+    "process_seconds": 8.263569053000538,
+    "monitored_peak_rss_bytes": 674942976,
+    "returncode": 0,
+    "killed": null,
+    "hypothesis": "Афина, я не хочу, чтобы сегодня звонил будильник.",
+    "score": {
+      "N": 8,
+      "S": 0,
+      "D": 0,
+      "I": 0,
+      "WER": 0.0
+    }
+  },
+  {
+    "sample": "ru-negation",
+    "candidate": "small",
+    "language": "ru",
+    "raw_segments": [
+      {
+        "text": " Афина, я не хочу, чтобы сегодня звонил будильник.",
+        "start": 0.0,
+        "end": 3.6
+      }
+    ],
+    "network_attempts": 0,
+    "imports_seconds": 0.11627475699060597,
+    "verification_seconds": 1.1401046800019685,
+    "decode_seconds": 0.007511033007176593,
+    "model_load_seconds": 1.1579028809792362,
+    "pcm": {
+      "samples": 59004,
+      "rate": 16000,
+      "channels": 1,
+      "duration": 3.68775,
+      "peak": 0.020233154296875,
+      "rms": 0.002332021715119481,
+      "clipped_samples": 0,
+      "exact_original": true,
+      "sha256": "193a8c871000e1d85f67590b1cdf12a9602fe7e2acdaf9e103b4840cae1464f5"
+    },
+    "transcript": {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration": 3.68775,
+      "selected_language": "ru",
+      "detected_language": "ru",
+      "language_probability": 0.9509735703468323,
+      "outcome": "transcribed",
+      "segments": [
+        {
+          "text": "Афина, я не хочу, чтобы сегодня звонил будильник.",
+          "start": 0.0,
+          "end": 3.6
+        }
+      ],
+      "model_sha256": {
+        "config.json": "b55496ac7940a7ae47d2c01eab40edfd8701feec1229d9cce3b40014383fb828",
+        "model.bin": "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671",
+        "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+        "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      },
+      "versions": {
+        "faster-whisper": "1.2.1",
+        "ctranslate2": "4.8.2",
+        "av": "16.1.0",
+        "onnxruntime": "1.30.0",
+        "numpy": "2.5.3"
+      },
+      "elapsed_seconds": 8.677071815996896,
+      "peak_rss_bytes": 677011456
+    },
+    "status": "ok",
+    "recognition_seconds": 6.367990750004537,
+    "total_seconds": 8.815422977990238,
+    "peak_rss_bytes": 677011456,
+    "process_seconds": 9.097623119974742,
+    "monitored_peak_rss_bytes": 675700736,
+    "returncode": 0,
+    "killed": null,
+    "hypothesis": "Афина, я не хочу, чтобы сегодня звонил будильник.",
+    "score": {
+      "N": 8,
+      "S": 0,
+      "D": 0,
+      "I": 0,
+      "WER": 0.0
+    }
+  },
+  {
+    "sample": "ru-transfer",
+    "candidate": "small",
+    "language": "ru",
+    "raw_segments": [
+      {
+        "text": " Збир, привет! Перейди, Маня, тысячу рублей.",
+        "start": 0.0,
+        "end": 3.0
+      }
+    ],
+    "network_attempts": 0,
+    "imports_seconds": 0.10328962898347527,
+    "verification_seconds": 0.32192365001537837,
+    "decode_seconds": 0.0067077169951517135,
+    "model_load_seconds": 0.9592400779947639,
+    "pcm": {
+      "samples": 49691,
+      "rate": 16000,
+      "channels": 1,
+      "duration": 3.1056875,
+      "peak": 0.020355224609375,
+      "rms": 0.0025624395348131657,
+      "clipped_samples": 0,
+      "exact_original": true,
+      "sha256": "98d14ec207f456034c0154d181a9569229b3ff72994f4989761132f1afd8b575"
+    },
+    "transcript": {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration": 3.1056875,
+      "selected_language": "ru",
+      "detected_language": "ru",
+      "language_probability": 0.885819673538208,
+      "outcome": "transcribed",
+      "segments": [
+        {
+          "text": "Збир, привет! Перейди, Маня, тысячу рублей.",
+          "start": 0.0,
+          "end": 3.0
+        }
+      ],
+      "model_sha256": {
+        "config.json": "b55496ac7940a7ae47d2c01eab40edfd8701feec1229d9cce3b40014383fb828",
+        "model.bin": "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671",
+        "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+        "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      },
+      "versions": {
+        "faster-whisper": "1.2.1",
+        "ctranslate2": "4.8.2",
+        "av": "16.1.0",
+        "onnxruntime": "1.30.0",
+        "numpy": "2.5.3"
+      },
+      "elapsed_seconds": 7.799029424000764,
+      "peak_rss_bytes": 677318656
+    },
+    "status": "ok",
+    "recognition_seconds": 6.503405922005186,
+    "total_seconds": 7.920110603998182,
+    "peak_rss_bytes": 677318656,
+    "process_seconds": 8.212173692998476,
+    "monitored_peak_rss_bytes": 664023040,
+    "returncode": 0,
+    "killed": null,
+    "hypothesis": "Збир, привет! Перейди, Маня, тысячу рублей.",
+    "score": {
+      "N": 6,
+      "S": 3,
+      "D": 0,
+      "I": 0,
+      "WER": 0.5
+    }
+  },
+  {
+    "sample": "silence",
+    "candidate": "small",
+    "language": "ru",
+    "raw_segments": [],
+    "network_attempts": 0,
+    "imports_seconds": 0.1270082349947188,
+    "verification_seconds": 0.32072061600047164,
+    "decode_seconds": 0.0074477810121607035,
+    "model_load_seconds": 0.9659295930177905,
+    "pcm": {
+      "samples": 80000,
+      "rate": 16000,
+      "channels": 1,
+      "duration": 5.0,
+      "peak": 0.0,
+      "rms": 0.0,
+      "clipped_samples": 0,
+      "exact_original": true,
+      "sha256": "ac2878215ad33205d1732578c89f25ededaad1b676911c540825bcf4baa42d9b"
+    },
+    "transcript": {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate": 16000,
+      "channels": 1,
+      "duration": 5.0,
+      "selected_language": "ru",
+      "detected_language": null,
+      "language_probability": null,
+      "outcome": "no_speech",
+      "segments": [],
+      "model_sha256": {
+        "config.json": "b55496ac7940a7ae47d2c01eab40edfd8701feec1229d9cce3b40014383fb828",
+        "model.bin": "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671",
+        "tokenizer.json": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab",
+        "vocabulary.txt": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      },
+      "versions": {
+        "faster-whisper": "1.2.1",
+        "ctranslate2": "4.8.2",
+        "av": "16.1.0",
+        "onnxruntime": "1.30.0",
+        "numpy": "2.5.3"
+      },
+      "elapsed_seconds": 1.3361435609986074,
+      "peak_rss_bytes": 676687872
+    },
+    "status": "ok",
+    "recognition_seconds": 0.029017838009167463,
+    "total_seconds": 1.4755521379993297,
+    "peak_rss_bytes": 676687872,
+    "process_seconds": 1.7471226490160916,
+    "monitored_peak_rss_bytes": 669233152,
+    "returncode": 0,
+    "killed": null,
+    "hypothesis": "",
+    "score": {
+      "N": 0,
+      "S": 0,
+      "D": 0,
+      "I": 0,
+      "WER": null
+    }
+  }
+]

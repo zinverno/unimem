@@ -30,8 +30,8 @@ export function errorText(error) {
 export function jobSummary(job) {
   return job.observed ? STATES[job.observed.state] : job.delivery === "not_sent" ? "Не отправлено" : "Приём не подтверждён";
 }
-export async function downloadMarkdown(api, markdown, operationId, urls = URL) {
-  const filename = `youtube-${operationId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 128)}.md`;
+export async function downloadMarkdown(api, markdown, operationId, urls = URL, source = "youtube") {
+  const filename = `${source === "audio" ? "audio" : "youtube"}-${operationId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 128)}.md`;
   const url = urls.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
   try {
     const id = await api.downloads.download({ url, filename, saveAs: true, conflictAction: "uniquify" });

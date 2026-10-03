@@ -18,6 +18,8 @@ from unimem_api.obsidian_contract import (
 )
 from unimem_api.obsidian_store import ObsidianStore, suggested_filename
 from unimem_api.security import refusal
+from unimem_asr.export import AudioMarkdownRenderer
+from unimem_asr.policy import AsrError
 from unimem_youtube.errors import ExportError
 from unimem_youtube.export import CaptionMarkdownRenderer
 
@@ -68,13 +70,15 @@ def install_obsidian_routes(
             raise DeliveryError("result_not_ready")
         content = contents.get_for_capture(request.source_capture_id)
         renderer = (
-            CaptionMarkdownRenderer()
+            AudioMarkdownRenderer()
+            if "audio_transcription" in content.metadata
+            else CaptionMarkdownRenderer()
             if "youtube_captions" in content.metadata
             else MarkdownRenderer()
         )
         try:
             markdown = renderer.render(content)
-        except ExportError:
+        except (ExportError, AsrError):
             raise DeliveryError("markdown_unavailable") from None
         delivery, created = store.register(
             request.destination_id,

@@ -34,9 +34,7 @@ def operation_view(op: YoutubeOperation) -> dict[str, object]:
     }
 
 
-def install_operation_routes(
-    app: FastAPI, store: OperationStore, service: YoutubeCaptureService
-) -> None:
+def install_operation_errors(app: FastAPI) -> None:
     @app.exception_handler(OperationError)
     async def operation_error(request: object, exc: OperationError) -> Response:
         code = exc.code
@@ -49,6 +47,10 @@ def install_operation_routes(
         }.get(code, 503)
         return refusal(status, code)
 
+
+def install_operation_routes(
+    app: FastAPI, store: OperationStore, service: YoutubeCaptureService
+) -> None:
     @app.exception_handler(AcquisitionError)
     async def input_error(request: object, exc: AcquisitionError) -> Response:
         return refusal(422, exc.code)

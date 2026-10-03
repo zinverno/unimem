@@ -84,6 +84,8 @@ from core.persistence import (
 )
 from core.processing import ProcessingOrchestrator
 from core.storage import RawObjectStore, build_raw_ref, resolve_digest
+from unimem_api.audio_http import install_audio_routes
+from unimem_api.audio_operations import AudioOperationStore
 from unimem_api.errors import install_error_handlers
 from unimem_api.models import (
     CaptureAcceptedResponse,
@@ -93,9 +95,10 @@ from unimem_api.models import (
 )
 from unimem_api.obsidian_http import install_obsidian_routes
 from unimem_api.obsidian_store import ObsidianStore
-from unimem_api.operations_http import install_operation_routes
+from unimem_api.operations_http import install_operation_errors, install_operation_routes
 from unimem_api.replay import resolve_completed_replay
 from unimem_api.security import ApiSecurity, LocalApiSecurity
+from unimem_asr.service import AudioCaptureService
 from unimem_youtube.operations import OperationStore
 from unimem_youtube.service import YoutubeCaptureService
 
@@ -146,6 +149,9 @@ def create_app(
     operations: OperationStore | None = None,
     youtube_service: YoutubeCaptureService | None = None,
     obsidian: ObsidianStore | None = None,
+    audio_operations: AudioOperationStore | None = None,
+    audio_service: AudioCaptureService | None = None,
+    audio_enabled: bool = False,
 ) -> FastAPI:
     """Build the API over five already-constructed core services.
 
@@ -174,6 +180,11 @@ def create_app(
     )
     app.add_middleware(LocalApiSecurity, policy=security, receivers=obsidian)
     install_error_handlers(app)
+    install_operation_errors(app)
+    if audio_operations is not None:
+        if audio_service is None:
+            raise ValueError("Audio operations require the capture service.")
+        install_audio_routes(app, audio_operations, audio_service, enabled=audio_enabled)
     if obsidian is not None:
         install_obsidian_routes(app, obsidian, record_store, content_store)
     if operations is not None:
