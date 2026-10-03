@@ -33,6 +33,6 @@ test('credential refusal and offline do not report success',async()=>{
 test('missing vision remains explicit; no acquisition',async()=>{
   const s=server({yt:true}); const result=await checkConnection(s.http);
   assert.equal(result.youtube,true); assert.equal(result.image.description.ready,false);
-  assert(connectionLines(result).join(' ').includes('vision_profile_missing'));
+  assert(connectionLines(result).join(' ').includes('файлы модели отсутствуют'));
   assert(s.calls.every(([p])=>!p.includes('/uploads')));
 });

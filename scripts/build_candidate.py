@@ -46,7 +46,7 @@ def main() -> None:
         )
         with tarfile.open(tar) as stream:
             stream.extractall(source, filter="data")
-        run("uv", "build", "--wheel", "--out-dir", str(output), cwd=source)
+        run("uv", "build", "--wheel", "--no-create-gitignore", "--out-dir", str(output), cwd=source)
         for component in ("browser-extension", "obsidian-plugin"):
             run("npm", "ci", "--prefix", f"clients/{component}", cwd=source)
             run("npm", "run", "build", "--prefix", f"clients/{component}", cwd=source)

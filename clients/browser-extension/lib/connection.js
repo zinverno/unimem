@@ -1,3 +1,4 @@
+import { errorText } from "./presentation.js";
 import { API_ORIGIN } from "./api.js";
 import { ClientError, jsonBody, httpError } from "./transport.js";
 import { obsidianClient } from "./obsidian.js";
@@ -37,7 +38,7 @@ export function connectionLines(s) {
     `Сервис: ${s.server ? "доступен" : "не подтверждён"}. Browser credential: ${s.token ? "принят" : "не подтверждён"}.`,
     ...(s.token ? [`Текст и страница: доступны. YouTube captions: ${ready(s.youtube)}.`] : []),
     ...(s.image ? [`PNG/JPEG: ${s.image.original ? "готово" : "нет декодера Pillow; установите extra images"}. OCR: ${ready(s.image.ocr)}.`,
-      `Описание изображений (Qwen3-VL): ${s.image.description.ready ? "готово" : s.image.description.code}.`] : []),
+      `Описание изображений (Qwen3-VL): ${s.image.description.ready ? "готово" : errorText(s.image.description)}.`] : []),
     ...(s.video ? [`Аудио (ASR base): ${ready(s.video.asr)}. MP4: ${ready(s.video.ready)}. Описание выбранных кадров: ${ready(s.video.vision)}.`] : []),
     `Назначения Obsidian: ${s.destinations.length ? s.destinations.map(d => d.display_name).join(", ") : "нет подтверждённых; unimem destination создаёт первое"}.`,
     "Выберите назначение у результата. Папку задаёт Connector; импорт начинается после явной отправки.",
