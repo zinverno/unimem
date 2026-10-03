@@ -2738,6 +2738,8 @@ existing B1 receipts between separate YouTube and audio tables/routes.
     ADR-028 permits up to 50 audio operation references/observations, with the
     transient upload bytes confined to the extension page and never persisted
     in browser storage. Confirmed acceptance is the background-execution boundary.
+    ADR-029 applies the same bound to image operation references, and adds a
+    two-file import journal for an explicitly permitted PNG/JPEG attachment.
 
 19. A processor asserts only what it observed or produced, and absence of
     interpretation is represented by absence rather than by placeholder content.
@@ -2959,6 +2961,22 @@ complements derived, so adding a version is a deliberate reviewed act and cannot
 silently reinterpret an older one.
 
 
+## Explicit image operations and required attachments
+
+[ADR-029](ADR/ADR-029-image-attachment-delivery.md) adds an explicit original/OCR
+operation using the established intake, raw store, router and processors. Each
+composition has exactly one image processor. Legacy `/v1/captures` retains its
+deployment-wide choice. Optional `unimem_images` validates decode in a bounded
+child; neither core nor API imports Pillow. Read/render/delivery use persisted
+results and never invoke recognition.
+
+Delivery v2 fixes one image manifest and one `image-markdown/1.0` snapshot before
+acceptance. Binary access is destination/delivery/asset scoped; the strict v1
+queue and ACK remain separate. Connector opt-in is off on settings migration.
+A two-file journal precedes create-only Vault API writes, and package ACK follows
+verification of both. Partial writes are recoverable or explicitly ambiguous;
+they are not an atomic transaction. Imported files belong to the user.
+
 ## Recoverable Zen/Linux browser delivery (B2/B3)
 
 [ADR-026](ADR/ADR-026-recoverable-browser-delivery.md) adds a shared Gecko event
@@ -2993,3 +3011,21 @@ disabled. Settings changes require saving and read-only verification before
 reenabling reception. Physical symlink/race limits and the lack of a distributed
 exactly-once transaction are explicit in the ADR. Setup, routes and measured
 native/automated evidence: [OBSIDIAN_DELIVERY.md](OBSIDIAN_DELIVERY.md).
+
+## Explicit local video notes and v3 selected-frame delivery
+
+[ADR-031](ADR/ADR-031-local-video-notes.md) composes the established raw/intake/
+canonical/operation owners in `unimem_video`. The structural core VideoProcessor
+stays unchanged. Pinned PyAV validates and sequentially decodes controlled streams
+outside core, preserving a common PTS origin for speech and sampled frames.
+One operation creates one VIDEO object; derivatives carry source/transform evidence.
+The parent worker owns the shared ASR/vision slot across sequential finite stages.
+No read, preview or delivery repeats decode or inference.
+
+Strict v1/v2 remain unchanged. v3 extends the existing delivery store and Connector
+with an ordered, digest-bound manifest of 1–3 required PNGs, a separate permission
+and a bounded-list journal migration. Create-only, rollback, lease/settings/unload
+fences, ambiguity and user ownership after import remain the same. The original
+MP4 remains in UniMem. [Operator guide](LOCAL_VIDEO.md) and
+[measured evidence](VIDEO_VERIFICATION_2026-10-03.md) distinguish limited static-frame
+description from understanding events across a video.

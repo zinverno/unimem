@@ -66,7 +66,9 @@ class DurableOperationStore[RequestT: OperationRequest]:
         *,
         request_type: type[RequestT],
         operation_type: type[Operation[RequestT]],
-        table: Literal["youtube_operations", "audio_operations"],
+        table: Literal[
+            "youtube_operations", "audio_operations", "image_operations", "video_operations"
+        ],
         capacity: int = 32,
         history_limit: int = 10_000,
     ) -> None:

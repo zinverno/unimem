@@ -5,7 +5,7 @@ import itertools
 import resource
 from pathlib import Path
 from time import monotonic
-from typing import BinaryIO, Literal
+from typing import Any, BinaryIO, Literal
 
 from unimem_asr.input import inspect_input
 from unimem_asr.model import require_engine, verify_model
@@ -32,14 +32,9 @@ def transcribe(
 ) -> Transcript:
     started = monotonic()
     require_engine()
-    hashes = verify_model(model_dir)
+    verify_model(model_dir)
     import av
     import numpy as np
-    import onnxruntime
-
-    onnxruntime.disable_telemetry_events()
-    from faster_whisper import WhisperModel
-    from faster_whisper.vad import VadOptions, get_speech_timestamps
 
     container_name, _, _ = inspect_input(stream, declared)
     try:
@@ -89,6 +84,43 @@ def transcribe(
             audio = np.concatenate(chunks).astype(np.float32) / 32768.0
     except (av.error.FFmpegError, OSError, ValueError):
         raise AsrError("decode_failed") from None
+    return transcribe_pcm(
+        audio,
+        language,
+        model_dir,
+        container=container_name,
+        codec=codec,
+        sample_rate=rate,
+        channels=channels,
+        duration=samples / 16000,
+        started=started,
+    )
+
+
+def transcribe_pcm(
+    audio: Any,
+    language: Literal["auto", "ru", "en"],
+    model_dir: Path,
+    *,
+    container: Literal["wav", "mp3", "ogg", "mp4"],
+    codec: str,
+    sample_rate: int,
+    channels: int,
+    duration: float,
+    started: float | None = None,
+) -> Transcript:
+    """Recognize bounded mono 16 kHz PCM; the caller owns source/timeline decoding."""
+    started = monotonic() if started is None else started
+    require_engine()
+    hashes = verify_model(model_dir)
+    import onnxruntime
+
+    onnxruntime.disable_telemetry_events()
+    from faster_whisper import WhisperModel
+    from faster_whisper.vad import VadOptions, get_speech_timestamps
+
+    if not 0 < duration <= MAX_SECONDS:
+        raise AsrError("duration_limit")
     try:
         model = WhisperModel(
             str(model_dir),
@@ -125,16 +157,23 @@ def transcribe(
             if len(cues) >= MAX_SEGMENTS or size > MAX_TEXT_BYTES:
                 raise AsrError("output_limit")
             try:
-                cues.append(Cue(text=segment.text.strip(), start=segment.start, end=segment.end))
+                cues.append(
+                    Cue(
+                        text=segment.text.strip(),
+                        raw_text=segment.text,
+                        start=segment.start,
+                        end=segment.end,
+                    )
+                )
             except ValueError:
                 raise AsrError("invalid_result") from None
     try:
         return Transcript(
-            container=container_name,
+            container=container,
             codec=codec,
-            sample_rate=rate,
+            sample_rate=sample_rate,
             channels=channels,
-            duration=samples / 16000,
+            duration=duration,
             selected_language=language,
             detected_language=detected,
             language_probability=probability,

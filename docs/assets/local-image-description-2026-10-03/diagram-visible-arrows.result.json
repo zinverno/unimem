@@ -1,0 +1,35 @@
+{
+  "answer": {
+    "status": "described",
+    "description": "Схема процесса: блоки \"Источник\", \"Проверка\", \"Архив\" со стрелками, указывающими на последовательность. Все блоки имеют текст на русском языке. Блоки расположены в ряд, соединённые стрелками, указывающими на направление потока. Все элементы четко видны и различимы."
+  },
+  "raw_response": "{\n  \"status\": \"described\",\n  \"description\": \"Схема процесса: блоки \\\"Источник\\\", \\\"Проверка\\\", \\\"Архив\\\" со стрелками, указывающими на последовательность. Все блоки имеют текст на русском языке. Блоки расположены в ряд, соединённые стрелками, указывающими на направление потока. Все элементы четко видны и различимы.\"\n}",
+  "preprocessing": {
+    "version": "oriented-fit-white/1",
+    "pillow_version": "12.3.0",
+    "source_sha256": "097d95a4c2ef6249419c3af13d4677b00bc689e43eaada8bb56f24cead9f53ab",
+    "encoded_width": 768,
+    "encoded_height": 512,
+    "oriented_width": 768,
+    "oriented_height": 512,
+    "orientation_applied": false,
+    "width": 627,
+    "height": 418,
+    "scale": 0.816496580927726,
+    "cropped": false,
+    "sha256": "48f84362f7d7d3141a143b4c58732d98f975dc697294532d24d03a2d98b82489",
+    "warning": "Reduced input; small text and fine details may be lost."
+  },
+  "metrics": {
+    "generation_seconds": 8.22008,
+    "decoded_tokens": 109,
+    "profile_verification_seconds": 2.1322698940057307,
+    "preprocessing_seconds": 0.044852572988020256,
+    "model_ready_seconds": 6.15343955901335,
+    "vision_encoding_seconds": 8.299,
+    "runtime_seconds": 35.901350038999226,
+    "total_seconds": 38.0784729970037,
+    "peak_process_tree_rss": 2333114368,
+    "completion": "ended_before_token_limit"
+  }
+}

@@ -1,0 +1,207 @@
+{
+  "markdown": "# Видео — речь и выбранные кадры\n\nИсточник: локальный MP4.\nCapture ID: `47abeb45-bf97-4acf-89a3-ffb3ff977392`\nContent ID: `1501434e-67a0-4072-ae00-7002353c50f0`\nOperation ID: `042fd0ee-1d28-4a00-9a39-444588ea8d90`\nOriginal SHA-256: `c8a26e158e884448a20cc1917e65cc752dd8f48972b615c0edc01534ac4e4b65`\n\nОригинальное видео осталось в UniMem. Obsidian получает заметку и выбранные PNG.\n\n## Выполненная обработка\n\n```text\n{\n  \"request\": {\n    \"operation_id\": \"042fd0ee-1d28-4a00-9a39-444588ea8d90\",\n    \"file_ref\": \"sha256:c8a26e158e884448a20cc1917e65cc752dd8f48972b615c0edc01534ac4e4b65\",\n    \"declared_mime\": \"video/mp4\",\n    \"speech\": true,\n    \"language\": \"auto\",\n    \"frames\": true,\n    \"describe\": false,\n    \"captured_at\": \"2026-10-03T14:11:58.048000Z\",\n    \"decoder\": \"mp4-h264-aac/1\",\n    \"sampling\": \"quarters-first-pts/1\",\n    \"asr_profile\": \"faster-whisper-base-int8/1\",\n    \"vision_profile\": null\n  },\n  \"speech_outcome\": \"no_audio_track\",\n  \"frames_outcome\": \"extracted\",\n  \"vision_outcome\": \"not_requested\",\n  \"audio\": null,\n  \"stage_seconds\": {\n    \"extracting\": 0.3734741079970263\n  }\n}\n```\n\nВыборка: ¼, ½ и ¾ длительности; первый кадр с PTS не раньше позиции, без дублей. Это не выбор самых важных кадров.\nОбщая шкала: исходные PTS минус 0 с; длительность 3.0 с.\nМетки речи переведены из PCM на эту же шкалу с сохранённым смещением аудио.\n\n## Расшифровка\n\nНет аудиодорожки; ASR не запускался.\n## Выбранные кадры\n\n### Кадр: 0.8 с\n\n![Кадр в 0.8 с](./unimem-5dc83d443c4d63d24e17700da196c854595dacb9494ce35f9a62fa091f95c4da.png)\n\nПроизводный PNG; исходное видео не изменялось.\n```text\n{\n  \"requested_seconds\": 0.75,\n  \"presentation_seconds\": 0.8,\n  \"pts\": 8192,\n  \"time_base\": \"1/10240\",\n  \"stream_index\": 0,\n  \"encoded_width\": 768,\n  \"encoded_height\": 432,\n  \"width\": 768,\n  \"height\": 432,\n  \"rotation_degrees\": 0,\n  \"transform\": \"fit-1024-rgb24-bilinear/1\",\n  \"cropped\": false,\n  \"sha256\": \"782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6\",\n  \"size_bytes\": 8411,\n  \"source_asset_id\": \"5bfc041c-f450-4e6b-920c-1201226a31d7\",\n  \"source_sha256\": \"c8a26e158e884448a20cc1917e65cc752dd8f48972b615c0edc01534ac4e4b65\"\n}\n```\n### Кадр: 1.5 с\n\n![Кадр в 1.5 с](./unimem-2c2e335c3757f05f159c21f5594b3bf25c05d1a681ba10d8752f6470bad4d9b0.png)\n\nПроизводный PNG; исходное видео не изменялось.\n```text\n{\n  \"requested_seconds\": 1.5,\n  \"presentation_seconds\": 1.5,\n  \"pts\": 15360,\n  \"time_base\": \"1/10240\",\n  \"stream_index\": 0,\n  \"encoded_width\": 768,\n  \"encoded_height\": 432,\n  \"width\": 768,\n  \"height\": 432,\n  \"rotation_degrees\": 0,\n  \"transform\": \"fit-1024-rgb24-bilinear/1\",\n  \"cropped\": false,\n  \"sha256\": \"782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6\",\n  \"size_bytes\": 8411,\n  \"source_asset_id\": \"5bfc041c-f450-4e6b-920c-1201226a31d7\",\n  \"source_sha256\": \"c8a26e158e884448a20cc1917e65cc752dd8f48972b615c0edc01534ac4e4b65\"\n}\n```\n### Кадр: 2.3 с\n\n![Кадр в 2.3 с](./unimem-88c9fbea0aa5f22596cbc4019320c6f798adf110a020739f48a890278f67e42b.png)\n\nПроизводный PNG; исходное видео не изменялось.\n```text\n{\n  \"requested_seconds\": 2.25,\n  \"presentation_seconds\": 2.3,\n  \"pts\": 23552,\n  \"time_base\": \"1/10240\",\n  \"stream_index\": 0,\n  \"encoded_width\": 768,\n  \"encoded_height\": 432,\n  \"width\": 768,\n  \"height\": 432,\n  \"rotation_degrees\": 0,\n  \"transform\": \"fit-1024-rgb24-bilinear/1\",\n  \"cropped\": false,\n  \"sha256\": \"782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6\",\n  \"size_bytes\": 8411,\n  \"source_asset_id\": \"5bfc041c-f450-4e6b-920c-1201226a31d7\",\n  \"source_sha256\": \"c8a26e158e884448a20cc1917e65cc752dd8f48972b615c0edc01534ac4e4b65\"\n}\n```\n\nВизуальная выборка ограничена показанными статичными кадрами. Она не описывает все события ролика, движение между кадрами, скрытые действия или их причины. Машинные описания могут выдумывать и пропускать детали. ASR и vision приведены отдельно и не исправляют друг друга.\n",
+  "markdown_bytes": 4561,
+  "attachments": [
+    {
+      "asset_id": "df60fd56-fe14-4314-9037-a564e8457af4",
+      "mime_type": "image/png",
+      "size_bytes": 8411,
+      "sha256": "782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6",
+      "relative_name": "unimem-5dc83d443c4d63d24e17700da196c854595dacb9494ce35f9a62fa091f95c4da.png",
+      "width": 768,
+      "height": 432
+    },
+    {
+      "asset_id": "d96bf5d0-04bb-4097-af1b-c47b637c7e0b",
+      "mime_type": "image/png",
+      "size_bytes": 8411,
+      "sha256": "782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6",
+      "relative_name": "unimem-2c2e335c3757f05f159c21f5594b3bf25c05d1a681ba10d8752f6470bad4d9b0.png",
+      "width": 768,
+      "height": 432
+    },
+    {
+      "asset_id": "323a791c-d806-4049-bab9-b735ba86a57f",
+      "mime_type": "image/png",
+      "size_bytes": 8411,
+      "sha256": "782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6",
+      "relative_name": "unimem-88c9fbea0aa5f22596cbc4019320c6f798adf110a020739f48a890278f67e42b.png",
+      "width": 768,
+      "height": 432
+    }
+  ],
+  "delivery_version": "3",
+  "content": {
+    "schema_version": "0.3",
+    "id": "1501434e-67a0-4072-ae00-7002353c50f0",
+    "type": "video",
+    "source": {
+      "capture_id": "47abeb45-bf97-4acf-89a3-ffb3ff977392",
+      "provider": "local-video",
+      "url": null
+    },
+    "original": {
+      "asset_id": "5bfc041c-f450-4e6b-920c-1201226a31d7",
+      "mime_type": "video/mp4",
+      "sha256": "c8a26e158e884448a20cc1917e65cc752dd8f48972b615c0edc01534ac4e4b65"
+    },
+    "title": "Видео — речь и выбранные кадры",
+    "metadata": {
+      "video_notes": {
+        "decoder": "mp4-h264-aac/1",
+        "sampling": "quarters-first-pts/1",
+        "container": "mp4",
+        "codec": "h264",
+        "origin_seconds": 0.0,
+        "origin_rational": "0",
+        "duration_seconds": 3.0,
+        "video_stream_index": 0,
+        "video_start_seconds": 0.0,
+        "packets": 31,
+        "video_frames": 30,
+        "decoded_pixels": 9953280,
+        "av_version": "16.1.0",
+        "ffmpeg_versions": {
+          "libavutil": "60.8.100",
+          "libavcodec": "62.11.100",
+          "libavformat": "62.3.100",
+          "libavdevice": "62.1.100",
+          "libavfilter": "11.4.100",
+          "libswscale": "9.1.100",
+          "libswresample": "6.1.100"
+        },
+        "decode_seconds": 0.10579752098419704,
+        "operation_id": "042fd0ee-1d28-4a00-9a39-444588ea8d90",
+        "request": {
+          "operation_id": "042fd0ee-1d28-4a00-9a39-444588ea8d90",
+          "file_ref": "sha256:c8a26e158e884448a20cc1917e65cc752dd8f48972b615c0edc01534ac4e4b65",
+          "declared_mime": "video/mp4",
+          "speech": true,
+          "language": "auto",
+          "frames": true,
+          "describe": false,
+          "captured_at": "2026-10-03T14:11:58.048000Z",
+          "decoder": "mp4-h264-aac/1",
+          "sampling": "quarters-first-pts/1",
+          "asr_profile": "faster-whisper-base-int8/1",
+          "vision_profile": null
+        },
+        "audio": null,
+        "speech_outcome": "no_audio_track",
+        "frames_outcome": "extracted",
+        "vision_outcome": "not_requested",
+        "transcript": null,
+        "stage_seconds": {
+          "extracting": 0.3734741079970263
+        },
+        "total_seconds": 0.3753769189934246,
+        "peak_worker_rss_bytes": 92815360,
+        "peak_child_rss_bytes": 0
+      }
+    },
+    "segments": [],
+    "assets": [
+      {
+        "id": "5bfc041c-f450-4e6b-920c-1201226a31d7",
+        "role": "original",
+        "mime_type": "video/mp4",
+        "ref": "sha256:c8a26e158e884448a20cc1917e65cc752dd8f48972b615c0edc01534ac4e4b65",
+        "sha256": "c8a26e158e884448a20cc1917e65cc752dd8f48972b615c0edc01534ac4e4b65",
+        "metadata": {}
+      },
+      {
+        "id": "df60fd56-fe14-4314-9037-a564e8457af4",
+        "role": "keyframe",
+        "mime_type": "image/png",
+        "ref": "sha256:782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6",
+        "sha256": "782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6",
+        "metadata": {
+          "requested_seconds": 0.75,
+          "presentation_seconds": 0.8,
+          "pts": 8192,
+          "time_base": "1/10240",
+          "stream_index": 0,
+          "encoded_width": 768,
+          "encoded_height": 432,
+          "width": 768,
+          "height": 432,
+          "rotation_degrees": 0,
+          "transform": "fit-1024-rgb24-bilinear/1",
+          "cropped": false,
+          "sha256": "782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6",
+          "size_bytes": 8411,
+          "source_asset_id": "5bfc041c-f450-4e6b-920c-1201226a31d7",
+          "source_sha256": "c8a26e158e884448a20cc1917e65cc752dd8f48972b615c0edc01534ac4e4b65"
+        }
+      },
+      {
+        "id": "d96bf5d0-04bb-4097-af1b-c47b637c7e0b",
+        "role": "keyframe",
+        "mime_type": "image/png",
+        "ref": "sha256:782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6",
+        "sha256": "782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6",
+        "metadata": {
+          "requested_seconds": 1.5,
+          "presentation_seconds": 1.5,
+          "pts": 15360,
+          "time_base": "1/10240",
+          "stream_index": 0,
+          "encoded_width": 768,
+          "encoded_height": 432,
+          "width": 768,
+          "height": 432,
+          "rotation_degrees": 0,
+          "transform": "fit-1024-rgb24-bilinear/1",
+          "cropped": false,
+          "sha256": "782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6",
+          "size_bytes": 8411,
+          "source_asset_id": "5bfc041c-f450-4e6b-920c-1201226a31d7",
+          "source_sha256": "c8a26e158e884448a20cc1917e65cc752dd8f48972b615c0edc01534ac4e4b65"
+        }
+      },
+      {
+        "id": "323a791c-d806-4049-bab9-b735ba86a57f",
+        "role": "keyframe",
+        "mime_type": "image/png",
+        "ref": "sha256:782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6",
+        "sha256": "782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6",
+        "metadata": {
+          "requested_seconds": 2.25,
+          "presentation_seconds": 2.3,
+          "pts": 23552,
+          "time_base": "1/10240",
+          "stream_index": 0,
+          "encoded_width": 768,
+          "encoded_height": 432,
+          "width": 768,
+          "height": 432,
+          "rotation_degrees": 0,
+          "transform": "fit-1024-rgb24-bilinear/1",
+          "cropped": false,
+          "sha256": "782717a0afe425cf2907ba3168263492a0daae45918e79c6515e3de2d5d66fa6",
+          "size_bytes": 8411,
+          "source_asset_id": "5bfc041c-f450-4e6b-920c-1201226a31d7",
+          "source_sha256": "c8a26e158e884448a20cc1917e65cc752dd8f48972b615c0edc01534ac4e4b65"
+        }
+      }
+    ],
+    "derived": {
+      "summary": null,
+      "topics": [],
+      "entities": []
+    },
+    "processing": [
+      {
+        "processor": "local-video-notes",
+        "processor_version": "1",
+        "started_at": "2026-10-03T14:12:01.812740Z",
+        "completed_at": "2026-10-03T14:12:02.188145Z",
+        "status": "complete",
+        "warnings": [
+          "Sampled still images do not describe all events. ASR and vision may contain errors."
+        ],
+        "errors": []
+      }
+    ]
+  }
+}

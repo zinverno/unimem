@@ -1,5 +1,5 @@
 import { request } from "node:http";
-import { SafeError, MAX_BYTES } from "./contract";
+import { SafeError, MAX_BYTES, MAX_IMAGE_BYTES } from "./contract";
 
 export function serverAddress(value: string): string {
   try {
@@ -14,7 +14,8 @@ export function receiverClient(base: string, token: string) {
   const origin = serverAddress(base);
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new SafeError("invalid_settings");
   return (path: string, body?: object, signal?: AbortSignal): Promise<unknown> => {
-    if (!/^\/v1\/receiver\/(destination|deliveries\/(next|[0-9a-f-]{36}(?:\/(claim|ack|fail))?))$/.test(path)) {
+    const binary = /^\/v[23]\/receiver\/deliveries\/[0-9a-f-]{36}\/assets\/[A-Za-z0-9_-]{1,128}$/.test(path);
+    if (!binary && !/^\/v[123]\/receiver\/(destination|capabilities|deliveries\/(next|[0-9a-f-]{36}(?:\/(claim|ack|fail))?))$/.test(path)) {
       return Promise.reject(new SafeError("invalid_request"));
     }
     return new Promise((resolve, reject) => {
@@ -24,12 +25,19 @@ export function receiverClient(base: string, token: string) {
         res.on("data", (chunk: Buffer) => {
           size += chunk.length;
           // JSON escaping can expand each UTF-8 byte up to six bytes.
-          if (size > MAX_BYTES * 6 + 8192) { req.destroy(); reject(new SafeError("response_too_large")); }
+          if (size > (binary ? MAX_IMAGE_BYTES : MAX_BYTES * 6 + 16384)) { req.destroy(); reject(new SafeError("response_too_large")); }
           else chunks.push(chunk);
         });
         res.on("error", () => reject(new SafeError("unavailable")));
         res.on("end", () => {
           clearTimeout(timer);
+          if (binary && res.statusCode === 200) {
+            if (!["image/png", "image/jpeg"].includes(res.headers["content-type"] ?? "") ||
+                (res.headers["content-length"] !== undefined && Number(res.headers["content-length"]) !== size)) {
+              reject(new SafeError("invalid_response")); return;
+            }
+            resolve(new Uint8Array(Buffer.concat(chunks))); return;
+          }
           let json: unknown;
           try { json = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))); }
           catch { reject(new SafeError("invalid_response")); return; }
@@ -41,7 +49,7 @@ export function receiverClient(base: string, token: string) {
           } else resolve(json);
         });
       });
-      const timer = setTimeout(() => { req.destroy(); reject(new SafeError("timeout")); }, 15000);
+      const timer = setTimeout(() => { req.destroy(); reject(new SafeError("timeout")); }, binary ? 30000 : 15000);
       req.on("error", () => { clearTimeout(timer); reject(new SafeError(signal?.aborted ? "stopped" : "unavailable")); });
       req.end(body ? JSON.stringify(body) : undefined);
     });

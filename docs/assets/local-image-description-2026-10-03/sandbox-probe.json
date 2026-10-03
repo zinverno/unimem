@@ -1,0 +1,12 @@
+{
+  "host_canary_visible": false,
+  "home_visible": false,
+  "interfaces": [
+    [
+      1,
+      "lo"
+    ]
+  ],
+  "tmp_marker_created": 22,
+  "host_marker_absent": true
+}

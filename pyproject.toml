@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "capture-core"
-version = "0.1.0"
+version = "0.3.0"
 description = "Capture core plus the local HTTP capture surface for the multimodal capture and ingestion layer."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -40,6 +40,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Decode validation for image operations; independent of Tesseract/PDF OCR.
+images = ["Pillow>=11.0"]
+video = ["av==16.1.0", "Pillow>=11.0"]
 asr = [
     "faster-whisper==1.2.1",
     "ctranslate2==4.8.2",
@@ -66,6 +69,8 @@ youtube = [
 # `unimem_ocr.tesseract`. A machine with a system Tesseract and no extra
 # installed runs image OCR perfectly well, and a CI job proves it by doing
 # exactly that. See ADR-020.
+# The new explicit browser image operations additionally use [images] for
+# bounded decode validation. This does not change the older /v1/captures path.
 #
 # Tesseract itself is NOT here and cannot be. It is a system executable with its
 # own language data files, installed by the machine's package manager; see the
@@ -115,7 +120,7 @@ dev = [
 # provides. A Python extra would suggest `pip` could supply that, which it cannot.
 # Leaving the package out would mean `--media` failed with "no such module" on a
 # machine that had FFmpeg installed and everything it needs. See ADR-023.
-packages = ["src/core", "src/unimem_api", "src/unimem_ocr", "src/unimem_media", "src/unimem_youtube", "src/unimem_asr", "src/unimem_delivery"]
+packages = ["src/core", "src/unimem_api", "src/unimem_ocr", "src/unimem_media", "src/unimem_youtube", "src/unimem_asr", "src/unimem_delivery", "src/unimem_images", "src/unimem_vision", "src/unimem_video"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

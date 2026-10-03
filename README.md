@@ -22,6 +22,26 @@ Markdown export and existing Connector delivery read it without a model.
 See [setup and finite limits](docs/LOCAL_AUDIO.md) and
 [real-engine/native evidence and quality limitations](docs/AUDIO_VERIFICATION_2026-10-03.md).
 
+**Local PNG/JPEG:** the Zen management page accepts one file or drop, previews it,
+and offers original-only saving or existing local Tesseract OCR. Explicit Send
+delivers one note and its unchanged, offline image to the standalone Connector.
+See [installation, consent and limits](docs/IMAGE_DELIVERY.md),
+[versioned attachment protocol](docs/ADR/ADR-029-image-attachment-delivery.md), and
+[separate automated, real OCR and native evidence](docs/IMAGE_VERIFICATION_2026-10-03.md).
+
+**Local image description:** a third explicit image mode runs one prepared
+Qwen3-VL-2B CPU profile offline. It persists a labelled `VISUAL`/`VISION` result and
+uses existing delivery v2 with the same original attachment. No OCR substitution,
+model download on startup, or inference during reads/Send. See
+[preparation, quality limits and evidence](docs/local-image-description.md) and
+[ADR-030](docs/ADR/ADR-030-local-image-description.md).
+
+Local MP4 notes on Linux: explicit speech transcription, up to three uniformly
+sampled still frames and optional descriptions, then one note with PNGs through
+the existing standalone Connector. This does not interpret the entire video.
+See [setup and limits](docs/LOCAL_VIDEO.md), [ADR-031](docs/ADR/ADR-031-local-video-notes.md)
+and [separate automated/model/native evidence](docs/VIDEO_VERIFICATION_2026-10-03.md).
+
 Implemented so far:
 
 - **Phase 0A — domain contracts.** The stable domain language:
@@ -1260,8 +1280,9 @@ rasterizer, an imaging library, or `subprocess`. `python-multipart` is what
 FastAPI parses the upload's `multipart/form-data` body with. Persistence uses the
 standard library's `sqlite3`.
 
-Optional dependencies: the `[ocr]` extra adds **pypdfium2** (page rasterization)
-and **Pillow** (PNG encoding), used only by `src/unimem_ocr/` and imported only
+Optional dependencies: `[images]` adds **Pillow** for bounded PNG/JPEG decode
+validation in `unimem_images`; it needs no OCR engine. The `[ocr]` extra adds **pypdfium2** (page rasterization)
+and **Pillow** (PNG encoding), used by `src/unimem_ocr/` and imported only
 when a deployment actually asks for recognition. `unimem_ocr` depends on `core`
 and never the other way round; `core` does not know its name, and `unimem_api`
 imports it in exactly one place — `unimem_api.__main__`, inside the function that

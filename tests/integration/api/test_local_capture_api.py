@@ -34,8 +34,12 @@ from tests.unit.api.builders import AWKWARD_TEXT, CAPTURE_ID, CAPTURED_AT, TITLE
 from tests.unit.api.conftest import served_paths
 from unimem_api import DATABASE_FILENAME, RAW_DIRNAME, build_local_app, create_app
 from unimem_api.audio_operations import AudioOperationStore
+from unimem_api.image_operations import ImageOperationStore
+from unimem_api.image_service import ImageCaptureService
 from unimem_api.obsidian_store import ObsidianStore
 from unimem_asr.service import AudioCaptureService
+from unimem_video.operations import VideoOperationStore
+from unimem_video.service import VideoCaptureService
 
 
 def table_names(database: Path) -> set[str]:
@@ -380,6 +384,10 @@ def test_create_app_and_build_local_app_serve_the_same_routes(data_dir: Path) ->
         obsidian=ObsidianStore(data_dir / "obsidian-delivery.sqlite3"),
         audio_operations=AudioOperationStore(database),
         audio_service=AudioCaptureService(data_dir),
+        image_operations=ImageOperationStore(database),
+        image_service=ImageCaptureService(data_dir),
+        video_operations=VideoOperationStore(database),
+        video_service=VideoCaptureService(data_dir),
     )
 
     composed = build_local_app(data_dir, security=TEST_SECURITY)

@@ -1,0 +1,2 @@
+# Preserve the exact CLI response bytes, including its terminal blank lines.
+docs/assets/local-image-description-2026-10-03/*.stdout -text whitespace=-blank-at-eof

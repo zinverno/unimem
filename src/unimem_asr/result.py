@@ -10,13 +10,14 @@ from unimem_asr.policy import MAX_SECONDS, MAX_SEGMENTS, MAX_TEXT_BYTES
 class Cue(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
     text: str = Field(min_length=1, max_length=100_000)
+    raw_text: str | None = Field(default=None, max_length=100_000)
     start: float = Field(ge=0)
     end: float = Field(ge=0)
 
 
 class Transcript(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
-    container: Literal["wav", "mp3", "ogg"]
+    container: Literal["wav", "mp3", "ogg", "mp4"]
     codec: str
     sample_rate: int = Field(ge=8000, le=48000)
     channels: int = Field(ge=1, le=2)
@@ -41,6 +42,7 @@ class Transcript(BaseModel):
             # Whisper's timestamp grid is 20 ms; 100 ms also covers codec padding.
             if (
                 not cue.text.strip()
+                or (cue.raw_text is not None and cue.raw_text.strip() != cue.text)
                 or cue.start < previous
                 or cue.end < cue.start
                 or cue.end > self.duration + 0.1

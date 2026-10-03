@@ -1,0 +1,11 @@
+{
+  "ocr_enabled": false,
+  "states": [
+    "text",
+    "text",
+    "empty",
+    "not_requested"
+  ],
+  "same_original_and_markdown": true,
+  "content_rows_unchanged": true
+}

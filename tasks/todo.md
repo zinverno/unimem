@@ -196,3 +196,25 @@ Prior ASR/native evidence and older B4 gates remain unchanged.
   partial results; no repository execution or implicit full download.
 - [ ] Treat private GitHub access as a separate explicit read-only connection.
   D2 remains outside the completed A/B/C and explicitly requested D1 slices.
+
+## D3 — Bounded local video notes (dependent on open PR #39)
+
+This explicitly requested slice supersedes the local-video portion of the D2
+planning item above. Broader video interpretation and GitHub remain future work.
+
+- [x] Verify main and PR #38/#39; branch from #39 HEAD `50b9081e5ebe8e7339b9e5f1f63447968f0b6558`.
+- [x] Reuse intake/raw/canonical, durable operation recovery, ASR/vision and heavy slot.
+- [x] Bounded MP4/H.264/AAC adapter; deterministic quarter sampling and shared PTS timeline.
+- [x] Explicit independent speech/frame/description choices and recoverable existing Zen UI.
+- [x] One VIDEO result with raw/derived/transcript/vision provenance and offline reads.
+- [x] Strict v1/v2 preservation, distinct v3 manifest/ACK and explicit PNG-frame permission.
+- [x] Connector bounded-list migration and create-only recovery, rollback/fences/partial-write tests.
+- [x] Decoder/VFR/offset/refusal tests, real kill/reap/slot tests, fake-stage adapter tests.
+- [x] One real ASR + three real vision calls through installed Zen and standalone Connector.
+- [x] Separate no-audio clip, exact snapshot/PNG delivery, restart/poll deduplication and offline Obsidian.
+- [x] ADR, operator instructions, dated quality/resource evidence, reproducible dev packages.
+- [ ] Review and manual merge of the dependent PR chain; no auto-merge/release/publication.
+
+Evidence: [2026-10-03](../docs/VIDEO_VERIFICATION_2026-10-03.md).
+ASR comparison is not reopened. B4 signed install/update and other browser/platform
+acceptance gates remain open; three stills are not full-video analysis.

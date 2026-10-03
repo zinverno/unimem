@@ -100,11 +100,17 @@ from core.storage import LocalRawObjectStore
 from unimem_api.app import create_app
 from unimem_api.audio_operations import AudioOperationStore
 from unimem_api.audio_worker import AudioWorker
+from unimem_api.image_operations import ImageOperationStore
+from unimem_api.image_service import ImageCaptureService
+from unimem_api.image_worker import ImageWorker
 from unimem_api.obsidian_store import ObsidianStore
 from unimem_api.security import ApiSecurity
 from unimem_api.worker import DeliveryWorker, ServerLease
 from unimem_asr.service import AudioCaptureService
 from unimem_delivery.operations import OperationError
+from unimem_video.operations import VideoOperationStore
+from unimem_video.service import VideoCaptureService
+from unimem_video.worker import VideoWorker
 from unimem_youtube.operations import OperationStore
 from unimem_youtube.service import YoutubeCaptureService
 
@@ -189,6 +195,9 @@ def build_local_app(
     security: ApiSecurity,
     youtube: bool = False,
     audio_model: Path | None = None,
+    image_description_profile: Path | None = None,
+    video_notes: bool = False,
+    video_worker_command: tuple[str, ...] | None = None,
     audio_worker_command: tuple[str, ...] | None = None,
     worker_command: tuple[str, ...] | None = None,
     pdf_ocr: PdfPageOcr | None = None,
@@ -268,6 +277,10 @@ def build_local_app(
     """
     if youtube:
         require_youtube()
+    if video_notes:
+        from unimem_video.decode import require_decoder
+
+        require_decoder()
     if audio_model is not None:
         from unimem_asr.model import require_engine, verify_model
         from unimem_asr.policy import AsrError
@@ -306,6 +319,15 @@ def build_local_app(
     youtube_service = YoutubeCaptureService(data_dir) if youtube else None
     audio_operations = AudioOperationStore(database)
     audio_service = AudioCaptureService(data_dir)
+    image_operations = ImageOperationStore(database)
+    image_service = ImageCaptureService(data_dir)
+    video_operations = VideoOperationStore(database)
+    video_service = VideoCaptureService(data_dir)
+    description_capability = None
+    if image_description_profile is not None:
+        from unimem_vision.profile import readiness
+
+        description_capability = readiness(image_description_profile)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -335,9 +357,46 @@ def build_local_app(
                     logging.getLogger(__name__).error(
                         "Audio recovery unavailable; restart required."
                     )
+            image_worker: ImageWorker | None = ImageWorker(
+                data_dir,
+                image_operations,
+                lease.fd,
+                ocr_enabled=image_ocr is not None,
+                description_profile=image_description_profile,
+            )
+            try:
+                if image_worker is not None:
+                    image_worker.start()
+            except (OperationError, CaptureRecordStoreError, ContentObjectStoreError):
+                logging.getLogger(__name__).error("Image recovery unavailable; restart required.")
+                image_worker = None
+            video_worker = (
+                VideoWorker(
+                    data_dir,
+                    video_operations,
+                    lease.fd,
+                    audio_model,
+                    image_description_profile,
+                    command=video_worker_command,
+                )
+                if video_notes
+                else None
+            )
+            try:
+                if video_worker:
+                    video_worker.start()
+                else:
+                    video_operations.recover(video_service)
+            except (OperationError, CaptureRecordStoreError, ContentObjectStoreError):
+                logging.getLogger(__name__).error("Video recovery unavailable; restart required.")
+                video_worker = None
             try:
                 yield
             finally:
+                if video_worker:
+                    await asyncio.to_thread(video_worker.stop)
+                if image_worker:
+                    await asyncio.to_thread(image_worker.stop)
                 if worker:
                     await asyncio.to_thread(worker.stop)
                 if audio_worker:
@@ -357,6 +416,15 @@ def build_local_app(
         audio_operations=audio_operations,
         audio_service=audio_service,
         audio_enabled=audio_model is not None,
+        image_operations=image_operations,
+        image_service=image_service,
+        image_ocr_enabled=image_ocr is not None,
+        image_description_capability=description_capability,
+        video_operations=video_operations,
+        video_service=video_service,
+        video_enabled=video_notes,
+        audio_model=audio_model,
+        image_description_profile=image_description_profile,
     )
     return app
 

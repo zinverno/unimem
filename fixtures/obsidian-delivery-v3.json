@@ -1,0 +1,48 @@
+{
+  "delivery": {
+    "delivery_id": "33333333-3333-4333-8333-333333333333",
+    "destination_id": "44444444-4444-4444-8444-444444444444",
+    "source_capture_id": "fixture_capture",
+    "source_content_id": "fixture_content",
+    "export_format": "video-notes-markdown",
+    "export_version": "1",
+    "markdown": "# Video fixture\n\n![Frame 1](./unimem-0e13daeeced75fbfad26d8265b0d826ded004bbfc75276a93cdd6c66e3fd72b8.png)\n![Frame 2](./unimem-c898e17cd9040d633ba643e103ada73c9d3a94566e6cb40e93307d28b2577227.png)\n![Frame 3](./unimem-46cafe36867df75014d72dcace89fe053ba5010d91c4bf917631b95ea617f6aa.png)\n",
+    "markdown_sha256": "8883ad8cca62367bea7f31e0823cead482eafc519d0e4681b96a2821bb12a66d",
+    "suggested_filename": "unimem-7f4924d13edf410addc59b53e450503ab96791d87b3cb979e4efe9ff34c8b261.md",
+    "created_at": "2026-09-30T20:00:00Z",
+    "state": "pending",
+    "lease_expires_at": null,
+    "error_code": null,
+    "protocol_version": "3",
+    "attachments": [
+      {
+        "asset_id": "frame-1",
+        "mime_type": "image/png",
+        "size_bytes": 71,
+        "sha256": "b7eb1fb7bf063e77f1b972b21d0213bb4e940891c286c8bf904e1954a3239a29",
+        "relative_name": "unimem-0e13daeeced75fbfad26d8265b0d826ded004bbfc75276a93cdd6c66e3fd72b8.png",
+        "width": 4,
+        "height": 4
+      },
+      {
+        "asset_id": "frame-2",
+        "mime_type": "image/png",
+        "size_bytes": 71,
+        "sha256": "b7eb1fb7bf063e77f1b972b21d0213bb4e940891c286c8bf904e1954a3239a29",
+        "relative_name": "unimem-c898e17cd9040d633ba643e103ada73c9d3a94566e6cb40e93307d28b2577227.png",
+        "width": 4,
+        "height": 4
+      },
+      {
+        "asset_id": "frame-3",
+        "mime_type": "image/png",
+        "size_bytes": 71,
+        "sha256": "b7eb1fb7bf063e77f1b972b21d0213bb4e940891c286c8bf904e1954a3239a29",
+        "relative_name": "unimem-46cafe36867df75014d72dcace89fe053ba5010d91c4bf917631b95ea617f6aa.png",
+        "width": 4,
+        "height": 4
+      }
+    ],
+    "package_sha256": "921990d19886be67357e8fd3d37b6fafea0858ebeb544a959710f28c2260938f"
+  }
+}

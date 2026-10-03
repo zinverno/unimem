@@ -70,6 +70,7 @@ ADR-025 adds mandatory authentication and bounded ingress around every route.
 The optional YouTube delivery routes have a separate durable operation lifecycle.
 """
 
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, File, Response, UploadFile, status
@@ -87,6 +88,9 @@ from core.storage import RawObjectStore, build_raw_ref, resolve_digest
 from unimem_api.audio_http import install_audio_routes
 from unimem_api.audio_operations import AudioOperationStore
 from unimem_api.errors import install_error_handlers
+from unimem_api.image_http import install_image_routes
+from unimem_api.image_operations import ImageOperationStore
+from unimem_api.image_service import ImageCaptureService
 from unimem_api.models import (
     CaptureAcceptedResponse,
     ErrorResponse,
@@ -95,10 +99,14 @@ from unimem_api.models import (
 )
 from unimem_api.obsidian_http import install_obsidian_routes
 from unimem_api.obsidian_store import ObsidianStore
+from unimem_api.obsidian_v2_http import install_attachment_routes
 from unimem_api.operations_http import install_operation_errors, install_operation_routes
 from unimem_api.replay import resolve_completed_replay
 from unimem_api.security import ApiSecurity, LocalApiSecurity
 from unimem_asr.service import AudioCaptureService
+from unimem_video.http import install_video_routes
+from unimem_video.operations import VideoOperationStore
+from unimem_video.service import VideoCaptureService
 from unimem_youtube.operations import OperationStore
 from unimem_youtube.service import YoutubeCaptureService
 
@@ -152,6 +160,15 @@ def create_app(
     audio_operations: AudioOperationStore | None = None,
     audio_service: AudioCaptureService | None = None,
     audio_enabled: bool = False,
+    image_operations: ImageOperationStore | None = None,
+    image_service: ImageCaptureService | None = None,
+    image_ocr_enabled: bool = False,
+    image_description_capability: dict[str, str | bool] | None = None,
+    video_operations: VideoOperationStore | None = None,
+    video_service: VideoCaptureService | None = None,
+    video_enabled: bool = False,
+    audio_model: Path | None = None,
+    image_description_profile: Path | None = None,
 ) -> FastAPI:
     """Build the API over five already-constructed core services.
 
@@ -174,7 +191,7 @@ def create_app(
     """
     app = FastAPI(
         title="UniMem capture API",
-        version="0.1.0",
+        version="0.3.0",
         summary="Local HTTP capture surface over the UniMem capture core.",
         lifespan=lifespan,
     )
@@ -185,8 +202,31 @@ def create_app(
         if audio_service is None:
             raise ValueError("Audio operations require the capture service.")
         install_audio_routes(app, audio_operations, audio_service, enabled=audio_enabled)
+    if image_operations is not None and image_service is not None:
+        install_image_routes(
+            app,
+            image_operations,
+            image_service,
+            ocr_enabled=image_ocr_enabled,
+            description_capability=image_description_capability,
+        )
+    if video_operations is not None and video_service is not None:
+        install_video_routes(
+            app,
+            video_operations,
+            video_service,
+            enabled=video_enabled,
+            asr=audio_enabled,
+            vision=image_description_capability,
+            model_dir=audio_model,
+            vision_dir=image_description_profile,
+        )
     if obsidian is not None:
         install_obsidian_routes(app, obsidian, record_store, content_store)
+        install_attachment_routes(app, obsidian, record_store, content_store, raw_store)
+        install_attachment_routes(
+            app, obsidian, record_store, content_store, raw_store, version="3"
+        )
     if operations is not None:
         if youtube_service is None:
             raise ValueError("YouTube operations require the capture service.")
