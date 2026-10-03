@@ -1,0 +1,36 @@
+{
+  "native_restart": {
+    "connector": "0.2.0",
+    "files_before": 9,
+    "files_after": 9,
+    "polls_after_restart": 2,
+    "same_file_set": true
+  },
+  "python": {
+    "passed": 4406,
+    "skipped": 31,
+    "coverage_percent": 96.1
+  },
+  "browser_tests": 608,
+  "focused_python_before_final_slot_test": 87,
+  "adapter_coverage_percent": 92.39,
+  "final_vision_tests": 34,
+  "final_native_restart": {
+    "connector": "0.2.0",
+    "files_before": 11,
+    "files_after": 11,
+    "polls_after_restart": 2,
+    "same_file_set": true
+  },
+  "additional_health_sampler": {
+    "queries": 359,
+    "initial_api_startup_connection_refusals": 2,
+    "failures_after_first_two": 0,
+    "maximum_seconds": 0.015825081994989887
+  },
+  "initial_inference_health": {
+    "queries": 143,
+    "maximum_seconds": 0.02111690799938515,
+    "failures": 0
+  }
+}

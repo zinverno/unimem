@@ -112,3 +112,24 @@ test("preview checks content signature and decoded dimensions before Blob URL", 
   const bomb = new Uint8Array(png); new DataView(bomb.buffer).setUint32(16, 20000000);
   await assert.rejects(() => previewMime(new Blob([bomb])), /pixel_limit/);
 });
+
+test("description is opt-in and durable reload never resubmits recognition", async () => {
+  const h = harness();
+  const j = await h.jobs.start(new Blob(["pixels"]), "describe");
+  assert.equal(j.mode, "describe");
+  await imageJobs(h.options).refresh(j.operation_id);
+  assert.equal((await imageJobs(h.options).list())[0].mode, "describe");
+  assert.deepEqual(h.counts(), { uploads: 1, posts: 1, gets: 1 });
+});
+
+test("description readiness comes only from the fixed protected API and never prepares weights", async () => {
+  const calls = [];
+  const client = imageClient(localTransport({ getToken: async () => "a".repeat(43), fetch: async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ description: { ready: true, code: "ready", model: "Qwen/Qwen3-VL-2B-Instruct-GGUF" } }), { headers: { "Content-Type": "application/json" } });
+  } }));
+  assert.equal((await client.capabilities()).ready, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, `${API_ORIGIN}/v1/image/capabilities`);
+  assert.equal(calls[0].options.headers.Authorization, `Bearer ${"a".repeat(43)}`);
+});

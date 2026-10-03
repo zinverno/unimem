@@ -1,0 +1,12 @@
+{
+  "checkable": [
+    "three boxes: Источник, Проверка, Архив",
+    "two separate visible arrowheads pointing right",
+    "Источник to Проверка; Проверка to Архив"
+  ],
+  "not_supported": [
+    "backward connection",
+    "feedback loop",
+    "hidden implementation"
+  ]
+}

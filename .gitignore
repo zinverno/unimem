@@ -18,3 +18,6 @@ graphify-out/
 # Browser development tools and artifacts
 node_modules/
 web-ext-artifacts/
+
+# Explicitly prepared local vision runtime and one model profile; never content.
+.local-vision/

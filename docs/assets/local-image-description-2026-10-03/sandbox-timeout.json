@@ -1,0 +1,6 @@
+{
+  "timeout_seconds": 0.6103700920066331,
+  "observed_processes": 4,
+  "active_descendants_after_timeout": 0,
+  "kind": "real sandbox/process control with synthetic sleeping child; not a model quality test"
+}

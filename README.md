@@ -29,6 +29,13 @@ See [installation, consent and limits](docs/IMAGE_DELIVERY.md),
 [versioned attachment protocol](docs/ADR/ADR-029-image-attachment-delivery.md), and
 [separate automated, real OCR and native evidence](docs/IMAGE_VERIFICATION_2026-10-03.md).
 
+**Local image description:** a third explicit image mode runs one prepared
+Qwen3-VL-2B CPU profile offline. It persists a labelled `VISUAL`/`VISION` result and
+uses existing delivery v2 with the same original attachment. No OCR substitution,
+model download on startup, or inference during reads/Send. See
+[preparation, quality limits and evidence](docs/local-image-description.md) and
+[ADR-030](docs/ADR/ADR-030-local-image-description.md).
+
 Implemented so far:
 
 - **Phase 0A — domain contracts.** The stable domain language:

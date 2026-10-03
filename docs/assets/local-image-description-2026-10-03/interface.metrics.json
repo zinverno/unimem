@@ -1,0 +1,23 @@
+{
+  "input": "interface",
+  "original_dimensions": [
+    768,
+    512
+  ],
+  "model_dimensions": [
+    627,
+    418
+  ],
+  "input_sha256": "0939a8b923b652a227b065cef21336a653b6e41e57a86b30d7a2b734c6178767",
+  "preprocessing_seconds": 0.1261725270014722,
+  "runtime_ready_seconds": 7.375033917021938,
+  "runtime_seconds": 56.85542014200473,
+  "total_seconds": 56.982407264003996,
+  "peak_process_tree_rss": 2050412544,
+  "returncode": 0,
+  "failure": null,
+  "response": {
+    "status": "described",
+    "description": "Интерфейс для загрузки файлов. Слева — меню с пунктами: Входящие, Изображения, Настройки. В центре — раздел 'Изображения' с кнопкой 'Добавить файл', и две строки: 'Схема.png — Готово' и 'Фото.jpg — В очереди'. Внизу — кнопка 'Открыть'."
+  }
+}

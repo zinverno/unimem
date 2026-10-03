@@ -50,6 +50,7 @@ class Options:
     media: bool
     youtube: bool = False
     audio_model: Path | None = None
+    image_description_profile: Path | None = None
     token_file: Path | None = None
     init_token: bool = False
     rotate_token: bool = False
@@ -133,6 +134,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="enable audio operations with an explicitly prepared local model; requires .[asr]",
     )
     parser.add_argument(
+        "--image-description-profile",
+        type=Path,
+        metavar="DIRECTORY",
+        help="opt in to one explicitly prepared local Qwen3-VL CPU profile; never downloads",
+    )
+    parser.add_argument(
         "--token-file", type=Path, help="owner-only credential file (default: data-dir/api.token)"
     )
     credentials = parser.add_mutually_exclusive_group()
@@ -169,6 +176,7 @@ def parse_args(argv: Sequence[str] | None = None) -> Options:
         media=namespace.media,
         youtube=namespace.youtube,
         audio_model=namespace.audio_model,
+        image_description_profile=namespace.image_description_profile,
         token_file=namespace.token_file,
         init_token=namespace.init_token,
         rotate_token=namespace.rotate_token,
@@ -332,6 +340,7 @@ def main(
             security=security,
             youtube=options.youtube,
             audio_model=options.audio_model,
+            image_description_profile=options.image_description_profile,
             pdf_ocr=build_pdf_ocr() if options.pdf_ocr else None,
             image_ocr=build_image_ocr() if options.image_ocr else None,
             media_probe=build_media_probe() if options.media else None,

@@ -9,10 +9,22 @@ export function mountImageUi(api, settings) {
   const http = localTransport(options);
   const client = imageClient(http, localTransport({ ...options, timeoutMs: 120000, maxBytes: 16 * 1024 * 1024 }), localTransport({ ...options, timeoutMs: 30000, maxBytes: 16 * 1024 * 1024 }));
   const jobs = imageJobs({ local: api.storage.local, client }), delivery = obsidianClient(http, "2");
-  let rows = [], selected = "", file = null, busy = false, result = null, loaded = false, sent = false, enabled = false, blobUrl = null;
+  let rows = [], selected = "", file = null, busy = false, result = null, loaded = false, sent = false, enabled = false, blobUrl = null, descriptionReady = false;
   const current = () => rows.find(j => j.operation_id === selected);
   const labels = { not_requested: "OCR не запрашивался. Смысловой анализ не выполнялся.", text: "OCR выполнен: текст получен.", empty: "OCR выполнен: текст не найден.", skipped: "OCR пропущен по известному ограничению; распознавание не выполнено." };
   const errors = {
+    vision_disabled: "Локальное описание не включено. Оператор должен явно подготовить профиль и включить его на сервере.",
+    vision_profile_missing: "Локальные файлы модели отсутствуют. Автоматической загрузки нет; original-only и OCR доступны независимо.",
+    vision_profile_invalid: "Проверка локальных файлов модели не пройдена. Нужно восстановить закреплённый профиль и перезапустить API.",
+    vision_sandbox_unavailable: "Для изоляции локальной модели нужен bubblewrap на сервере.",
+    vision_platform_unsupported: "Этот профиль требует Linux x86_64 с AVX2/FMA/F16C.",
+    vision_execution_failed: "Локальная модель завершилась ошибкой; описания нет. Оригинальный upload сохранён.",
+    vision_input_too_narrow: "После уменьшения вход слишком узкий для этого профиля. Оригинальный upload сохранён.",
+    vision_budget_exceeded: "Лимит времени или памяти модели исчерпан. Процесс остановлен, готового описания нет.",
+    vision_output_limit: "Ответ достиг лимита. Он не сохранён как полное описание; оригинальный upload сохранён.",
+    vision_completion_unverified: "Не удалось подтвердить завершённость ответа. Готового описания нет.",
+    vision_invalid_output: "Модель вернула пустой или некорректный ответ. Готового описания нет.",
+    vision_refused: "Модель отказалась описывать изображение. Готового описания нет.",
     input_size_limit: "Нужен один непустой PNG/JPEG до 16 МиБ.", pixel_limit: "Изображение превышает лимит 40 миллионов пикселей.",
     unsupported_format: "Поддерживаются только статические PNG и JPEG.", mime_mismatch: "MIME противоречит содержимому файла.",
     invalid_image: "Файл повреждён или не декодируется. Загруженный оригинал остаётся в UniMem.",
@@ -34,6 +46,7 @@ export function mountImageUi(api, settings) {
   function buttons() {
     $("section").querySelectorAll("button,input,select").forEach(e => { e.disabled = busy; });
     for (const id of ["save", "ocr"]) $(id).disabled = busy || !file;
+    $("describe").disabled = busy || !file || !descriptionReady;
     $("refresh").disabled = busy || !current()?.file_ref;
     $("retry").disabled = busy || !current()?.file_ref || current().accepted;
     $("remove").disabled = busy || !current();
@@ -47,7 +60,7 @@ export function mountImageUi(api, settings) {
     if (!rows.some(j => j.operation_id === selected)) { selected = rows[0]?.operation_id ?? ""; clear(); }
     const picker = $("jobs"); picker.replaceChildren();
     if (!rows.length) picker.add(new Option("Заданий пока нет", ""));
-    for (const j of rows) picker.add(new Option(`${j.captured_at} · ${j.mode === "ocr" ? "OCR" : "Оригинал"} · ${j.observed ? IMAGE_STATES[j.observed.state] : "Приём не подтверждён"}`, j.operation_id));
+    for (const j of rows) picker.add(new Option(`${j.captured_at} · ${j.mode === "ocr" ? "OCR" : j.mode === "describe" ? "Описание моделью" : "Оригинал"} · ${j.observed ? IMAGE_STATES[j.observed.state] : "Приём не подтверждён"}`, j.operation_id));
     picker.value = selected;
     const j = current();
     $("details").textContent = j ? `ID: ${j.operation_id}. ${j.file_ref ? "Upload сохранён." : "Upload не подтверждён."} ${j.observed ? IMAGE_STATES[j.observed.state] : "Приём не подтверждён"}. ${j.accepted ? "Сервер принял задание, страницу можно закрыть." : "Проверьте прежний ID; новый capture автоматически не создаётся."}` : "";
@@ -65,13 +78,14 @@ export function mountImageUi(api, settings) {
     if (files.length !== 1) throw new ClientError("input_size_limit");
     const chosen = files[0], mime = await previewMime(chosen);
     file = chosen; preview(new Blob([file], { type: mime }));
-    notice(`${file.size} байт. Выберите «Сохранить изображение» или «Извлечь текст». В vault переносится исходный файл со всей metadata.`);
+    notice(`${file.size} байт. Выберите сохранение оригинала, OCR или локальное описание моделью. В vault переносится исходный файл со всей metadata.`);
   }
   $("file").onchange = () => act(() => choose($("file").files));
   $("drop").ondragover = e => { e.preventDefault(); };
   $("drop").ondrop = e => { e.preventDefault(); if (!busy) act(() => choose(e.dataTransfer.files)); };
-  for (const [id, mode] of [["save", "original"], ["ocr", "ocr"]]) $(id).onclick = () => act(async () => {
+  for (const [id, mode] of [["save", "original"], ["ocr", "ocr"], ["describe", "describe"]]) $(id).onclick = () => act(async () => {
     const chosen = file; clear();
+    $("details").textContent = "Новое задание: upload ещё не подтверждён."; $("error").textContent = "";
     const job = await jobs.start(chosen, mode, phase => notice(phase === "uploading"
       ? "Upload: идёт загрузка. Закрытие страницы может прервать её."
       : "Upload сохранён. Ожидается durable acceptance операции."));
@@ -99,7 +113,9 @@ export function mountImageUi(api, settings) {
   $("result").onclick = () => act(async () => {
     result = await client.result(current()); $("markdown").textContent = result.markdown;
     preview(await client.original(current(), result.attachment));
-    notice(`${labels[result.ocr_status]} OCR может ошибаться. Описание изображения не создаётся.`);
+    notice(result.description
+      ? "Описание моделью: интерпретация может содержать выдуманные или пропущенные детали. Вход уменьшен без обрезки; мелкие детали могут быть потеряны. Отдельное OCR не выполнялось."
+      : `${labels[result.ocr_status]} OCR может ошибаться. Описание изображения не создаётся.`);
     await loadDelivery();
   });
   $("destination").onchange = () => act(loadDelivery);
@@ -108,7 +124,17 @@ export function mountImageUi(api, settings) {
     if (!loaded || sent || !enabled || !result) return;
     await delivery.send(current().observed.capture_id, $("destination").value); await loadDelivery();
   });
+  async function capability() {
+    descriptionReady = false;
+    try {
+      const state = await client.capabilities(); descriptionReady = state.ready;
+      $("capability").textContent = state.ready
+        ? `Локальный профиль подготовлен: ${state.model}. CPU, 2 threads; до 3 минут. Мелкие детали и сложные связи могут быть потеряны или описаны неверно.`
+        : explain({ code: state.code });
+    } catch (e) { $("capability").textContent = `Готовность описания не подтверждена: ${explain(e)}`; }
+  }
+  $("capability-refresh").onclick = () => act(capability);
   api.storage.onChanged.addListener((changes, area) => { if (area === "local" && changes[IMAGE_KEY] && !busy) act(load); });
   window.addEventListener("pagehide", () => preview(null));
-  act(async () => { await load(); if (current()?.file_ref) { await jobs.refresh(selected); await load(); } });
+  act(async () => { await capability(); await load(); if (current()?.file_ref) { await jobs.refresh(selected); await load(); } });
 }

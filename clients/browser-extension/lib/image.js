@@ -31,6 +31,14 @@ export function validateImage(body, request) {
 export function imageClient(http, uploadHttp = http, binaryHttp = http) {
   const base = `${API_ORIGIN}/v1/image/operations`;
   return {
+    async capabilities() {
+      const response = await http(`${API_ORIGIN}/v1/image/capabilities`);
+      if (response.status !== 200) throw await httpError(response);
+      const body = await jsonBody(response), d = body?.description;
+      if (typeof d?.ready !== "boolean" || typeof d.code !== "string" ||
+          d.code.length > 80 || (d.ready && (typeof d.model !== "string" || d.model.length > 160))) throw new ClientError("invalid_response");
+      return d;
+    },
     async upload(file) {
       const form = new FormData(); form.append("file", file, "image-upload");
       const response = await uploadHttp(`${API_ORIGIN}/v1/uploads`, { method: "POST", body: form });
@@ -58,6 +66,10 @@ export function imageClient(http, uploadHttp = http, binaryHttp = http) {
           !a || !validId(a.asset_id) || !["image/png", "image/jpeg"].includes(a.mime_type) ||
           !Number.isSafeInteger(a.size_bytes) || a.size_bytes < 1 || a.size_bytes > 16 * 1024 * 1024 ||
           !/^[0-9a-f]{64}$/.test(a.sha256) || !/^unimem-[0-9a-f]{64}\.(png|jpg)$/.test(a.relative_name)) throw new ClientError("invalid_response");
+      if (job.mode === "describe" && (!r.description ||
+          !["described", "unclear"].includes(r.description.answer?.status) ||
+          typeof r.description.answer.description !== "string" || !r.description.answer.description.trim() ||
+          r.description.answer.description.length > 8000 || r.ocr_status !== "not_requested")) throw new ClientError("invalid_response");
       return r;
     },
     async original(job, asset) {
@@ -78,7 +90,7 @@ export function imageJobs({ local, client, lock = work => navigator.locks.reques
     if (!Array.isArray(rows) || rows.length > 50) throw new ClientError("history_corrupt");
     for (const j of rows) {
       if (!validId(j?.operation_id) || j.connection !== API_ORIGIN || !date(j.captured_at) ||
-          !["original", "ocr"].includes(j.mode) || typeof j.declared_mime !== "string" || j.declared_mime.length > 100 ||
+          !["original", "ocr", "describe"].includes(j.mode) || typeof j.declared_mime !== "string" || j.declared_mime.length > 100 ||
           !(j.file_ref === null || ref(j.file_ref)) || typeof j.accepted !== "boolean" ||
           (j.accepted && !j.observed)) throw new ClientError("history_corrupt");
       if (j.observed) validateImage(j.observed, requestFor(j));
@@ -102,7 +114,7 @@ export function imageJobs({ local, client, lock = work => navigator.locks.reques
     start(file, mode, progress = () => {}) {
       // Freeze the user's selection before the first async boundary.
       if (!(file instanceof Blob) || file.size === 0 || file.size > 16 * 1024 * 1024) throw new ClientError("input_size_limit");
-      if (!["original", "ocr"].includes(mode)) throw new ClientError("invalid_message");
+      if (!["original", "ocr", "describe"].includes(mode)) throw new ClientError("invalid_message");
       const job = { operation_id: newId(), file_ref: null, declared_mime: file.type, mode,
         captured_at: now(), connection: API_ORIGIN, accepted: false, observed: null, error: null };
       if (!validId(job.operation_id) || !date(job.captured_at) || job.declared_mime.length > 100) throw new ClientError("invalid_message");

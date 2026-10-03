@@ -1,0 +1,23 @@
+{
+  "input": "photo",
+  "original_dimensions": [
+    4494,
+    3371
+  ],
+  "model_dimensions": [
+    591,
+    443
+  ],
+  "input_sha256": "fa45484cece8e3a57459cf74f71128158947be3e40a336e47a37b8152fce208e",
+  "preprocessing_seconds": 0.54294021698297,
+  "runtime_ready_seconds": 6.744457464985317,
+  "runtime_seconds": 47.6888427179947,
+  "total_seconds": 48.23190955599421,
+  "peak_process_tree_rss": 2228912128,
+  "returncode": 0,
+  "failure": null,
+  "response": {
+    "status": "described",
+    "description": "На изображении красное яблоко с желтыми участками лежит на белой тарелке с волнистым краем. Фон светлый, однотонный."
+  }
+}

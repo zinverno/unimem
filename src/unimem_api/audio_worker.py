@@ -21,6 +21,7 @@ from unimem_asr.input import inspect_input
 from unimem_asr.policy import EXECUTION_SECONDS, MAX_RSS_BYTES, MEMORY_BYTES, AsrError
 from unimem_asr.result import Transcript
 from unimem_asr.service import AudioCaptureService
+from unimem_delivery.heavy import heavy_slot
 
 Recognizer = Callable[[BinaryIO, str, Literal["auto", "ru", "en"], Path], Transcript]
 
@@ -106,44 +107,48 @@ class AudioWorker:
                 if op is None:
                     self.stopping.wait(0.2)
                     continue
-                budget = False
-                env = os.environ | {
-                    "HF_HUB_OFFLINE": "1",
-                    "HF_HUB_DISABLE_TELEMETRY": "1",
-                    "OPENBLAS_NUM_THREADS": "2",
-                    "OMP_NUM_THREADS": "2",
-                    "TOKENIZERS_PARALLELISM": "false",
-                }
-                with subprocess.Popen(
-                    [
-                        *self.command,
-                        str(self.data_dir),
-                        op.request.operation_id,
-                        str(self.model_dir),
-                    ],
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    pass_fds=(self.lease_fd,),
-                    env=env,
-                    cwd=self.data_dir,
-                ) as child:
-                    deadline = monotonic() + EXECUTION_SECONDS
-                    while child.poll() is None:
-                        budget = (
-                            monotonic() >= deadline or resident_bytes(child.pid) > MAX_RSS_BYTES
-                        )
-                        if self.stopping.wait(0.1) or budget:
-                            child.kill()
-                            child.wait(timeout=5)
-                            break
-                budget = budget or child.returncode in (-signal.SIGALRM, -signal.SIGXCPU)
-                self.store.reconcile(
-                    op,
-                    service,
-                    error_code=("budget_exceeded" if budget else "execution_interrupted"),
-                    incomplete_state="failed" if budget else "interrupted",
-                )
+                with heavy_slot(self.data_dir, self.stopping) as slot:
+                    if slot is None:
+                        self.store.reconcile(op, service)
+                        return
+                    budget = False
+                    env = os.environ | {
+                        "HF_HUB_OFFLINE": "1",
+                        "HF_HUB_DISABLE_TELEMETRY": "1",
+                        "OPENBLAS_NUM_THREADS": "2",
+                        "OMP_NUM_THREADS": "2",
+                        "TOKENIZERS_PARALLELISM": "false",
+                    }
+                    with subprocess.Popen(
+                        [
+                            *self.command,
+                            str(self.data_dir),
+                            op.request.operation_id,
+                            str(self.model_dir),
+                        ],
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        pass_fds=(self.lease_fd, slot),
+                        env=env,
+                        cwd=self.data_dir,
+                    ) as child:
+                        deadline = monotonic() + EXECUTION_SECONDS
+                        while child.poll() is None:
+                            budget = (
+                                monotonic() >= deadline or resident_bytes(child.pid) > MAX_RSS_BYTES
+                            )
+                            if self.stopping.wait(0.1) or budget:
+                                child.kill()
+                                child.wait(timeout=5)
+                                break
+                    budget = budget or child.returncode in (-signal.SIGALRM, -signal.SIGXCPU)
+                    self.store.reconcile(
+                        op,
+                        service,
+                        error_code=("budget_exceeded" if budget else "execution_interrupted"),
+                        incomplete_state="failed" if budget else "interrupted",
+                    )
             except Exception:
                 with suppress(Exception):
                     self.store.recover(service)

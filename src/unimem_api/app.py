@@ -159,6 +159,7 @@ def create_app(
     image_operations: ImageOperationStore | None = None,
     image_service: ImageCaptureService | None = None,
     image_ocr_enabled: bool = False,
+    image_description_capability: dict[str, str | bool] | None = None,
 ) -> FastAPI:
     """Build the API over five already-constructed core services.
 
@@ -181,7 +182,7 @@ def create_app(
     """
     app = FastAPI(
         title="UniMem capture API",
-        version="0.2.0",
+        version="0.3.0",
         summary="Local HTTP capture surface over the UniMem capture core.",
         lifespan=lifespan,
     )
@@ -193,7 +194,13 @@ def create_app(
             raise ValueError("Audio operations require the capture service.")
         install_audio_routes(app, audio_operations, audio_service, enabled=audio_enabled)
     if image_operations is not None and image_service is not None:
-        install_image_routes(app, image_operations, image_service, ocr_enabled=image_ocr_enabled)
+        install_image_routes(
+            app,
+            image_operations,
+            image_service,
+            ocr_enabled=image_ocr_enabled,
+            description_capability=image_description_capability,
+        )
     if obsidian is not None:
         install_obsidian_routes(app, obsidian, record_store, content_store)
         install_attachment_routes(app, obsidian, record_store, content_store, raw_store)

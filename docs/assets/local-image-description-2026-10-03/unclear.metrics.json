@@ -1,0 +1,23 @@
+{
+  "input": "unclear",
+  "original_dimensions": [
+    768,
+    512
+  ],
+  "model_dimensions": [
+    627,
+    418
+  ],
+  "input_sha256": "153a472267005d4bd2d964d5882fbe2686dcaf8fd120010ddd778771ac028dc3",
+  "preprocessing_seconds": 0.22720403000130318,
+  "runtime_ready_seconds": 4.5319516970193945,
+  "runtime_seconds": 39.850178510998376,
+  "total_seconds": 40.080223372991895,
+  "peak_process_tree_rss": 2020216832,
+  "returncode": 0,
+  "failure": null,
+  "response": {
+    "status": "unclear",
+    "description": "Изображение сильно размыто, содержится только нечеткие пятна различных цветов (оранжевого, желтого, серого) на фоне. Нет четкого изображения объектов, блоков или стрелок. Неразличимы детали, связи и назначение."
+  }
+}

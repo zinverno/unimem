@@ -15,7 +15,9 @@
 <p>Один локальный PNG/JPEG, до 16 МиБ и 40 миллионов пикселей. Исходный файл, включая EXIF и другую metadata, переносится в vault без изменений. Без облака и описания картинки.</p>
 <div id="image-drop"><label for="image-file">Выберите или перетащите сюда изображение</label><input id="image-file" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg"></div>
 <img id="image-preview-image" alt="Предпросмотр выбранного исходного изображения" hidden>
-<div class="actions"><button id="image-save" disabled>Сохранить изображение</button><button id="image-ocr" disabled>Извлечь текст</button></div>
+<p id="image-capability" role="status">Локальное описание: готовность не проверена.</p>
+<button id="image-capability-refresh">Проверить локальную модель</button>
+<div class="actions"><button id="image-save" disabled>Сохранить изображение</button><button id="image-ocr" disabled>Извлечь текст</button><button id="image-describe" disabled>Описать изображение</button></div>
 <p>Сохранение оригинала не требует OCR. Для текста используется локальный Tesseract с русскими и английскими языковыми данными. OCR может ошибаться; смысловой анализ не выполняется.</p>
 <p id="image-notice" role="status" aria-live="polite">До подтверждённого upload закрытие страницы может прервать загрузку. После приёма операции сервер работает самостоятельно.</p>
 <label for="image-jobs">Сохранённые задания изображений</label><select id="image-jobs"></select>
