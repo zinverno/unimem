@@ -21,6 +21,7 @@ from unimem_api.__main__ import main
 from unimem_api.obsidian_contract import (
     MAX_MARKDOWN_BYTES,
     AckRequest,
+    AnyDelivery,
     ClaimRequest,
     Delivery,
     DeliveryError,
@@ -58,7 +59,7 @@ def claim() -> ClaimRequest:
     return ClaimRequest(receiver_id=str(uuid4()), claim_id=str(uuid4()))
 
 
-def expire(store: ObsidianStore, d: Delivery) -> None:
+def expire(store: ObsidianStore, d: AnyDelivery) -> None:
     old = d.model_copy(update={"lease_expires_at": datetime.now(UTC) - timedelta(seconds=1)})
     with store.connection() as db:
         db.execute(

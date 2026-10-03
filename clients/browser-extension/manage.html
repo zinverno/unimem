@@ -11,6 +11,22 @@
 <label for="languages">Приоритет языков субтитров</label><input id="languages" value="ru,en" maxlength="200" required aria-describedby="languages-help"><p id="languages-help">От 1 до 10 кодов через запятую, в порядке выбора. Перевод не выполняется. Изменения применяются к новым заданиям.</p>
 <div class="actions"><button type="submit">Сохранить настройки</button><button id="delete-token" type="button">Удалить токен</button><button id="check" type="button">Проверить YouTube API</button><button id="permission" type="button">Разрешить доступ к локальному API</button></div></form>
 <p id="credential-state"></p><p id="connection-state" role="status"></p></section>
+<section id="image-section" aria-labelledby="image-heading"><h2 id="image-heading">Изображение → Obsidian</h2>
+<p>Один локальный PNG/JPEG, до 16 МиБ и 40 миллионов пикселей. Исходный файл, включая EXIF и другую metadata, переносится в vault без изменений. Без облака и описания картинки.</p>
+<div id="image-drop"><label for="image-file">Выберите или перетащите сюда изображение</label><input id="image-file" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg"></div>
+<img id="image-preview-image" alt="Предпросмотр выбранного исходного изображения" hidden>
+<div class="actions"><button id="image-save" disabled>Сохранить изображение</button><button id="image-ocr" disabled>Извлечь текст</button></div>
+<p>Сохранение оригинала не требует OCR. Для текста используется локальный Tesseract с русскими и английскими языковыми данными. OCR может ошибаться; смысловой анализ не выполняется.</p>
+<p id="image-notice" role="status" aria-live="polite">До подтверждённого upload закрытие страницы может прервать загрузку. После приёма операции сервер работает самостоятельно.</p>
+<label for="image-jobs">Сохранённые задания изображений</label><select id="image-jobs"></select>
+<p id="image-details" role="status"></p><p id="image-error" class="error" role="status"></p>
+<div class="actions"><button id="image-refresh" disabled>Обновить статус</button><button id="image-retry" disabled>Повторить приём с тем же ID</button><button id="image-remove" disabled>Удалить локальную ссылку</button><button id="image-result" disabled>Просмотреть результат</button></div>
+<pre id="image-markdown" tabindex="0" aria-label="Текст будущей заметки"></pre>
+<label for="image-destination">Назначение Obsidian</label><select id="image-destination"></select>
+<p id="image-delivery" role="status"></p>
+<div class="actions"><button id="image-send" disabled>Отправить в Obsidian</button><button id="image-delivery-refresh" disabled>Обновить доставку</button></div>
+<p>Полный результат — заметка вместе с изображением. Отдельный .md не является полным экспортом.</p>
+</section>
 <section id="audio-section" aria-labelledby="audio-heading"><h2 id="audio-heading">Загрузить аудио</h2>
 <p>Локальная автоматическая расшифровка: WAV с PCM, MP3, OGG с Opus. До 32 МиБ и 120 секунд; одна аудиодорожка, 1–2 канала, 8–48 кГц. Поддержку проверяет сервер по содержимому. Аудио сохраняется в UniMem; в Obsidian отправляется текст.</p>
 <p>Оператор один раз подготавливает модель, затем запускает UniMem с <code>--audio-model</code>. Здесь модель не скачивается.</p>

@@ -10,7 +10,7 @@ export function localTransport({ getToken, fetch: fetchImpl = globalThis.fetch,
   return async (url, options = {}) => {
     const target = new URL(url);
     if (target.origin !== API_ORIGIN || target.username || target.password || target.search || target.hash ||
-        !/^\/(health|v1\/uploads|v1\/captures(?:\/[A-Za-z0-9_-]+)?|v1\/(?:youtube|audio)\/operations(?:\/[A-Za-z0-9_-]+(?:\/markdown)?)?|v1\/deliveries|v1\/destinations(?:\/[0-9a-f-]{36}\/captures\/[A-Za-z0-9_-]+\/delivery)?)$/.test(target.pathname)) {
+        !/^\/(health|v1\/uploads|v1\/captures(?:\/[A-Za-z0-9_-]+)?|v1\/(?:youtube|audio|image)\/operations(?:\/[A-Za-z0-9_-]+(?:\/(?:markdown|result|original))?)?|v[12]\/deliveries|v[12]\/destinations(?:\/[0-9a-f-]{36}\/captures\/[A-Za-z0-9_-]+\/delivery)?)$/.test(target.pathname)) {
       throw new ClientError("invalid_destination");
     }
     if (!await hasPermission()) throw new ClientError("permission_denied");
@@ -62,7 +62,7 @@ export async function httpError(response) {
     "markdown_unavailable", "result_not_ready", "unauthorized", "origin_denied", "request_limit",
     "operation_storage_unavailable", "operation_corrupt", "invalid_url", "invalid_languages",
     "markdown_too_large", "delivery_history_full", "destination_not_found", "delivery_storage_unavailable",
-    "input_size_limit", "unsupported_format", "mime_mismatch", "model_unavailable", "asr_disabled"]);
+    "input_size_limit", "unsupported_format", "mime_mismatch", "model_unavailable", "asr_disabled", "ocr_disabled", "image_decoder_unavailable", "invalid_image", "pixel_limit", "receiver_upgrade_required", "asset_mismatch"]);
   try {
     const body = await jsonBody(response);
     if (known.has(body?.error?.code)) code = body.error.code;

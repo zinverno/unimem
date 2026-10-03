@@ -1,7 +1,9 @@
 # UniMem Connector
 
-Standalone desktop Obsidian plugin, version **0.1.0**. Creates new Markdown
-notes from explicit UniMem delivery requests. No Veynrel, Companion, MCP, AI,
+Standalone desktop Obsidian plugin, version **0.2.0**. Creates new Markdown
+notes from explicit UniMem delivery requests. With separate opt-in permission,
+delivery v2 creates one PNG/JPEG attachment before its note. V1 stays supported.
+No Veynrel, Companion, MCP, AI,
 server process or full-vault synchronization.
 
 ```sh
@@ -18,6 +20,8 @@ enable receiving. `dist/SHA256SUMS` identifies the built files.
 [Complete installation, pairing, protocol and recovery guide](../../docs/OBSIDIAN_DELIVERY.md).
 [Architecture decision and filesystem limits](../../docs/ADR/ADR-027-standalone-obsidian-connector.md).
 [Verification evidence](../../docs/OBSIDIAN_VERIFICATION.md).
+[Image setup and permission](../../docs/IMAGE_DELIVERY.md).
+[Image verification](../../docs/IMAGE_VERIFICATION_2026-10-03.md).
 
 Connection check creates no notes. `Получить сейчас` works only when reception
 is enabled. `Открыть последний импорт` opens the last recorded path. Files are
@@ -27,7 +31,8 @@ journal is required for recovery; do not delete it or copy it to another vault.
 It includes an unencrypted receiver credential, so exclude it from sharing.
 
 Desktop-only HTTP uses Node's abortable client with no listening socket.
-Note/folder writes and verification use official Obsidian Vault APIs. Read-only
+Note/folder writes and verification use official Obsidian Vault APIs;
+binary writes/verification use `createBinary`/`readBinary`. Read-only
 desktop `lstat` rejects existing symlinks/junctions, with the external path-race
 limitations explained in the ADR. Linux is natively tested; Windows/macOS and
 mobile are not claimed by this development artifact.

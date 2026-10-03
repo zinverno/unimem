@@ -87,6 +87,9 @@ from core.storage import RawObjectStore, build_raw_ref, resolve_digest
 from unimem_api.audio_http import install_audio_routes
 from unimem_api.audio_operations import AudioOperationStore
 from unimem_api.errors import install_error_handlers
+from unimem_api.image_http import install_image_routes
+from unimem_api.image_operations import ImageOperationStore
+from unimem_api.image_service import ImageCaptureService
 from unimem_api.models import (
     CaptureAcceptedResponse,
     ErrorResponse,
@@ -95,6 +98,7 @@ from unimem_api.models import (
 )
 from unimem_api.obsidian_http import install_obsidian_routes
 from unimem_api.obsidian_store import ObsidianStore
+from unimem_api.obsidian_v2_http import install_attachment_routes
 from unimem_api.operations_http import install_operation_errors, install_operation_routes
 from unimem_api.replay import resolve_completed_replay
 from unimem_api.security import ApiSecurity, LocalApiSecurity
@@ -152,6 +156,9 @@ def create_app(
     audio_operations: AudioOperationStore | None = None,
     audio_service: AudioCaptureService | None = None,
     audio_enabled: bool = False,
+    image_operations: ImageOperationStore | None = None,
+    image_service: ImageCaptureService | None = None,
+    image_ocr_enabled: bool = False,
 ) -> FastAPI:
     """Build the API over five already-constructed core services.
 
@@ -174,7 +181,7 @@ def create_app(
     """
     app = FastAPI(
         title="UniMem capture API",
-        version="0.1.0",
+        version="0.2.0",
         summary="Local HTTP capture surface over the UniMem capture core.",
         lifespan=lifespan,
     )
@@ -185,8 +192,11 @@ def create_app(
         if audio_service is None:
             raise ValueError("Audio operations require the capture service.")
         install_audio_routes(app, audio_operations, audio_service, enabled=audio_enabled)
+    if image_operations is not None and image_service is not None:
+        install_image_routes(app, image_operations, image_service, ocr_enabled=image_ocr_enabled)
     if obsidian is not None:
         install_obsidian_routes(app, obsidian, record_store, content_store)
+        install_attachment_routes(app, obsidian, record_store, content_store, raw_store)
     if operations is not None:
         if youtube_service is None:
             raise ValueError("YouTube operations require the capture service.")

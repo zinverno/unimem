@@ -2738,6 +2738,8 @@ existing B1 receipts between separate YouTube and audio tables/routes.
     ADR-028 permits up to 50 audio operation references/observations, with the
     transient upload bytes confined to the extension page and never persisted
     in browser storage. Confirmed acceptance is the background-execution boundary.
+    ADR-029 applies the same bound to image operation references, and adds a
+    two-file import journal for an explicitly permitted PNG/JPEG attachment.
 
 19. A processor asserts only what it observed or produced, and absence of
     interpretation is represented by absence rather than by placeholder content.
@@ -2958,6 +2960,22 @@ The rules that depend on a version live beside them as explicit named sets —
 complements derived, so adding a version is a deliberate reviewed act and cannot
 silently reinterpret an older one.
 
+
+## Explicit image operations and required attachments
+
+[ADR-029](ADR/ADR-029-image-attachment-delivery.md) adds an explicit original/OCR
+operation using the established intake, raw store, router and processors. Each
+composition has exactly one image processor. Legacy `/v1/captures` retains its
+deployment-wide choice. Optional `unimem_images` validates decode in a bounded
+child; neither core nor API imports Pillow. Read/render/delivery use persisted
+results and never invoke recognition.
+
+Delivery v2 fixes one image manifest and one `image-markdown/1.0` snapshot before
+acceptance. Binary access is destination/delivery/asset scoped; the strict v1
+queue and ACK remain separate. Connector opt-in is off on settings migration.
+A two-file journal precedes create-only Vault API writes, and package ACK follows
+verification of both. Partial writes are recoverable or explicitly ambiguous;
+they are not an atomic transaction. Imported files belong to the user.
 
 ## Recoverable Zen/Linux browser delivery (B2/B3)
 

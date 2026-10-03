@@ -27,3 +27,20 @@ test("HTTP auth, abort, offline, safe errors and no redirect forwarding", async 
   }finally{server.closeAllConnections();await new Promise(r=>server.close(r));}
   await assert.rejects(client('/v1/receiver/destination'),/unavailable/);
 });
+test("v2 binary response is separately bounded; never JSON/base64 and no redirects", async () => {
+  let mode = "ok";
+  const server = createServer((req, res) => {
+    if (mode === "redirect") { res.writeHead(302, { location: "http://example.invalid/file" }); res.end("{}"); return; }
+    res.setHeader("content-type", mode === "mime" ? "image/svg+xml" : "image/png");
+    if (mode === "large") { res.end(Buffer.alloc(16 * 1024 * 1024 + 1)); return; }
+    res.end(Buffer.from([1,2,3]));
+  });
+  await new Promise(r => server.listen(0, "127.0.0.1", r));
+  const client = receiverClient(`http://127.0.0.1:${server.address().port}`, "r".repeat(43));
+  const path = "/v2/receiver/deliveries/11111111-1111-4111-8111-111111111111/assets/asset";
+  try {
+    assert.deepEqual(await client(path), new Uint8Array([1,2,3]));
+    for (mode of ["mime", "large", "redirect"]) await assert.rejects(client(path));
+    await assert.rejects(client(path + "/../../raw"));
+  } finally { server.closeAllConnections(); await new Promise(r => server.close(r)); }
+});
