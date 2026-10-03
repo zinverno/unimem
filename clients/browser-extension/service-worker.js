@@ -1,5 +1,6 @@
 // Shared native ES module: Gecko event page and Chromium service worker.
 // No popup preserves left-click selection. Popups also support activeTab.
+import { checkConnection } from "./lib/connection.js";
 import { getExtension } from "./lib/browser.js";
 import { readSelection, runCapture } from "./lib/capture.js";
 import { readPageHtml, runWholePageCapture } from "./lib/page.js";
@@ -83,7 +84,7 @@ api.runtime.onMessage.addListener((message, sender, respond) => {
   try { trusted = trustedMessage(message, sender); } catch { /* Invalid sender URL. */ }
   if (!trusted) { respond({ ok: false, error: { code: "invalid_message", status: null } }); return false; }
   Promise.resolve().then(async () => {
-    if (message.type === "check") return client.check();
+    if (message.type === "check") return checkConnection(http);
     if (message.type === "list") return jobs.list();
     if (message.type === "destinations") return obsidian.destinations();
     if (["obsidian-send", "obsidian-status"].includes(message.type)) {

@@ -1,0 +1,15 @@
+[Unit]
+Description=UniMem local capture service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/unimem-app/venv/bin/unimem start
+WorkingDirectory=%h
+UMask=0077
+Restart=no
+TimeoutStopSec=30
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

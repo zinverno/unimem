@@ -1,3 +1,4 @@
+import { connectionLines } from "./lib/connection.js";
 import { getExtension } from "./lib/browser.js";
 import { settingsStore } from "./lib/settings.js";
 import { errorText, jobSummary, downloadMarkdown } from "./lib/presentation.js";
@@ -107,7 +108,11 @@ $("settings-form").addEventListener("submit", (event) => { event.preventDefault(
   await credential(); notice("Настройки сохранены. Проверка подключения выполняется отдельно.");
 }); });
 $("delete-token").onclick = () => act(async () => { $("token").value = ""; await settings.removeToken(); await credential(); notice("Токен удалён. Локальные ссылки на задания сохранены."); });
-$("check").onclick = () => act(async () => { const s = await message("check"); $("connection-state").textContent = `Сервер: ${s.server ? "доступен" : "не подтверждён"}. Токен: ${s.token ? "принят" : "не подтверждён"}. YouTube API: ${s.youtube ? "доступен" : "не подтверждён"}.`; notice(s.error ? errorText(s.error) : "Подключение подтверждено. Доступность субтитров конкретного ролика проверяется при захвате.", Boolean(s.error)); });
+$("check").onclick = () => act(async () => {
+  const s = await message("check"), state = $("connection-state"); state.replaceChildren();
+  for (const text of connectionLines(s)) { const p = document.createElement("p"); p.textContent = text; state.append(p); }
+  notice(s.error ? errorText(s.error) : "Подключение проверено. Готовность не гарантирует качество конкретного материала.", Boolean(s.error));
+});
 $("permission").onclick = () => act(async () => {
   // act invokes work synchronously: request still belongs to this gesture.
   if (!await api.permissions.request({ origins: ["http://127.0.0.1/*"] })) throw { code: "permission_denied" };

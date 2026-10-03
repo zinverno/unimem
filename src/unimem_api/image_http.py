@@ -1,5 +1,7 @@
 """Binary upload references and read-only persisted image results."""
 
+from importlib.util import find_spec
+
 from fastapi import FastAPI, Response
 
 from core.storage.raw import parse_raw_ref, raw_object_ref
@@ -31,7 +33,11 @@ def install_image_routes(
 
     @app.get("/v1/image/capabilities")
     def capabilities() -> dict[str, object]:
-        return {"description": capability, "ocr": ocr_enabled}
+        return {
+            "description": capability,
+            "ocr": ocr_enabled,
+            "original": find_spec("PIL") is not None,
+        }
 
     @app.exception_handler(ImageError)
     async def failure(request: object, exc: ImageError) -> Response:

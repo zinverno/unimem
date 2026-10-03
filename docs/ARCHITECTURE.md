@@ -3029,3 +3029,12 @@ fences, ambiguity and user ownership after import remain the same. The original
 MP4 remains in UniMem. [Operator guide](LOCAL_VIDEO.md) and
 [measured evidence](VIDEO_VERIFICATION_2026-10-03.md) distinguish limited static-frame
 description from understanding events across a video.
+
+## First installed Zen/Linux candidate
+
+[ADR-032](ADR/ADR-032-first-release-candidate.md) adds the stdlib-only `unimem_local`
+launcher over the existing CLI, saved absolute-path TOML configuration and an
+optional user systemd template. [FIRST_RUN](../FIRST_RUN.md) is the single entry
+for a hash-identified compatible wheel/browser/standalone Connector kit. Core,
+models, delivery v1/v2/v3 and persistence ownership remain unchanged. Mozilla
+signing and complete signed Zen restart remain separately evidenced gates.
