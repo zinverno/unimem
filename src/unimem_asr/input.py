@@ -8,6 +8,7 @@ MIMES = {"wav": "audio/wav", "mp3": "audio/mpeg", "ogg": "audio/ogg"}
 ALIASES = {
     "audio/x-wav": "audio/wav",
     "audio/wave": "audio/wav",
+    "audio/vnd.wave": "audio/wav",
     "audio/mp3": "audio/mpeg",
     "application/ogg": "audio/ogg",
     "audio/ogg; codecs=opus": "audio/ogg",

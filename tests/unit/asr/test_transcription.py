@@ -49,7 +49,7 @@ def transcript(**changes: Any) -> Transcript:
     return Transcript.model_validate(fields | changes)
 
 
-@pytest.mark.parametrize("mime", ["", "application/octet-stream", "audio/wav", "audio/x-wav"])
+@pytest.mark.parametrize("mime", ["", "application/octet-stream", "audio/wav", "audio/x-wav", "audio/vnd.wave"])
 def test_content_detection_and_declared_aliases(mime: str) -> None:
     data = wav_bytes()
     assert inspect_input(io.BytesIO(data), mime) == ("wav", "audio/wav", len(data))
