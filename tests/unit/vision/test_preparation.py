@@ -88,6 +88,25 @@ def test_probe_is_bounded_and_does_not_load_model(
         profile.probe_sandbox(tmp_path)
 
 
+def test_readiness_requires_decoder_but_disabled_profile_imports_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(profile, "verify_profile", lambda _: None)
+    monkeypatch.setattr(profile, "probe_sandbox", lambda _: None)
+    attempted = []
+
+    def missing(name: str) -> None:
+        attempted.append(name)
+        raise ModuleNotFoundError(name)
+
+    monkeypatch.setattr(profile, "import_module", missing)
+    assert profile.readiness(None)["code"] == "vision_disabled"
+    assert not attempted
+    assert profile.readiness(tmp_path)["code"] == "image_decoder_unavailable"
+    assert attempted == ["PIL.Image"]
+
+
 def test_preparation_extracts_only_verified_cpu_members(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

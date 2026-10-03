@@ -153,10 +153,12 @@ npm run build
 npm run check-package
 ```
 
-Full local Python regression: **4406 passed, 31 skipped; 96.10% coverage**.
+Full local Python regression at `28f8b52`: **4406 passed, 31 skipped; 96.10% coverage**.
+The final readiness guard for a missing optional decoder adds one focused test;
+final-head full regression also runs in the unchanged mandatory CI gates.
 The skipped existing optional integration gates are not claimed as native evidence.
 Focused vision/image/route tests passed; the final independent vision suite has
-**34 passed, 92.39% adapter/slot coverage**, including the inherited-lock test.
+**35 passed, 92.48% adapter/slot coverage**, including the inherited-lock test.
 Browser: **608 passed**, web-ext lint zero errors and two existing manifest warnings
 (Gecko service-worker fallback and Firefox Android minimum version); package check
 24 shipped files. Ruff/format/mypy pass. The image CI job additionally enforces
@@ -181,7 +183,7 @@ Builds (development only):
 
 | Artifact | Version | SHA-256 |
 |---|---|---|
-| capture_core wheel | 0.3.0 | `2cb2ede0c3d47186c61aa587c8fedcb240fe1ede91299c6cb74e15dd42de48e5` |
+| capture_core wheel | 0.3.0 | `d0edde33f273719764f38875d4bd1830793d9128f3283edceae7073f3da44b22` |
 | unimem-browser dev ZIP | 0.5.0 | `8fff7d2ac58c4550175690b615ca36f36964eda31b9d1a22cad5b1bf3b0d7ea3` |
 
 Wheel command: `uv build --wheel --out-dir /tmp/unimem-vision-20261003/build`.

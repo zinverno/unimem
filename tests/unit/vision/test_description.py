@@ -282,6 +282,7 @@ def test_local_file_verification_and_no_hidden_preparation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(profile, "probe_sandbox", lambda _: None)
+    monkeypatch.setattr(profile, "import_module", lambda _: None)
     monkeypatch.setattr("unimem_vision.profile.platform.system", lambda: "Linux")
     monkeypatch.setattr("unimem_vision.profile.platform.machine", lambda: "x86_64")
     real_is_file, real_read_text = Path.is_file, Path.read_text

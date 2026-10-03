@@ -3,6 +3,7 @@
 import hashlib
 import platform
 import subprocess
+from importlib import import_module
 from pathlib import Path
 
 from unimem_vision.policy import COMPONENTS, MODEL, REVISION, VisionError
@@ -57,7 +58,11 @@ def readiness(root: Path | None) -> dict[str, str | bool]:
         try:
             verify_profile(root)
             probe_sandbox(root)
+            import_module("PIL.Image")
+            import_module("PIL.ImageOps")
             code = "ready"
         except VisionError as exc:
             code = exc.code
+        except ImportError:
+            code = "image_decoder_unavailable"
     return {"ready": code == "ready", "code": code, "model": MODEL, "revision": REVISION}

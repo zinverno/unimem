@@ -9,12 +9,13 @@
   "python": {
     "passed": 4406,
     "skipped": 31,
-    "coverage_percent": 96.1
+    "coverage_percent": 96.1,
+    "head": "28f8b523fc6bd88bfd61fbdd2c10a6bc5bee7fa5"
   },
   "browser_tests": 608,
   "focused_python_before_final_slot_test": 87,
-  "adapter_coverage_percent": 92.39,
-  "final_vision_tests": 34,
+  "adapter_coverage_percent": 92.48,
+  "final_vision_tests": 35,
   "final_native_restart": {
     "connector": "0.2.0",
     "files_before": 11,
