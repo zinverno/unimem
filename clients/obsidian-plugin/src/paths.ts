@@ -17,6 +17,11 @@ export function notePath(inbox: string, basename: string, configDir = ".obsidian
   if (!/^unimem-[0-9a-f]{64}\.md$/.test(basename)) throw new SafeError("path_rejected");
   return `${inbox}/${basename}`;
 }
+export function assetPath(inbox: string, basename: string, configDir = ".obsidian"): string {
+  folder(inbox, configDir);
+  if (!/^unimem-[0-9a-f]{64}\.(png|jpg)$/.test(basename)) throw new SafeError("path_rejected");
+  return `${inbox}/${basename}`;
+}
 // Read-only desktop defense. Vault API remains the sole note/folder writer.
 // This detects existing symlinks/junctions; it cannot fence an external OS rename race.
 export async function rejectSymlinks(base: string, relative: string): Promise<void> {

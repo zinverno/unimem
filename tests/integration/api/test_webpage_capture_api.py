@@ -402,4 +402,18 @@ class TestNoNewSurface:
             "/v1/audio/operations",
             "/v1/audio/operations/{operation_id}",
             "/v1/audio/operations/{operation_id}/markdown",
+            # ADR-029 explicit image operations and version-isolated attachment delivery.
+            "/v1/image/operations",
+            "/v1/image/operations/{operation_id}",
+            "/v1/image/operations/{operation_id}/original",
+            "/v1/image/operations/{operation_id}/result",
+            "/v2/receiver/capabilities",
+            "/v2/destinations/{destination_id}/captures/{capture_id}/delivery",
+            "/v2/deliveries",
+            "/v2/receiver/deliveries/next",
+            "/v2/receiver/deliveries/{delivery_id}",
+            "/v2/receiver/deliveries/{delivery_id}/claim",
+            "/v2/receiver/deliveries/{delivery_id}/ack",
+            "/v2/receiver/deliveries/{delivery_id}/fail",
+            "/v2/receiver/deliveries/{delivery_id}/assets/{asset_id}",
         }

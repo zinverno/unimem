@@ -1,0 +1,53 @@
+{
+  "receiver_id": "11111111-1111-4111-8111-111111111111",
+  "claim_id": "22222222-2222-4222-8222-222222222222",
+  "states": [
+    "pending",
+    "claimed",
+    "imported",
+    "conflict",
+    "failed",
+    "ambiguous"
+  ],
+  "failure_codes": [
+    "path_rejected",
+    "file_exists",
+    "digest_mismatch",
+    "write_failed",
+    "write_ambiguous",
+    "config_changed"
+  ],
+  "invalid_ids": [
+    "",
+    "../note",
+    "UPPERCASE",
+    "11111111-1111-1111-1111-111111111111",
+    "11111111-1111-4111-8111-111111111111\n"
+  ],
+  "delivery": {
+    "protocol_version": "2",
+    "delivery_id": "33333333-3333-4333-8333-333333333333",
+    "destination_id": "44444444-4444-4444-8444-444444444444",
+    "source_capture_id": "fixture_capture",
+    "source_content_id": "fixture_content",
+    "export_format": "image-markdown",
+    "export_version": "1.0",
+    "markdown": "# Изображение\n\n![Исходное изображение](./unimem-7f4924d13edf410addc59b53e450503ab96791d87b3cb979e4efe9ff34c8b261.png)\n",
+    "markdown_sha256": "ecc0a04a37809adc5cbd51089d8f45c52f1812c5de3da60b3105279292f67e66",
+    "suggested_filename": "unimem-7f4924d13edf410addc59b53e450503ab96791d87b3cb979e4efe9ff34c8b261.md",
+    "created_at": "2026-09-30T20:00:00Z",
+    "state": "pending",
+    "lease_expires_at": null,
+    "error_code": null,
+    "attachments": [
+      {
+        "asset_id": "11111111-1111-4111-8111-111111111111",
+        "mime_type": "image/png",
+        "size_bytes": 71,
+        "sha256": "b7eb1fb7bf063e77f1b972b21d0213bb4e940891c286c8bf904e1954a3239a29",
+        "relative_name": "unimem-7f4924d13edf410addc59b53e450503ab96791d87b3cb979e4efe9ff34c8b261.png"
+      }
+    ],
+    "package_sha256": "f548cd63550ae3020741820c29123ac98bac97934a19af530d3bd566f3b23d3e"
+  }
+}

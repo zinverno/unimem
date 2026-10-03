@@ -36,6 +36,18 @@ jobs:
         # coverage floor applies to it rather than only to the kernel.
         run: pytest --cov=core --cov=unimem_api
 
+  image-attachments:
+    name: Local image operations and attachment contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e '.[dev,images]'
+      - run: python -c 'from PIL import Image; print(Image.__version__)'
+      - run: pytest tests/unit/api/test_image_delivery.py tests/unit/api/test_obsidian_delivery.py -q
+
   local-audio-contracts:
     name: Local audio (deterministic adapter contracts)
     runs-on: ubuntu-latest

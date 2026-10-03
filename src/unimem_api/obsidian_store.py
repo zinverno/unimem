@@ -12,13 +12,20 @@ from pathlib import Path
 from uuid import uuid4
 
 from unimem_api.obsidian_contract import (
+    DELIVERY_ADAPTER,
     MAX_MARKDOWN_BYTES,
+    MAX_PACKAGE_BYTES,
     AckRequest,
+    AnyDelivery,
+    Attachment,
     ClaimRequest,
     Delivery,
     DeliveryError,
     Destination,
     FailureRequest,
+    ImageDelivery,
+    PackageAckRequest,
+    package_digest,
 )
 
 
@@ -58,6 +65,15 @@ class ObsidianStore:
                 "json_extract(payload, '$.lease_expires_at'))"
             )
 
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS attachment_permissions "
+                "(destination TEXT PRIMARY KEY, enabled INTEGER NOT NULL)"
+            )
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS delivery_assets "
+                "(delivery TEXT PRIMARY KEY, raw_ref TEXT NOT NULL)"
+            )
+
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
         try:
@@ -69,6 +85,35 @@ class ObsidianStore:
                 db.close()
         except sqlite3.Error:
             raise DeliveryError("delivery_storage_unavailable") from None
+
+    def attachment_permission(self, destination: str, receiver: str, enabled: bool) -> None:
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._owner(db, destination, receiver)
+            db.execute(
+                "INSERT OR REPLACE INTO attachment_permissions VALUES (?,?)",
+                (destination, int(enabled)),
+            )
+
+    def attachments_enabled(self, destination: str) -> bool:
+        self.destination(destination)
+        with self.connection() as db:
+            row = db.execute(
+                "SELECT enabled FROM attachment_permissions WHERE destination=?", (destination,)
+            ).fetchone()
+        return bool(row and row[0])
+
+    def asset_ref(self, destination: str, delivery_id: str, asset_id: str) -> str:
+        d = self.get(destination, delivery_id)
+        if not isinstance(d, ImageDelivery) or d.attachments[0].asset_id != asset_id:
+            raise DeliveryError("asset_not_found")
+        with self.connection() as db:
+            row = db.execute(
+                "SELECT raw_ref FROM delivery_assets WHERE delivery=?", (delivery_id,)
+            ).fetchone()
+        if not row:
+            raise DeliveryError("asset_not_found")
+        return str(row[0])
 
     def create_destination(self, name: str) -> tuple[Destination, str]:
         destination = Destination(destination_id=str(uuid4()), display_name=name.strip())
@@ -107,13 +152,13 @@ class ObsidianStore:
                 return destination
         raise DeliveryError("destination_not_found")
 
-    def find(self, destination: str, capture: str) -> Delivery | None:
+    def find(self, destination: str, capture: str) -> AnyDelivery | None:
         with self.connection() as db:
             row = db.execute(
                 "SELECT payload FROM obsidian_deliveries WHERE destination=? AND capture=?",
                 (destination, capture),
             ).fetchone()
-        return Delivery.model_validate_json(row[0]) if row else None
+        return DELIVERY_ADAPTER.validate_json(row[0]) if row else None
 
     def register(
         self,
@@ -123,7 +168,10 @@ class ObsidianStore:
         markdown: str,
         export_format: str,
         export_version: str,
-    ) -> tuple[Delivery, bool]:
+        *,
+        attachment: Attachment | None = None,
+        raw_ref: str | None = None,
+    ) -> tuple[AnyDelivery, bool]:
         self.destination(destination)
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -132,13 +180,13 @@ class ObsidianStore:
                 (destination, capture),
             ).fetchone()
             if row:
-                return Delivery.model_validate_json(row[0]), False
+                return DELIVERY_ADAPTER.validate_json(row[0]), False
             if len(markdown.encode("utf-8")) > MAX_MARKDOWN_BYTES:
                 raise DeliveryError("markdown_too_large")
             if db.execute("SELECT count(*) FROM obsidian_deliveries").fetchone()[0] >= self.limit:
                 raise DeliveryError("delivery_history_full")
             delivery_id = str(uuid4())
-            delivery = Delivery(
+            delivery: AnyDelivery = Delivery(
                 delivery_id=delivery_id,
                 destination_id=destination,
                 source_capture_id=capture,
@@ -150,6 +198,20 @@ class ObsidianStore:
                 suggested_filename=suggested_filename(capture),
                 created_at=datetime.now(UTC),
             )
+            if attachment is not None:
+                if raw_ref is None or raw_ref != "sha256:" + attachment.sha256:
+                    raise DeliveryError("asset_mismatch")
+                if len(markdown.encode()) + attachment.size_bytes > MAX_PACKAGE_BYTES:
+                    raise DeliveryError("package_too_large")
+                if not self.attachments_enabled(destination):
+                    raise DeliveryError("receiver_upgrade_required")
+                package = ImageDelivery(
+                    **delivery.model_dump(exclude={"protocol_version"}),
+                    attachments=(attachment,),
+                    package_sha256="0" * 64,
+                )
+                delivery = package.model_copy(update={"package_sha256": package_digest(package)})
+                db.execute("INSERT INTO delivery_assets VALUES (?,?)", (delivery_id, raw_ref))
             db.execute(
                 "INSERT INTO obsidian_deliveries VALUES (?,?,?,?,NULL)",
                 (delivery_id, destination, capture, delivery.model_dump_json()),
@@ -159,29 +221,30 @@ class ObsidianStore:
     @staticmethod
     def _read(
         db: sqlite3.Connection, destination: str, delivery_id: str
-    ) -> tuple[Delivery, str | None]:
+    ) -> tuple[AnyDelivery, str | None]:
         row = db.execute(
             "SELECT payload,claim_id FROM obsidian_deliveries WHERE id=? AND destination=?",
             (delivery_id, destination),
         ).fetchone()
         if not row:
             raise DeliveryError("delivery_not_found")
-        return Delivery.model_validate_json(row[0]), row[1]
+        return DELIVERY_ADAPTER.validate_json(row[0]), row[1]
 
-    def get(self, destination: str, delivery_id: str) -> Delivery:
+    def get(self, destination: str, delivery_id: str) -> AnyDelivery:
         with self.connection() as db:
             return self._read(db, destination, delivery_id)[0]
 
-    def next(self, destination: str) -> Delivery | None:
+    def next(self, destination: str, version: str = "1") -> AnyDelivery | None:
         with self.connection() as db:
             row = db.execute(
                 "SELECT payload FROM obsidian_deliveries WHERE destination=? "
+                "AND json_extract(payload, '$.protocol_version') = ? "
                 "AND json_extract(payload, '$.state') IN ('pending','claimed') "
                 "AND (json_extract(payload, '$.lease_expires_at') IS NULL "
                 "OR json_extract(payload, '$.lease_expires_at') <= ?) ORDER BY rowid LIMIT 1",
-                (destination, datetime.now(UTC).isoformat().replace("+00:00", "Z")),
+                (destination, version, datetime.now(UTC).isoformat().replace("+00:00", "Z")),
             ).fetchone()
-        return Delivery.model_validate_json(row[0]) if row else None
+        return DELIVERY_ADAPTER.validate_json(row[0]) if row else None
 
     @staticmethod
     def _owner(db: sqlite3.Connection, destination: str, receiver_id: str) -> None:
@@ -194,7 +257,7 @@ class ObsidianStore:
             raise DeliveryError("receiver_mismatch")
         db.execute("UPDATE destinations SET receiver_id=? WHERE id=?", (receiver_id, destination))
 
-    def claim(self, destination: str, delivery_id: str, request: ClaimRequest) -> Delivery:
+    def claim(self, destination: str, delivery_id: str, request: ClaimRequest) -> AnyDelivery:
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             delivery, claim_id = self._read(db, destination, delivery_id)
@@ -219,15 +282,27 @@ class ObsidianStore:
         return updated
 
     def finish(
-        self, destination: str, delivery_id: str, request: AckRequest | FailureRequest
-    ) -> Delivery:
+        self,
+        destination: str,
+        delivery_id: str,
+        request: AckRequest | PackageAckRequest | FailureRequest,
+    ) -> AnyDelivery:
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             delivery, claim_id = self._read(db, destination, delivery_id)
             self._owner(db, destination, request.receiver_id)
             if claim_id != request.claim_id:
                 raise DeliveryError("claim_mismatch")
-            if isinstance(request, AckRequest):
+            if isinstance(request, PackageAckRequest):
+                if (
+                    not isinstance(delivery, ImageDelivery)
+                    or request.package_sha256 != delivery.package_sha256
+                ):
+                    raise DeliveryError("digest_mismatch")
+                state, error = "imported", None
+            elif isinstance(request, AckRequest):
+                if isinstance(delivery, ImageDelivery):
+                    raise DeliveryError("protocol_mismatch")
                 if request.markdown_sha256 != delivery.markdown_sha256:
                     raise DeliveryError("digest_mismatch")
                 state, error = "imported", None

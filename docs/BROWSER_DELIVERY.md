@@ -1,8 +1,9 @@
-# UniMem 0.3.0: Zen/Linux, задания и Markdown
+# UniMem 0.4.0: Zen/Linux, задания и доставка
 
 Это dev-расширение для защищённого локального API B1. Оно сохраняет выделенный
-текст, HTML страницы и субтитры выбранного YouTube-видео. Импорт в Obsidian не
-входит в этот этап. Состоянием операции владеет сервер.
+текст, HTML страницы и субтитры выбранного YouTube-видео. Состоянием операции
+владеет сервер. [Локальные изображения и полноценная доставка в Obsidian](IMAGE_DELIVERY.md)
+добавлены в 0.4.0; прежние проверки B2/B3 ниже относятся к своему этапу.
 
 ## Сборка и временная установка
 
@@ -14,10 +15,10 @@ npm test --prefix clients/browser-extension
 npm run lint --prefix clients/browser-extension
 npm run build --prefix clients/browser-extension
 npm run check-package --prefix clients/browser-extension
-sha256sum clients/browser-extension/dist/unimem-browser-0.3.0-dev.zip
+sha256sum clients/browser-extension/dist/unimem-browser-0.4.0-dev.zip
 ```
 
-Пакет: `clients/browser-extension/dist/unimem-browser-0.3.0-dev.zip`.
+Пакет: `clients/browser-extension/dist/unimem-browser-0.4.0-dev.zip`.
 Рядом — `.sha256`; распакованный набор — `dist/unpacked/`.
 Сборка воспроизводима: повторная сборка тех же исходников даёт тот же SHA256.
 `web-ext` — только dev-зависимость; расширение исполняет исходные ES modules.

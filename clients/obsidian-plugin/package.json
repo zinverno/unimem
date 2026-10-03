@@ -1,5 +1,5 @@
 {
-  "name": "unimem-connector", "version": "0.1.0", "private": true,
+  "name": "unimem-connector", "version": "0.2.0", "private": true,
   "description": "Create-only delivery from local UniMem into Obsidian",
   "type": "module", "main": "main.js",
   "scripts": {

@@ -1,0 +1,3 @@
+Local image capture
+The original file remains unchanged.
+Text recognition can contain errors.

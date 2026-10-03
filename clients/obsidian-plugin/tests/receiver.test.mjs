@@ -62,6 +62,14 @@ test("shared Python/TS contract: states, errors, digest, IDs, bounds", () => {
     assert.throws(() => delivery({ ...fixture.delivery, ...bad }, fixture.delivery.destination_id));
   }
 });
+
+test("unavailable attachment capability cannot block an ordinary v1 import", async () => {
+  const h = harness(); h.r.data.settings.attachments = true;
+  h.onRequest = async path => { if (path.startsWith("/v2/")) throw Error("old server"); };
+  await h.r.poll();
+  assert.equal(h.d.state, "imported"); assert.equal(h.creates, 1);
+  assert.equal(h.calls.some(path => path.startsWith("/v2/")), false);
+});
 test("read-only connection; disabled and unverified receive do nothing", async () => {
   const h = harness(); h.r.data.settings.enabled = false;
   await h.r.poll(); assert.equal(h.calls.length, 0);

@@ -22,6 +22,13 @@ Markdown export and existing Connector delivery read it without a model.
 See [setup and finite limits](docs/LOCAL_AUDIO.md) and
 [real-engine/native evidence and quality limitations](docs/AUDIO_VERIFICATION_2026-10-03.md).
 
+**Local PNG/JPEG:** the Zen management page accepts one file or drop, previews it,
+and offers original-only saving or existing local Tesseract OCR. Explicit Send
+delivers one note and its unchanged, offline image to the standalone Connector.
+See [installation, consent and limits](docs/IMAGE_DELIVERY.md),
+[versioned attachment protocol](docs/ADR/ADR-029-image-attachment-delivery.md), and
+[separate automated, real OCR and native evidence](docs/IMAGE_VERIFICATION_2026-10-03.md).
+
 Implemented so far:
 
 - **Phase 0A — domain contracts.** The stable domain language:
@@ -1260,8 +1267,9 @@ rasterizer, an imaging library, or `subprocess`. `python-multipart` is what
 FastAPI parses the upload's `multipart/form-data` body with. Persistence uses the
 standard library's `sqlite3`.
 
-Optional dependencies: the `[ocr]` extra adds **pypdfium2** (page rasterization)
-and **Pillow** (PNG encoding), used only by `src/unimem_ocr/` and imported only
+Optional dependencies: `[images]` adds **Pillow** for bounded PNG/JPEG decode
+validation in `unimem_images`; it needs no OCR engine. The `[ocr]` extra adds **pypdfium2** (page rasterization)
+and **Pillow** (PNG encoding), used by `src/unimem_ocr/` and imported only
 when a deployment actually asks for recognition. `unimem_ocr` depends on `core`
 and never the other way round; `core` does not know its name, and `unimem_api`
 imports it in exactly one place — `unimem_api.__main__`, inside the function that

@@ -100,6 +100,9 @@ from core.storage import LocalRawObjectStore
 from unimem_api.app import create_app
 from unimem_api.audio_operations import AudioOperationStore
 from unimem_api.audio_worker import AudioWorker
+from unimem_api.image_operations import ImageOperationStore
+from unimem_api.image_service import ImageCaptureService
+from unimem_api.image_worker import ImageWorker
 from unimem_api.obsidian_store import ObsidianStore
 from unimem_api.security import ApiSecurity
 from unimem_api.worker import DeliveryWorker, ServerLease
@@ -306,6 +309,8 @@ def build_local_app(
     youtube_service = YoutubeCaptureService(data_dir) if youtube else None
     audio_operations = AudioOperationStore(database)
     audio_service = AudioCaptureService(data_dir)
+    image_operations = ImageOperationStore(database)
+    image_service = ImageCaptureService(data_dir)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -335,9 +340,20 @@ def build_local_app(
                     logging.getLogger(__name__).error(
                         "Audio recovery unavailable; restart required."
                     )
+            image_worker: ImageWorker | None = ImageWorker(
+                data_dir, image_operations, lease.fd, ocr_enabled=image_ocr is not None
+            )
+            try:
+                if image_worker is not None:
+                    image_worker.start()
+            except (OperationError, CaptureRecordStoreError, ContentObjectStoreError):
+                logging.getLogger(__name__).error("Image recovery unavailable; restart required.")
+                image_worker = None
             try:
                 yield
             finally:
+                if image_worker:
+                    await asyncio.to_thread(image_worker.stop)
                 if worker:
                     await asyncio.to_thread(worker.stop)
                 if audio_worker:
@@ -357,6 +373,9 @@ def build_local_app(
         audio_operations=audio_operations,
         audio_service=audio_service,
         audio_enabled=audio_model is not None,
+        image_operations=image_operations,
+        image_service=image_service,
+        image_ocr_enabled=image_ocr is not None,
     )
     return app
 
