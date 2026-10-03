@@ -403,6 +403,8 @@ class TestNoNewSurface:
             "/v1/audio/operations/{operation_id}",
             "/v1/audio/operations/{operation_id}/markdown",
             # ADR-029 explicit image operations and version-isolated attachment delivery.
+            # ADR-030 reports the prepared local description capability without inference.
+            "/v1/image/capabilities",
             "/v1/image/operations",
             "/v1/image/operations/{operation_id}",
             "/v1/image/operations/{operation_id}/original",

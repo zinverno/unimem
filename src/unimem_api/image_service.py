@@ -1,6 +1,8 @@
 """Image boundary validation and composition; canonical owners remain in core."""
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, BinaryIO
 
 from core.contracts import (
     CaptureContext,
@@ -18,12 +20,16 @@ from core.processing import (
     ImageOcrProcessor,
     ImageProcessor,
     ProcessingOrchestrator,
+    Processor,
     ProcessorRouter,
 )
 from core.processing.image_recognition import ImageOcr
 from core.storage import LocalRawObjectStore
 from core.storage.raw import parse_raw_ref, raw_object_ref
 from unimem_api.image_operations import ImageOperation
+
+if TYPE_CHECKING:
+    from unimem_vision.engine import Description
 from unimem_images import (
     IMAGE_MEMORY as IMAGE_MEMORY,
 )
@@ -53,13 +59,20 @@ class ImageCaptureService:
         self.record_store = SqliteCaptureRecordStore(data_dir / "unimem.sqlite3")
         self.content_store = SqliteContentObjectStore(data_dir / "unimem.sqlite3")
 
-    def capture(self, op: ImageOperation, ocr: ImageOcr | None) -> ContentObject:
+    def capture(
+        self,
+        op: ImageOperation,
+        ocr: ImageOcr | None,
+        describe: Callable[[BinaryIO], "Description"] | None = None,
+    ) -> ContentObject:
         request = op.request
         with self.raw_store.open(raw_object_ref(parse_raw_ref(request.file_ref))) as stream:
             data, mime, header = inspect_image(stream, request.declared_mime)
         validate_pixels(data, header)
         if request.mode == "ocr" and ocr is None:
             raise ImageError("ocr_disabled")
+        if request.mode == "describe" and describe is None:
+            raise ImageError("vision_disabled")
         stored = CaptureIntake(self.raw_store, self.record_store).accept(
             CaptureEnvelope(
                 id=op.reserved_capture_id,
@@ -70,11 +83,15 @@ class ImageCaptureService:
                 context=CaptureContext(captured_at=request.captured_at, application="unimem-image"),
             )
         )
-        processor = (
+        processor: Processor = (
             ImageOcrProcessor(self.raw_store, ocr)
             if ocr is not None and request.mode == "ocr"
             else ImageProcessor(self.raw_store)
         )
+        if request.mode == "describe" and describe is not None:
+            from unimem_vision.processor import ImageDescriptionProcessor
+
+            processor = ImageDescriptionProcessor(self.raw_store, describe)
         return ProcessingOrchestrator(
             ProcessorRouter([processor]),
             self.record_store,

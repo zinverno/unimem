@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "capture-core"
-version = "0.2.0"
+version = "0.3.0"
 description = "Capture core plus the local HTTP capture surface for the multimodal capture and ingestion layer."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -119,7 +119,7 @@ dev = [
 # provides. A Python extra would suggest `pip` could supply that, which it cannot.
 # Leaving the package out would mean `--media` failed with "no such module" on a
 # machine that had FFmpeg installed and everything it needs. See ADR-023.
-packages = ["src/core", "src/unimem_api", "src/unimem_ocr", "src/unimem_media", "src/unimem_youtube", "src/unimem_asr", "src/unimem_delivery", "src/unimem_images"]
+packages = ["src/core", "src/unimem_api", "src/unimem_ocr", "src/unimem_media", "src/unimem_youtube", "src/unimem_asr", "src/unimem_delivery", "src/unimem_images", "src/unimem_vision"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

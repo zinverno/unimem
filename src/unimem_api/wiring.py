@@ -192,6 +192,7 @@ def build_local_app(
     security: ApiSecurity,
     youtube: bool = False,
     audio_model: Path | None = None,
+    image_description_profile: Path | None = None,
     audio_worker_command: tuple[str, ...] | None = None,
     worker_command: tuple[str, ...] | None = None,
     pdf_ocr: PdfPageOcr | None = None,
@@ -311,6 +312,11 @@ def build_local_app(
     audio_service = AudioCaptureService(data_dir)
     image_operations = ImageOperationStore(database)
     image_service = ImageCaptureService(data_dir)
+    description_capability = None
+    if image_description_profile is not None:
+        from unimem_vision.profile import readiness
+
+        description_capability = readiness(image_description_profile)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -341,7 +347,11 @@ def build_local_app(
                         "Audio recovery unavailable; restart required."
                     )
             image_worker: ImageWorker | None = ImageWorker(
-                data_dir, image_operations, lease.fd, ocr_enabled=image_ocr is not None
+                data_dir,
+                image_operations,
+                lease.fd,
+                ocr_enabled=image_ocr is not None,
+                description_profile=image_description_profile,
             )
             try:
                 if image_worker is not None:
@@ -376,6 +386,7 @@ def build_local_app(
         image_operations=image_operations,
         image_service=image_service,
         image_ocr_enabled=image_ocr is not None,
+        image_description_capability=description_capability,
     )
     return app
 

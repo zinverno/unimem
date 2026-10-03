@@ -3,7 +3,7 @@
 from fastapi import FastAPI, Response
 
 from core.storage.raw import parse_raw_ref, raw_object_ref
-from unimem_api.image_export import ImageMarkdownRenderer, image_attachment
+from unimem_api.image_export import image_attachment, image_renderer
 from unimem_api.image_operations import ImageOperation, ImageOperationStore, ImageRequest
 from unimem_api.image_service import ImageCaptureService, ImageError, inspect_image, ocr_status
 from unimem_api.security import refusal
@@ -20,8 +20,19 @@ def image_view(op: ImageOperation) -> dict[str, object]:
 
 
 def install_image_routes(
-    app: FastAPI, store: ImageOperationStore, service: ImageCaptureService, *, ocr_enabled: bool
+    app: FastAPI,
+    store: ImageOperationStore,
+    service: ImageCaptureService,
+    *,
+    ocr_enabled: bool,
+    description_capability: dict[str, str | bool] | None = None,
 ) -> None:
+    capability = description_capability or {"ready": False, "code": "vision_disabled"}
+
+    @app.get("/v1/image/capabilities")
+    def capabilities() -> dict[str, object]:
+        return {"description": capability, "ocr": ocr_enabled}
+
     @app.exception_handler(ImageError)
     async def failure(request: object, exc: ImageError) -> Response:
         return refusal(
@@ -42,6 +53,8 @@ def install_image_routes(
             return image_view(existing)
         if request.mode == "ocr" and not ocr_enabled:
             raise ImageError("ocr_disabled")
+        if request.mode == "describe" and not capability["ready"]:
+            raise ImageError(str(capability["code"]))
         with service.raw_store.open(raw_object_ref(parse_raw_ref(request.file_ref))) as stream:
             inspect_image(stream, request.declared_mime)
         operation, created = store.register(request)
@@ -63,7 +76,7 @@ def install_image_routes(
         capture_id = completed(operation_id)
         content = service.read(capture_id)
         asset, _ = image_attachment(content, service.raw_store)
-        markdown = ImageMarkdownRenderer().render(
+        markdown = image_renderer(content).render(
             content, service.record_store.get(capture_id), asset
         )
         return {
@@ -71,6 +84,7 @@ def install_image_routes(
             "markdown_bytes": len(markdown.encode()),
             "attachment": asset.model_dump(),
             "ocr_status": ocr_status(content),
+            "description": content.metadata.get("image_description"),
         }
 
     @app.get("/v1/image/operations/{operation_id}/original")

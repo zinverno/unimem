@@ -11,7 +11,7 @@ from unimem_delivery.operations import DurableOperationStore, Operation, Operati
 class ImageRequest(OperationRequest):
     file_ref: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     declared_mime: str = Field(default="", max_length=100)
-    mode: Literal["original", "ocr"]
+    mode: Literal["original", "ocr", "describe"]
     captured_at: AwareDatetime
 
 

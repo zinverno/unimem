@@ -1,0 +1,38 @@
+{
+  "Qwen3VL-2B-Instruct-Q4_K_M.gguf": {
+    "size": 1107409952,
+    "sha256": "089d75c52f4b7ffc56ba998ffc50aae89fcafc755f9e7208aacca281dca6c2ae"
+  },
+  "mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf": {
+    "size": 445053216,
+    "sha256": "f9a68fabba69c3b81e153367b2c7521030b0fa8bb0de400c9599c8e6725f9c82"
+  },
+  "cpu/libggml-base.so.0": {
+    "size": 920080,
+    "sha256": "5edd28e54a19d75ccf3bcd1a729a5d5327f822514c274969b8b83d878e5ef3bd"
+  },
+  "cpu/libggml-cpu-haswell.so": {
+    "size": 1227976,
+    "sha256": "984064c44e5a92558e01ace8cf18cde33356d2d21bdb93166f0faf57885fe234"
+  },
+  "cpu/libggml.so.0": {
+    "size": 55184,
+    "sha256": "569c53469aceca5dd357d2c3e1570014ed73e676abb08d44971be4cb784d855c"
+  },
+  "cpu/libllama-common.so.0": {
+    "size": 6331832,
+    "sha256": "6686de2e183ac053f6d965bd06af6c4eb62aff44353a3c2664b854c72a492dda"
+  },
+  "cpu/libllama.so.0": {
+    "size": 4616400,
+    "sha256": "7e3dd3d60fada6e76cc0bbccd076c90e0b2f1c01cc1c18bf3bb0b2df5ee2c67f"
+  },
+  "cpu/libmtmd.so.0": {
+    "size": 1878192,
+    "sha256": "9bfb7fc0005de64f160763476a326a54a9a56ffd0a5b1e24111981a90c02d84f"
+  },
+  "cpu/llama-mtmd-cli": {
+    "size": 87984,
+    "sha256": "9378a6b9582c67c0c280487c07ebb483043c94779a975bf1e297af7ea115d271"
+  }
+}

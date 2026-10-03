@@ -3,7 +3,13 @@
 import hashlib
 import re
 
-from core.contracts import CaptureRecord, ContentObject, ContentType
+from core.contracts import (
+    CaptureRecord,
+    ContentObject,
+    ContentType,
+    ProvenanceSourceType,
+    SegmentType,
+)
 from core.storage import RawObjectStore
 from core.storage.raw import parse_raw_ref, raw_object_ref
 from unimem_api.image_service import MAX_IMAGE_BYTES, ImageError, ocr_status
@@ -103,3 +109,70 @@ class ImageMarkdownRenderer:
         else:
             lines.append("Распознанный текст отсутствует; статус обработки указан выше.")
         return "\n".join(lines) + "\n"
+
+
+class ImageDescriptionMarkdownRenderer(ImageMarkdownRenderer):
+    version = "1.1"
+
+    def render(self, content: ContentObject, capture: CaptureRecord, asset: Attachment) -> str:
+        meta = content.metadata.get("image_description")
+        segments = [
+            s
+            for s in content.segments
+            if s.type is SegmentType.VISUAL
+            and s.provenance.source_type is ProvenanceSourceType.VISION
+        ]
+        if (
+            content.original is None
+            or content.original.asset_id != asset.asset_id
+            or content.type is not ContentType.IMAGE
+            or not isinstance(meta, dict)
+            or len(segments) != 1
+            or not segments[0].text
+        ):
+            raise ImageError("invalid_image_description")
+        answer = meta.get("answer")
+        if not isinstance(answer, dict) or answer.get("description") != segments[0].text:
+            raise ImageError("invalid_image_description")
+        when = capture.context.captured_at if capture.context else None
+        lines = [
+            "# Изображение — описание моделью",
+            "",
+            "Локальная загрузка изображения.",
+            "",
+            f"Capture ID: `{capture.id}`",
+            f"Content ID: `{content.id}`",
+        ]
+        if when:
+            lines.append(f"Время захвата: {when.isoformat()}")
+        lines += [
+            "",
+            f"![Исходное изображение](./{asset.relative_name})",
+            "",
+            "Вложение — неизменный исходный файл, включая EXIF и другую metadata.",
+            "",
+            "## Обработка",
+            "",
+            "Локальное описание видимого содержания моделью. Отдельное OCR не выполнялось.",
+            "Машинная интерпретация не подтверждает факты. Возможны выдуманные "
+            "и пропущенные детали, ошибки связей и текста. Вход уменьшен без обрезки; "
+            "мелкие детали могут быть потеряны.",
+            literal(
+                f"Status: {answer.get('status')}\nModel: {meta.get('model')}\n"
+                f"Revision: {meta.get('revision')}\nRuntime: {meta.get('runtime')}\n"
+                f"Prompt: {meta.get('prompt_version')}"
+            ),
+            "",
+            "## Описание моделью",
+            "",
+            literal(segments[0].text),
+        ]
+        return "\n".join(lines) + "\n"
+
+
+def image_renderer(content: ContentObject) -> ImageMarkdownRenderer:
+    return (
+        ImageDescriptionMarkdownRenderer()
+        if "image_description" in content.metadata
+        else ImageMarkdownRenderer()
+    )

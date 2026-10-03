@@ -8,7 +8,7 @@ from core.contracts import CaptureStatus
 from core.persistence import CaptureRecordStore, ContentObjectStore
 from core.storage import RawObjectStore
 from core.storage.raw import parse_raw_ref, raw_object_ref
-from unimem_api.image_export import ImageMarkdownRenderer, image_attachment
+from unimem_api.image_export import image_attachment, image_renderer
 from unimem_api.obsidian_contract import (
     AnyDelivery,
     AttachmentPermission,
@@ -63,7 +63,7 @@ def install_attachment_routes(
             raise DeliveryError("result_not_ready")
         content = contents.get_for_capture(capture.id)
         attachment, ref = image_attachment(content, raw)
-        renderer = ImageMarkdownRenderer()
+        renderer = image_renderer(content)
         d, created = store.register(
             body.destination_id,
             capture.id,

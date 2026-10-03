@@ -1,0 +1,82 @@
+{
+  "operation_id": "0da8c479-bfe0-4fd0-a406-b1bdc3a2a58c",
+  "capture_id": "b1667bfe-3c80-4d74-93f7-1c23486441ba",
+  "content_id": "eb29a3a7-4926-479e-8f41-c71a16303710",
+  "delivery_id": "3c828fe6-b531-4e8e-8268-4b5ee812bc3b",
+  "state": "imported",
+  "description": "Схема процесса: блоки \"Источник\", \"Проверка\" и \"Архив\" соединены стрелками. Стрелка от \"Источник\" к \"Проверка\", а от \"Проверка\" к \"Архив\". Все блоки имеют текст на русском языке. Видимые детали четко различимы, но не указано, что это схема или интерфейс.",
+  "metadata": {
+    "answer": {
+      "status": "described",
+      "description": "Схема процесса: блоки \"Источник\", \"Проверка\" и \"Архив\" соединены стрелками. Стрелка от \"Источник\" к \"Проверка\", а от \"Проверка\" к \"Архив\". Все блоки имеют текст на русском языке. Видимые детали четко различимы, но не указано, что это схема или интерфейс."
+    },
+    "raw_response": "{\n  \"status\": \"described\",\n  \"description\": \"Схема процесса: блоки \\\"Источник\\\", \\\"Проверка\\\" и \\\"Архив\\\" соединены стрелками. Стрелка от \\\"Источник\\\" к \\\"Проверка\\\", а от \\\"Проверка\\\" к \\\"Архив\\\". Все блоки имеют текст на русском языке. Видимые детали четко различимы, но не указано, что это схема или интерфейс.\"\n}",
+    "preprocessing": {
+      "version": "oriented-fit-white/1",
+      "pillow_version": "12.3.0",
+      "source_sha256": "0557179334a4e21f14a2b1c1e87bc631f2aa54d3599a16e6cd40d7f0d5f86c65",
+      "encoded_width": 768,
+      "encoded_height": 512,
+      "oriented_width": 768,
+      "oriented_height": 512,
+      "orientation_applied": false,
+      "width": 627,
+      "height": 418,
+      "scale": 0.816496580927726,
+      "cropped": false,
+      "sha256": "52be7ee32c8280b339177fc081743182dde2f4f9e4d9a86eb52d7faa26695ca0",
+      "warning": "Reduced input; small text and fine details may be lost."
+    },
+    "metrics": {
+      "generation_seconds": 9.96444,
+      "decoded_tokens": 125,
+      "profile_verification_seconds": 2.089438285009237,
+      "preprocessing_seconds": 0.02687016100389883,
+      "model_ready_seconds": 5.324416369985556,
+      "vision_encoding_seconds": 12.975,
+      "runtime_seconds": 46.804919280984905,
+      "total_seconds": 48.921228138002334,
+      "peak_process_tree_rss": 2220728320,
+      "completion": "ended_before_token_limit"
+    },
+    "model": "Qwen/Qwen3-VL-2B-Instruct-GGUF",
+    "revision": "52d6c8ffea26cc873ac5ad116f8631268d7eb503",
+    "runtime": "llama.cpp b11146 (7fe450e19305b828c199d602c23a8337aaa1f03b)",
+    "components": {
+      "Qwen3VL-2B-Instruct-Q4_K_M.gguf": "089d75c52f4b7ffc56ba998ffc50aae89fcafc755f9e7208aacca281dca6c2ae",
+      "mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf": "f9a68fabba69c3b81e153367b2c7521030b0fa8bb0de400c9599c8e6725f9c82",
+      "cpu/libggml-base.so.0": "5edd28e54a19d75ccf3bcd1a729a5d5327f822514c274969b8b83d878e5ef3bd",
+      "cpu/libggml-cpu-haswell.so": "984064c44e5a92558e01ace8cf18cde33356d2d21bdb93166f0faf57885fe234",
+      "cpu/libggml.so.0": "569c53469aceca5dd357d2c3e1570014ed73e676abb08d44971be4cb784d855c",
+      "cpu/libllama-common.so.0": "6686de2e183ac053f6d965bd06af6c4eb62aff44353a3c2664b854c72a492dda",
+      "cpu/libllama.so.0": "7e3dd3d60fada6e76cc0bbccd076c90e0b2f1c01cc1c18bf3bb0b2df5ee2c67f",
+      "cpu/libmtmd.so.0": "9bfb7fc0005de64f160763476a326a54a9a56ffd0a5b1e24111981a90c02d84f",
+      "cpu/llama-mtmd-cli": "9378a6b9582c67c0c280487c07ebb483043c94779a975bf1e297af7ea115d271"
+    },
+    "parameters": {
+      "threads": 2,
+      "context": 2048,
+      "output_tokens": 384,
+      "visual_tokens_min": 64,
+      "visual_tokens_max": 256,
+      "temperature": 0,
+      "seed": 42,
+      "batch": 128,
+      "input_max_edge": 768,
+      "input_max_pixels": 262144
+    },
+    "prompt_version": "visible-ru/1",
+    "prompt_sha256": "23b58ef361b141a056f67ff15b187f1896629fc6509d358280d07d0a978b0db2",
+    "limitations": "Model interpretation, not verified fact or OCR. Fine details may be lost."
+  },
+  "note_relative_path": "Inbox/Nested/Images/unimem-88add998beeab4227310207cd839fc6d2e7e2dbcb38e97cd84e245b43965e6a3.md",
+  "image_relative_path": "Inbox/Nested/Images/unimem-88add998beeab4227310207cd839fc6d2e7e2dbcb38e97cd84e245b43965e6a3.png",
+  "original_sha256": "0557179334a4e21f14a2b1c1e87bc631f2aa54d3599a16e6cd40d7f0d5f86c65",
+  "markdown_sha256": "1aa17b3357a3c5aa82c075119400856d623949eb57338798514296ba1b1d0adf",
+  "package_sha256": "819938d898b14942856a6dcd24ce8ae5963b0f7f3a43819041caa174bb9007a8",
+  "exact_saved_exported_description": true,
+  "exact_snapshot_note": true,
+  "exact_original_attachment": true,
+  "describe_operations": 1,
+  "vault_files": 9
+}

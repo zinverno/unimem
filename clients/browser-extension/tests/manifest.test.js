@@ -62,7 +62,7 @@ describe("what the extension says it is", () => {
   });
 
   it("carries a deliberately bumped extension version", () => {
-    assert.equal(manifest.version, "0.4.0");
+    assert.equal(manifest.version, "0.5.0");
     assert.notEqual(manifest.version, "0.1.0");
   });
 
@@ -71,7 +71,7 @@ describe("what the extension says it is", () => {
   });
 
   it("does not confuse its own version with the canonical schema version", () => {
-    // The extension is at 0.4.0; the contract it emits is schema 0.3. They
+    // The extension is at 0.5.0; the contract it emits is schema 0.3. They
     // moved on different schedules for different reasons, and this test exists
     // so that nobody "fixes" one to match the other.
     assert.notEqual(manifest.version, SCHEMA_VERSION);
