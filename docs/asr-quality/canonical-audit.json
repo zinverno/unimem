@@ -1,0 +1,44 @@
+[
+  {
+    "sample": "en-prose",
+    "original_sha256": "799f78ed4beb4de7ceae3a809262d4ce242394342ccd1d58cef7d49dbc2def46",
+    "raw_to_canonical_text_and_times_equal": true,
+    "offline_reread_render_equal": true,
+    "markdown_sha256": "2172a7b8f8413459eb26115e3262d539485bd888088a4cb1275b51e2200228b5"
+  },
+  {
+    "sample": "ru-literary",
+    "original_sha256": "8f3c840638f5ec0ea3f63fe157d49484c301846371f14bdb903427c366a16058",
+    "raw_to_canonical_text_and_times_equal": true,
+    "offline_reread_render_equal": true,
+    "markdown_sha256": "69a5b5e88021289b730077e13a438faea9162e39703b43516c5624f8c4362e66"
+  },
+  {
+    "sample": "ru-name",
+    "original_sha256": "d6f079146d3c5e2bd4ab3531d7524670c6f9075fedfdfdd29f7e7131f2da8a6f",
+    "raw_to_canonical_text_and_times_equal": true,
+    "offline_reread_render_equal": true,
+    "markdown_sha256": "98b1b96b23fc9708c64e8a34fbeaabb3bdd0ee6dd1c098b9e4da47c3c3ab7583"
+  },
+  {
+    "sample": "ru-negation",
+    "original_sha256": "7d718236cee4e4b5925c81399babe8bb46fd0993eeda9b4b5dc44d8a5bdff730",
+    "raw_to_canonical_text_and_times_equal": true,
+    "offline_reread_render_equal": true,
+    "markdown_sha256": "30ec7c83a0af9938e64f39fecf7c081adec5184e94a107189f234ff713e1f5c4"
+  },
+  {
+    "sample": "ru-transfer",
+    "original_sha256": "e99001c34e3108be85110f92ddf3102a6def9eb9cc707a2dddbc75d5a8d494f8",
+    "raw_to_canonical_text_and_times_equal": true,
+    "offline_reread_render_equal": true,
+    "markdown_sha256": "0d6d99b7f7677f209ab045cdd8bcdd65e7900092b17337dcf4ec45be14bf6cd0"
+  },
+  {
+    "sample": "silence",
+    "original_sha256": "262d1f34f300560a4c82ba8127ddea9e1d72946f187fdbd3e8f70ee096077aec",
+    "raw_to_canonical_text_and_times_equal": true,
+    "offline_reread_render_equal": true,
+    "markdown_sha256": "9aae9a51de8c10fc6a45ac235e6986a04549960fde4509f796a7131228982d6a"
+  }
+]

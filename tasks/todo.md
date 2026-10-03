@@ -173,6 +173,20 @@ owner gates remain open.
 No signed publication/release, microphone, messenger integration, diarization,
 translation, summary or binary attachment delivery. Earlier B4 gates remain open.
 
+### D1 quality follow-up — fixed base/small comparison
+
+- [x] Four distinct Russian utterances (one held out), English prose and silence;
+  independent corpus references and frozen hashes/settings before comparison.
+- [x] Fourteen real sequential offline runs, fresh bounded processes; input and
+  canonical/offline-render audit, WER and resource measurements.
+- [x] [Measured decision and commands](../docs/asr-quality/README.md): retain base;
+  small improves pooled WER and two short utterances but fails the predeclared
+  discovery semantic gate. No production profile/UI change.
+- [ ] Independent listening audit, spontaneous voice messages and broader
+  noise/speaker coverage remain unverified; this tiny set does not close them.
+
+Prior ASR/native evidence and older B4 gates remain unchanged.
+
 ## D2 — Later sources and processing
 
 - [ ] Plan image processing and video visual interpretation as distinct
