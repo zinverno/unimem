@@ -149,7 +149,9 @@ B4 gates stay open. ADR-027 supersedes the former Veynrel/Companion delivery pla
 - [x] Automated auth, lease, crash recovery and cross-language fixture checks.
 - [x] Native synthetic Zen → API → standalone plugin → isolated vault acceptance.
 - [x] Dev installation, protocol, boundaries and measured evidence documentation.
-- [ ] Fresh live-caption browser → Obsidian acceptance (separate from synthetic delivery).
+- [x] Fresh live-caption browser → Obsidian acceptance: [2026-10-03 repeat](../docs/YOUTUBE_LIVE_VERIFICATION_2026-10-03.md)
+  passed without code changes; the historical timeout remains unexplained and
+  its BLOCKED evidence is preserved separately.
 - [ ] Native Windows/macOS filesystem validation (desktop manifest does not prove it).
 
 Evidence and current limits: [OBSIDIAN_VERIFICATION.md](../docs/OBSIDIAN_VERIFICATION.md).
