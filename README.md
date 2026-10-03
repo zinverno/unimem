@@ -36,6 +36,12 @@ model download on startup, or inference during reads/Send. See
 [preparation, quality limits and evidence](docs/local-image-description.md) and
 [ADR-030](docs/ADR/ADR-030-local-image-description.md).
 
+Local MP4 notes on Linux: explicit speech transcription, up to three uniformly
+sampled still frames and optional descriptions, then one note with PNGs through
+the existing standalone Connector. This does not interpret the entire video.
+See [setup and limits](docs/LOCAL_VIDEO.md), [ADR-031](docs/ADR/ADR-031-local-video-notes.md)
+and [separate automated/model/native evidence](docs/VIDEO_VERIFICATION_2026-10-03.md).
+
 Implemented so far:
 
 - **Phase 0A — domain contracts.** The stable domain language:

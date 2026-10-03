@@ -3011,3 +3011,21 @@ disabled. Settings changes require saving and read-only verification before
 reenabling reception. Physical symlink/race limits and the lack of a distributed
 exactly-once transaction are explicit in the ADR. Setup, routes and measured
 native/automated evidence: [OBSIDIAN_DELIVERY.md](OBSIDIAN_DELIVERY.md).
+
+## Explicit local video notes and v3 selected-frame delivery
+
+[ADR-031](ADR/ADR-031-local-video-notes.md) composes the established raw/intake/
+canonical/operation owners in `unimem_video`. The structural core VideoProcessor
+stays unchanged. Pinned PyAV validates and sequentially decodes controlled streams
+outside core, preserving a common PTS origin for speech and sampled frames.
+One operation creates one VIDEO object; derivatives carry source/transform evidence.
+The parent worker owns the shared ASR/vision slot across sequential finite stages.
+No read, preview or delivery repeats decode or inference.
+
+Strict v1/v2 remain unchanged. v3 extends the existing delivery store and Connector
+with an ordered, digest-bound manifest of 1–3 required PNGs, a separate permission
+and a bounded-list journal migration. Create-only, rollback, lease/settings/unload
+fences, ambiguity and user ownership after import remain the same. The original
+MP4 remains in UniMem. [Operator guide](LOCAL_VIDEO.md) and
+[measured evidence](VIDEO_VERIFICATION_2026-10-03.md) distinguish limited static-frame
+description from understanding events across a video.

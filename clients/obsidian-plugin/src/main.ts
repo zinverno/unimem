@@ -146,6 +146,8 @@ class ConnectorSettings extends PluginSettingTab {
       .addText(t => t.setValue(s.inbox).onChange(v => { draft.inbox = v; }));
     new Setting(el).setName("Разрешить PNG/JPEG-вложения").setDesc("По умолчанию выключено. Переносит исходный файл до 16 МиБ, включая EXIF и другую metadata. Сохраните конфигурацию, проверьте и включите приём.")
       .addToggle(t => t.setValue(s.attachments === true).onChange(value => { draft.attachments = value; }));
+    new Setting(el).setName("Разрешить выбранные PNG-кадры видео").setDesc("Отдельное разрешение: до 3 PNG, всего до 6 МиБ. Оригинальный MP4 не переносится. После сохранения проверьте подключение и включите приём.")
+      .addToggle(t => t.setValue(s.videoFrames === true).onChange(value => { draft.videoFrames = value; }));
     new Setting(el).setName("Сохранить конфигурацию").setDesc("Сохранение выключает приём. Затем проверьте подключение и включите приём.")
       .addButton(b => b.setButtonText("Сохранить").onClick(async () => {
         b.setDisabled(true);

@@ -77,8 +77,14 @@ def install_obsidian_routes(
         content = contents.get_for_capture(request.source_capture_id)
         if content.type is ContentType.IMAGE:
             raise DeliveryError("receiver_upgrade_required")
+        from unimem_video.export import VideoMarkdownRenderer, video_attachments
+
+        if "video_notes" in content.metadata and video_attachments(content):
+            raise DeliveryError("receiver_upgrade_required")
         renderer = (
-            AudioMarkdownRenderer()
+            VideoMarkdownRenderer()
+            if "video_notes" in content.metadata
+            else AudioMarkdownRenderer()
             if "audio_transcription" in content.metadata
             else CaptionMarkdownRenderer()
             if "youtube_captions" in content.metadata

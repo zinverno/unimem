@@ -77,6 +77,51 @@ class ImageDelivery(DeliveryFields):
     package_sha256: Digest
 
 
+MAX_VIDEO_ATTACHMENT_BYTES = 6 * 1024 * 1024
+
+
+class VideoAttachment(Attachment):
+    mime_type: Literal["image/png"] = "image/png"
+    size_bytes: int = Field(gt=0, le=2 * 1024 * 1024, strict=True)
+    width: int = Field(gt=0, le=1024, strict=True)
+    height: int = Field(gt=0, le=1024, strict=True)
+
+
+class VideoDelivery(DeliveryFields):
+    protocol_version: Literal["3"] = "3"
+    attachments: tuple[VideoAttachment, ...] = Field(min_length=1, max_length=3)
+    package_sha256: Digest
+
+    @model_validator(mode="after")
+    def manifest(self) -> "VideoDelivery":
+        if len({a.asset_id for a in self.attachments}) != len(self.attachments) or len(
+            {a.relative_name for a in self.attachments}
+        ) != len(self.attachments):
+            raise ValueError("duplicate asset")
+        if sum(a.size_bytes for a in self.attachments) > MAX_VIDEO_ATTACHMENT_BYTES:
+            raise ValueError("attachment budget")
+        return self
+
+
+def video_package_digest(d: VideoDelivery) -> str:
+    fields = [
+        "3",
+        d.delivery_id,
+        d.destination_id,
+        d.source_capture_id,
+        d.source_content_id,
+        d.export_format,
+        d.export_version,
+        d.suggested_filename,
+        d.markdown_sha256,
+        [
+            [a.asset_id, a.mime_type, a.size_bytes, a.sha256, a.relative_name, a.width, a.height]
+            for a in d.attachments
+        ],
+    ]
+    return hashlib.sha256(json.dumps(fields, separators=(",", ":")).encode()).hexdigest()
+
+
 def package_digest(d: ImageDelivery) -> str:
     a = d.attachments[0]
     fields = [
@@ -98,7 +143,7 @@ def package_digest(d: ImageDelivery) -> str:
     return hashlib.sha256(json.dumps(fields, separators=(",", ":")).encode()).hexdigest()
 
 
-AnyDelivery = Delivery | ImageDelivery
+AnyDelivery = Delivery | ImageDelivery | VideoDelivery
 DELIVERY_ADAPTER: TypeAdapter[AnyDelivery] = TypeAdapter(AnyDelivery)
 
 

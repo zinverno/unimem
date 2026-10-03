@@ -24,7 +24,24 @@ export interface TextDelivery extends DeliveryFields { protocol_version: "1" }
 export interface ImageDelivery extends DeliveryFields {
   protocol_version: "2"; attachments: [Attachment]; package_sha256: string;
 }
-export type Delivery = TextDelivery | ImageDelivery;
+export interface VideoAttachment extends Attachment { mime_type: "image/png"; width: number; height: number }
+export interface VideoDelivery extends DeliveryFields {
+  protocol_version: "3"; attachments: VideoAttachment[]; package_sha256: string;
+}
+export type Delivery = TextDelivery | ImageDelivery | VideoDelivery;
+export const MAX_VIDEO_BYTES = 6 * 1024 * 1024;
+export function videoAttachment(a: VideoAttachment): boolean {
+  if (!a || a.mime_type !== "image/png" || a.size_bytes > 2 * 1024 * 1024 ||
+      !Number.isSafeInteger(a.width) || a.width < 1 || a.width > 1024 ||
+      !Number.isSafeInteger(a.height) || a.height < 1 || a.height > 1024) return false;
+  const { width, height, ...rest } = a;
+  return attachment(rest);
+}
+export function videoPackageDigest(d: VideoDelivery): string {
+  return digest(JSON.stringify(["3", d.delivery_id, d.destination_id, d.source_capture_id, d.source_content_id,
+    d.export_format, d.export_version, d.suggested_filename, d.markdown_sha256,
+    d.attachments.map(a => [a.asset_id, a.mime_type, a.size_bytes, a.sha256, a.relative_name, a.width, a.height])]));
+}
 export const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
 export const binaryDigest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 export function packageDigest(d: ImageDelivery): string {
@@ -52,7 +69,7 @@ export function destination(value: unknown): Destination {
 }
 export function delivery(value: unknown, destinationId: string): Delivery {
   const d = value as Delivery;
-  if (!d || !["1", "2"].includes(d.protocol_version) || !UUID.test(d.delivery_id) || d.destination_id !== destinationId ||
+  if (!d || !["1", "2", "3"].includes(d.protocol_version) || !UUID.test(d.delivery_id) || d.destination_id !== destinationId ||
       !UUID.test(d.destination_id) || typeof d.source_capture_id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(d.source_capture_id) ||
       typeof d.source_content_id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(d.source_content_id) ||
       typeof d.export_format !== "string" || !/^[a-z0-9-]{1,64}$/.test(d.export_format) ||
@@ -75,6 +92,14 @@ export function delivery(value: unknown, destinationId: string): Delivery {
         d.attachments[0].relative_name.replace(/\.(png|jpg)$/, ".md") !== d.suggested_filename ||
         Buffer.byteLength(d.markdown, "utf8") + d.attachments[0].size_bytes > MAX_BYTES + MAX_IMAGE_BYTES ||
         packageDigest(d) !== d.package_sha256) throw new SafeError("invalid_response");
+  }
+  if (d.protocol_version === "3") {
+    keys.push("attachments", "package_sha256");
+    if (!Array.isArray(d.attachments) || d.attachments.length < 1 || d.attachments.length > 3 ||
+        !d.attachments.every(videoAttachment) || new Set(d.attachments.map(a => a.asset_id)).size !== d.attachments.length ||
+        new Set(d.attachments.map(a => a.relative_name)).size !== d.attachments.length ||
+        d.attachments.reduce((sum, a) => sum + a.size_bytes, 0) > MAX_VIDEO_BYTES ||
+        videoPackageDigest(d) !== d.package_sha256) throw new SafeError("invalid_response");
   }
   if (Object.keys(d).sort().join() !== keys.sort().join()) throw new SafeError("invalid_response");
   return d;

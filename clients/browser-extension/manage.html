@@ -11,6 +11,23 @@
 <label for="languages">Приоритет языков субтитров</label><input id="languages" value="ru,en" maxlength="200" required aria-describedby="languages-help"><p id="languages-help">От 1 до 10 кодов через запятую, в порядке выбора. Перевод не выполняется. Изменения применяются к новым заданиям.</p>
 <div class="actions"><button type="submit">Сохранить настройки</button><button id="delete-token" type="button">Удалить токен</button><button id="check" type="button">Проверить YouTube API</button><button id="permission" type="button">Разрешить доступ к локальному API</button></div></form>
 <p id="credential-state"></p><p id="connection-state" role="status"></p></section>
+<section id="video-section" aria-labelledby="video-heading"><h2 id="video-heading">Локальное видео → Obsidian</h2>
+<p>MP4 до 32 МиБ и 120 секунд: одна H.264-дорожка, не более одной AAC-дорожки. До 1920×1080 пикселей, без поворота и чересстрочности. Linux desktop.</p>
+<label for="video-file">Выберите локальное видео</label><input id="video-file" type="file" accept="video/mp4,.mp4">
+<label class="check"><input id="video-speech" type="checkbox" checked> Распознать речь</label>
+<label for="video-language">Язык речи</label><select id="video-language"><option value="auto">Авто</option><option value="ru">Русский</option><option value="en">English</option></select>
+<label class="check"><input id="video-frames" type="checkbox" checked> Добавить до трёх кадров</label>
+<p>Фиксированная выборка: ¼, ½ и ¾ длительности. Для каждой позиции берётся первый кадр с PTS не раньше неё, без дублей. Показывается фактическое время. Это не «самые важные» кадры и не анализ всех событий ролика.</p>
+<label class="check"><input id="video-describe" type="checkbox"> Описать кадры моделью</label>
+<p>Описание требует кадров и готового vision-профиля. Модели не загружаются автоматически. Речь и описания кадров остаются отдельными результатами.</p>
+<p id="video-capability" role="status"></p><div class="actions"><button id="video-capability-refresh">Проверить готовность</button><button id="video-start" disabled>Обработать видео</button></div>
+<p id="video-notice" role="status" aria-live="polite"></p><label for="video-jobs">Видео-задания</label><select id="video-jobs"></select>
+<p id="video-details" role="status" aria-live="polite"></p><p id="video-error" class="error"></p>
+<div class="actions"><button id="video-refresh">Обновить статус</button><button id="video-retry">Проверить / повторить прежний ID</button><button id="video-result">Просмотреть результат</button><button id="video-remove">Убрать локальную ссылку</button></div>
+<div id="video-preview"></div><details><summary>Markdown заметки</summary><pre id="video-markdown"></pre></details>
+<label for="video-destination">Назначение Obsidian</label><select id="video-destination"></select><p id="video-delivery" role="status"></p>
+<div class="actions"><button id="video-delivery-refresh">Обновить доставку</button><button id="video-send">Отправить в Obsidian</button></div>
+<p>MP4 остаётся в UniMem. После импорта заметка и PNG читаются в Obsidian без запущенного UniMem.</p></section>
 <section id="image-section" aria-labelledby="image-heading"><h2 id="image-heading">Изображение → Obsidian</h2>
 <p>Один локальный PNG/JPEG, до 16 МиБ и 40 миллионов пикселей. Исходный файл, включая EXIF и другую metadata, переносится в vault без изменений. Без облака и описания картинки.</p>
 <div id="image-drop"><label for="image-file">Выберите или перетащите сюда изображение</label><input id="image-file" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg"></div>

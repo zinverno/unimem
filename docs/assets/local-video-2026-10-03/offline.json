@@ -1,0 +1,21 @@
+{
+  "api_stopped": true,
+  "images": [
+    {
+      "file": "unimem-4d6d25dc88f6c9308a9a5e591d5599dae2882912da1f61f4705a93ce25ec708b.png",
+      "width": 768,
+      "height": 432
+    },
+    {
+      "file": "unimem-626d3fef6a717295e097a0f88ef26d43cea9d5c469e649e932be420016aaa765.png",
+      "width": 768,
+      "height": 432
+    },
+    {
+      "file": "unimem-0c1b7b0489835aa9e16214e0b9460137d95416947d8d17006d7c5a3adc095eb8.png",
+      "width": 768,
+      "height": 432
+    }
+  ],
+  "files": 4
+}

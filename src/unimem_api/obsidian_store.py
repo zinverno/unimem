@@ -25,7 +25,10 @@ from unimem_api.obsidian_contract import (
     FailureRequest,
     ImageDelivery,
     PackageAckRequest,
+    VideoAttachment,
+    VideoDelivery,
     package_digest,
+    video_package_digest,
 )
 
 
@@ -73,6 +76,15 @@ class ObsidianStore:
                 "CREATE TABLE IF NOT EXISTS delivery_assets "
                 "(delivery TEXT PRIMARY KEY, raw_ref TEXT NOT NULL)"
             )
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS video_attachment_permissions "
+                "(destination TEXT PRIMARY KEY, enabled INTEGER NOT NULL)"
+            )
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS video_delivery_assets "
+                "(delivery TEXT NOT NULL, asset TEXT NOT NULL, raw_ref TEXT NOT NULL, "
+                "PRIMARY KEY(delivery,asset))"
+            )
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
@@ -86,25 +98,41 @@ class ObsidianStore:
         except sqlite3.Error:
             raise DeliveryError("delivery_storage_unavailable") from None
 
-    def attachment_permission(self, destination: str, receiver: str, enabled: bool) -> None:
+    def attachment_permission(
+        self, destination: str, receiver: str, enabled: bool, *, video: bool = False
+    ) -> None:
+        table = "video_attachment_permissions" if video else "attachment_permissions"
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             self._owner(db, destination, receiver)
             db.execute(
-                "INSERT OR REPLACE INTO attachment_permissions VALUES (?,?)",
+                f"INSERT OR REPLACE INTO {table} VALUES (?,?)",
                 (destination, int(enabled)),
             )
 
-    def attachments_enabled(self, destination: str) -> bool:
+    def attachments_enabled(self, destination: str, *, video: bool = False) -> bool:
         self.destination(destination)
+        table = "video_attachment_permissions" if video else "attachment_permissions"
         with self.connection() as db:
             row = db.execute(
-                "SELECT enabled FROM attachment_permissions WHERE destination=?", (destination,)
+                f"SELECT enabled FROM {table} WHERE destination=?",
+                (destination,),
             ).fetchone()
         return bool(row and row[0])
 
     def asset_ref(self, destination: str, delivery_id: str, asset_id: str) -> str:
         d = self.get(destination, delivery_id)
+        if isinstance(d, VideoDelivery):
+            if asset_id not in {a.asset_id for a in d.attachments}:
+                raise DeliveryError("asset_not_found")
+            with self.connection() as db:
+                row = db.execute(
+                    "SELECT raw_ref FROM video_delivery_assets WHERE delivery=? AND asset=?",
+                    (delivery_id, asset_id),
+                ).fetchone()
+            if not row:
+                raise DeliveryError("asset_not_found")
+            return str(row[0])
         if not isinstance(d, ImageDelivery) or d.attachments[0].asset_id != asset_id:
             raise DeliveryError("asset_not_found")
         with self.connection() as db:
@@ -171,6 +199,7 @@ class ObsidianStore:
         *,
         attachment: Attachment | None = None,
         raw_ref: str | None = None,
+        video_assets: tuple[tuple[VideoAttachment, str], ...] = (),
     ) -> tuple[AnyDelivery, bool]:
         self.destination(destination)
         with self.connection() as db:
@@ -199,6 +228,8 @@ class ObsidianStore:
                 created_at=datetime.now(UTC),
             )
             if attachment is not None:
+                if video_assets:
+                    raise DeliveryError("protocol_mismatch")
                 if raw_ref is None or raw_ref != "sha256:" + attachment.sha256:
                     raise DeliveryError("asset_mismatch")
                 if len(markdown.encode()) + attachment.size_bytes > MAX_PACKAGE_BYTES:
@@ -212,6 +243,24 @@ class ObsidianStore:
                 )
                 delivery = package.model_copy(update={"package_sha256": package_digest(package)})
                 db.execute("INSERT INTO delivery_assets VALUES (?,?)", (delivery_id, raw_ref))
+            if video_assets:
+                if not self.attachments_enabled(destination, video=True):
+                    raise DeliveryError("receiver_upgrade_required")
+                package3 = VideoDelivery(
+                    **delivery.model_dump(exclude={"protocol_version"}),
+                    attachments=tuple(a for a, _ in video_assets),
+                    package_sha256="0" * 64,
+                )
+                delivery = package3.model_copy(
+                    update={"package_sha256": video_package_digest(package3)}
+                )
+                for asset, ref in video_assets:
+                    if ref != "sha256:" + asset.sha256:
+                        raise DeliveryError("asset_mismatch")
+                    db.execute(
+                        "INSERT INTO video_delivery_assets VALUES (?,?,?)",
+                        (delivery_id, asset.asset_id, ref),
+                    )
             db.execute(
                 "INSERT INTO obsidian_deliveries VALUES (?,?,?,?,NULL)",
                 (delivery_id, destination, capture, delivery.model_dump_json()),
@@ -295,13 +344,13 @@ class ObsidianStore:
                 raise DeliveryError("claim_mismatch")
             if isinstance(request, PackageAckRequest):
                 if (
-                    not isinstance(delivery, ImageDelivery)
+                    not isinstance(delivery, (ImageDelivery, VideoDelivery))
                     or request.package_sha256 != delivery.package_sha256
                 ):
                     raise DeliveryError("digest_mismatch")
                 state, error = "imported", None
             elif isinstance(request, AckRequest):
-                if isinstance(delivery, ImageDelivery):
+                if isinstance(delivery, (ImageDelivery, VideoDelivery)):
                     raise DeliveryError("protocol_mismatch")
                 if request.markdown_sha256 != delivery.markdown_sha256:
                     raise DeliveryError("digest_mismatch")

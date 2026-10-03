@@ -1,0 +1,15 @@
+{
+  "state": "imported",
+  "delivery_id": "657a4659-4d1e-485e-9885-eacf05aa13cc",
+  "package_sha256": "e7cd9bbc995dcbac91cde6fa224413595fd2b784d24c688c2951622e192f5191",
+  "note": "unimem-704f78d638f3578ad3d113a0063596cee5b9a9239dfa1f53df79ba1424d66758.md",
+  "markdown_sha256": "1bcff6fae6b635ed22693119c0e81adb4c6836fa7690629f837151da7df82b1c",
+  "files": 4,
+  "pngs": 3,
+  "journal_version": 3,
+  "journal_state": "written",
+  "receiver_id": "a11e0a65-6e91-4287-85be-994efbb130c3",
+  "plugins": [
+    "unimem-connector"
+  ]
+}

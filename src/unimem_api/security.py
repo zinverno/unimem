@@ -130,7 +130,7 @@ class LocalApiSecurity:
                 return
         elif not (scope["path"] == "/health" and scope["method"] == "GET"):
             values = headers.getlist("authorization")
-            if scope["path"].startswith(("/v1/receiver/", "/v2/receiver/")):
+            if scope["path"].startswith(("/v1/receiver/", "/v2/receiver/", "/v3/receiver/")):
                 destination = None
                 if (
                     self.receivers

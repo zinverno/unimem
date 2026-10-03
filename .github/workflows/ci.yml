@@ -50,6 +50,28 @@ jobs:
       - name: Local vision contracts without models or downloads
         run: pytest tests/unit/vision --cov=unimem_vision --cov=unimem_delivery.heavy --cov-report=term-missing
 
+  local-video-contracts:
+    name: Local video decoder, timeline and delivery (no models)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e '.[dev,asr,video]'
+      - run: python -c 'import av, numpy, PIL; assert av.__version__ == "16.1.0"'
+      - run: pytest tests/unit/video -q --junitxml=video.xml
+      - name: Require decoder and process tests to run
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          suites = ET.parse('video.xml').getroot()
+          cases = list(suites.iter('testcase'))
+          assert len(cases) >= 34
+          assert not list(suites.iter('skipped'))
+          assert not list(suites.iter('error'))
+          PY
+
   local-audio-contracts:
     name: Local audio (deterministic adapter contracts)
     runs-on: ubuntu-latest

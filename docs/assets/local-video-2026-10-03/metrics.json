@@ -1,0 +1,91 @@
+{
+  "source": {
+    "source_audio": "Vosk public Apache-2.0 test.wav (existing approved fixture)",
+    "audio_sha256": "dcfea5712c43a43ba7ae8083afb39d36993e5a69c46e88b68aaa72b65cb615bb",
+    "audio_offset_requested_seconds": 1,
+    "reference": "one zero zero zero one / nine oh two one oh / zero one eight zero three",
+    "scenes": [
+      {
+        "start": 0,
+        "end": 3.4,
+        "visible": "red square"
+      },
+      {
+        "start": 3.4,
+        "end": 6.8,
+        "visible": "blue circle"
+      },
+      {
+        "start": 6.8,
+        "end": 10,
+        "visible": "green triangle"
+      }
+    ],
+    "files": {
+      "silent.mp4": {
+        "bytes": 7510,
+        "sha256": "c8a26e158e884448a20cc1917e65cc752dd8f48972b615c0edc01534ac4e4b65"
+      },
+      "speech-scenes.mp4": {
+        "bytes": 89560,
+        "sha256": "f99877d73d6e30b5cd44f1d08e2a1bcb3b3efa7bc7fa966b378ebea7d17bedda"
+      }
+    }
+  },
+  "operation_id": "4c7bc799-f797-44d7-81ca-089213e3b187",
+  "accepted_at": "2026-10-03T13:45:02.713960Z",
+  "finished_at": "2026-10-03T13:47:58.525348Z",
+  "execution_seconds": 176.64016496000113,
+  "peak_process_tree_rss_bytes": 2100117504,
+  "stage_seconds": {
+    "extracting": 0.8160513000038918,
+    "transcribing": 6.278176093997899,
+    "frame_1": 56.796385752997594,
+    "frame_2": 56.29591728601372,
+    "frame_3": 54.91441425299854
+  },
+  "health_samples": 182,
+  "health_failures": 0,
+  "health_latency_ms": {
+    "median": 2.1467740007210523,
+    "p95": 11.6259700153023,
+    "max": 78.08117498643696
+  },
+  "stage_observations": [
+    {
+      "seconds": 7.101553988002706,
+      "stage": "running:extracting"
+    },
+    {
+      "seconds": 8.105462704988895,
+      "stage": "running:transcribing"
+    },
+    {
+      "seconds": 14.138968571991427,
+      "stage": "running:frame_1"
+    },
+    {
+      "seconds": 70.8622048549878,
+      "stage": "running:frame_2"
+    },
+    {
+      "seconds": 127.27273451001383,
+      "stage": "running:frame_3"
+    },
+    {
+      "seconds": 182.747104545997,
+      "stage": "complete:saving"
+    }
+  ],
+  "host": "Linux-6.12.108-1-MANJARO-x86_64-with-glibc2.44",
+  "python": "3.13.13",
+  "packages": {
+    "av": "16.1.0",
+    "Pillow": "12.3.0",
+    "faster-whisper": "1.2.1",
+    "ctranslate2": "4.8.2",
+    "onnxruntime": "1.30.0",
+    "numpy": "2.5.3"
+  },
+  "cpu": "AMD Ryzen 5 5500U with Radeon Graphics"
+}

@@ -270,3 +270,15 @@ services, persistence and CLI/export results; (2) remaining Zen extension work;
 (3) what was actually checked in Zen, including version, or `NOT RUN`/`BLOCKED`.
 Review scope before handoff: first PR contains no extension port or GitHub
 implementation. No auto-merge and no unverified readiness claims.
+
+## Explicit follow-up: bounded local video notes
+
+The owner authorized implementation after PR #39, including code/tests/native
+acceptance and a separate dependent PR. Current scope and decisions are recorded
+in [ADR-031](../docs/ADR/ADR-031-local-video-notes.md),
+[operator instructions](../docs/LOCAL_VIDEO.md) and
+[dated evidence](../docs/VIDEO_VERIFICATION_2026-10-03.md).
+Local MP4 speech plus quarter-position frames produce one VIDEO note; model frame
+descriptions are optional. This completes the bounded D3 scenario, not full-video
+interpretation, scene detection, video download, recording or a new ASR comparison.
+Earlier B4 gates and publication/merge ownership are unchanged.

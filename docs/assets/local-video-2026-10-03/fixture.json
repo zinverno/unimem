@@ -1,0 +1,33 @@
+{
+  "source_audio": "Vosk public Apache-2.0 test.wav (existing approved fixture)",
+  "audio_sha256": "dcfea5712c43a43ba7ae8083afb39d36993e5a69c46e88b68aaa72b65cb615bb",
+  "audio_offset_requested_seconds": 1,
+  "reference": "one zero zero zero one / nine oh two one oh / zero one eight zero three",
+  "scenes": [
+    {
+      "start": 0,
+      "end": 3.4,
+      "visible": "red square"
+    },
+    {
+      "start": 3.4,
+      "end": 6.8,
+      "visible": "blue circle"
+    },
+    {
+      "start": 6.8,
+      "end": 10,
+      "visible": "green triangle"
+    }
+  ],
+  "files": {
+    "silent.mp4": {
+      "bytes": 7510,
+      "sha256": "c8a26e158e884448a20cc1917e65cc752dd8f48972b615c0edc01534ac4e4b65"
+    },
+    "speech-scenes.mp4": {
+      "bytes": 89560,
+      "sha256": "f99877d73d6e30b5cd44f1d08e2a1bcb3b3efa7bc7fa966b378ebea7d17bedda"
+    }
+  }
+}

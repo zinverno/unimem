@@ -14,8 +14,8 @@ export function receiverClient(base: string, token: string) {
   const origin = serverAddress(base);
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new SafeError("invalid_settings");
   return (path: string, body?: object, signal?: AbortSignal): Promise<unknown> => {
-    const binary = /^\/v2\/receiver\/deliveries\/[0-9a-f-]{36}\/assets\/[A-Za-z0-9_-]{1,128}$/.test(path);
-    if (!binary && !/^\/v[12]\/receiver\/(destination|capabilities|deliveries\/(next|[0-9a-f-]{36}(?:\/(claim|ack|fail))?))$/.test(path)) {
+    const binary = /^\/v[23]\/receiver\/deliveries\/[0-9a-f-]{36}\/assets\/[A-Za-z0-9_-]{1,128}$/.test(path);
+    if (!binary && !/^\/v[123]\/receiver\/(destination|capabilities|deliveries\/(next|[0-9a-f-]{36}(?:\/(claim|ack|fail))?))$/.test(path)) {
       return Promise.reject(new SafeError("invalid_request"));
     }
     return new Promise((resolve, reject) => {
