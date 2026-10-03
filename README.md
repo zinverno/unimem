@@ -15,6 +15,13 @@ and do not participate. See [setup](docs/OBSIDIAN_DELIVERY.md),
 [ADR-027](docs/ADR/ADR-027-standalone-obsidian-connector.md) and
 [actual acceptance evidence](docs/OBSIDIAN_VERIFICATION.md).
 
+**Local audio transcription:** the same Zen page accepts WAV/PCM, MP3 and
+OGG/Opus through an explicit upload/recognize action. Optional CPU/int8
+faster-whisper produces a durable transcript linked to its original audio;
+Markdown export and existing Connector delivery read it without a model.
+See [setup and finite limits](docs/LOCAL_AUDIO.md) and
+[real-engine/native evidence and quality limitations](docs/AUDIO_VERIFICATION_2026-10-03.md).
+
 Implemented so far:
 
 - **Phase 0A — domain contracts.** The stable domain language:

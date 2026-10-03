@@ -83,6 +83,13 @@ def test_upload_acceptance_replay_processing_export_delivery(
     assert snapshot.markdown.encode() == markdown.content
     assert client.post("/v1/deliveries", json=delivery_body).status_code == 200
     assert calls == 1
+    # A base server reopens and renders existing results without a model/decoder.
+    base = AuthenticatedClient(build_local_app(tmp_path, security=TEST_SECURITY))
+    assert base.get("/v1/audio/operations/audio-one/markdown").content == markdown.content
+    assert base.post("/v1/audio/operations", json=body).json()["state"] == "complete"
+    refused = base.post("/v1/audio/operations", json=body | {"operation_id": "new"})
+    assert refused.status_code == 503
+    assert refused.json()["error"]["code"] == "asr_disabled"
 
 
 def test_acceptance_requires_uploaded_matching_bytes(
@@ -167,3 +174,60 @@ def test_crash_after_content_commit_recovers_without_model(tmp_path: Path) -> No
 def test_default_api_does_not_enable_audio(tmp_path: Path) -> None:
     client = AuthenticatedClient(build_local_app(tmp_path, security=TEST_SECURITY))
     assert client.get("/v1/audio/operations/test").status_code == 404
+
+
+def test_large_audio_result_exports_but_delivery_refuses_without_truncation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unimem_asr.result import Cue
+
+    client = audio_app(tmp_path, monkeypatch)
+    service = AudioCaptureService(tmp_path)
+    raw = service.raw_store.store_bytes(wav_bytes())
+    assert raw.ref is not None
+    store = AudioOperationStore(tmp_path / "unimem.sqlite3")
+    store.register(request(raw.ref))
+    assert store.claim()
+    assert client.get("/v1/audio/operations/audio-one/markdown").status_code == 409
+    result = transcript(segments=[Cue(text="x" * 100_000, start=0.0, end=0.0) for _ in range(12)])
+    execute_audio(tmp_path, "audio-one", tmp_path, lambda *_: result)
+    op = store.get("audio-one")
+    markdown = client.get("/v1/audio/operations/audio-one/markdown")
+    assert markdown.status_code == 200
+    assert len(markdown.content) > 1024**2
+    destination, _ = ObsidianStore(tmp_path / "obsidian-delivery.sqlite3").create_destination(
+        "Large"
+    )
+    response = client.post(
+        "/v1/deliveries",
+        json={"source_capture_id": op.capture_id, "destination_id": destination.destination_id},
+    )
+    assert response.json()["error"]["code"] == "markdown_too_large"
+    assert client.get("/v1/audio/operations/audio-one/markdown").content == markdown.content
+    assert service.raw_store.read_bytes(raw) == wav_bytes()
+
+
+@pytest.mark.parametrize("kind", [MemoryError, ValueError, RuntimeError])
+def test_unexpected_failure_and_memory_exhaustion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: type[Exception]
+) -> None:
+    from tests.unit.asr.test_worker import pending
+
+    store = pending(tmp_path)
+    assert store.claim()
+
+    def fail(*args: object) -> Transcript:
+        raise kind("sensitive runtime diagnostics")
+
+    monkeypatch.setattr("unimem_asr.engine.transcribe", fail)
+    execute_audio(tmp_path, "audio-one", tmp_path)
+    op = store.get("audio-one")
+    assert op.state == ("interrupted" if kind is RuntimeError else "failed")
+    assert (
+        op.error_code
+        == {
+            MemoryError: "budget_exceeded",
+            ValueError: "invalid_result",
+            RuntimeError: "execution_unavailable",
+        }[kind]
+    )

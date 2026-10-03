@@ -112,3 +112,9 @@ in UniMem; it creates no attachment link. The existing Obsidian delivery route
 selects this renderer, preserving immutable snapshot/digest, the 1 MiB refusal,
 capture+destination replay, receiver auth, create-only import, journal and ACK.
 The Connector itself requires no change.
+
+A base server without `--audio-model` exposes the same audio read/replay routes;
+new submissions receive `asr_disabled`. It reconciles uncertain old work under
+the same server lease without starting ASR. Model-independent CLI render remains
+available even without a running API. Measurements and the native UI acceptance
+are in [the dated record](../AUDIO_VERIFICATION_2026-10-03.md).

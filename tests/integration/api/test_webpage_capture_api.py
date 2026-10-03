@@ -398,4 +398,8 @@ class TestNoNewSurface:
             "/v1/receiver/deliveries/{delivery_id}/claim",
             "/v1/receiver/deliveries/{delivery_id}/ack",
             "/v1/receiver/deliveries/{delivery_id}/fail",
+            # ADR-028 adds explicit audio jobs and model-free result reads.
+            "/v1/audio/operations",
+            "/v1/audio/operations/{operation_id}",
+            "/v1/audio/operations/{operation_id}/markdown",
         }

@@ -158,12 +158,27 @@ Evidence and current limits: [OBSIDIAN_VERIFICATION.md](../docs/OBSIDIAN_VERIFIC
 No Community publication, release or merge. B4 distribution and earlier Phase 5A
 owner gates remain open.
 
-## D — Later sources and processing
+## D1 — Explicit local audio transcription
 
-- [ ] Plan audio/voice transcription, image processing and video visual
-  interpretation as distinct capabilities, preserving existing originals.
+- [x] Optional faster-whisper CPU/int8 multilingual base, explicit pinned model preparation.
+- [x] Original-first WAV PCM / MP3 / OGG Opus, bounded decoder/worker, canonical ASR provenance.
+- [x] Durable audio acceptance/replay/recovery; one active ASR child, real process termination.
+- [x] Existing Zen page upload/language/status/recovery/preview/export/explicit Connector send.
+- [x] Model-free canonical reads/Markdown; unchanged create-only Connector and 1-MiB delivery limit.
+- [x] Real RU/EN/Opus/silence and near-limit resource measurements; native one-note acceptance.
+- [x] Deterministic validation/failure/replay/recovery/offline/budget tests and CI coverage gate.
+- [x] [Operator commands](../docs/LOCAL_AUDIO.md) and
+  [dated evidence, ASR errors and remaining gates](../docs/AUDIO_VERIFICATION_2026-10-03.md).
+
+No signed publication/release, microphone, messenger integration, diarization,
+translation, summary or binary attachment delivery. Earlier B4 gates remain open.
+
+## D2 — Later sources and processing
+
+- [ ] Plan image processing and video visual interpretation as distinct
+  capabilities, preserving existing originals.
 - [ ] Plan public GitHub file/fragment selection with one pinned commit,
   source links, faithful Markdown/code, request/size/file bounds and explicit
   partial results; no repository execution or implicit full download.
 - [ ] Treat private GitHub access as a separate explicit read-only connection.
-  Do not implement D as part of A, B or C.
+  D2 remains outside the completed A/B/C and explicitly requested D1 slices.

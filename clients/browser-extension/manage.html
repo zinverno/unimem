@@ -9,9 +9,24 @@
 <form id="settings-form"><label for="token">Новый токен</label><input id="token" type="password" autocomplete="off" spellcheck="false" maxlength="43" aria-describedby="token-help"><p id="token-help">Токен не показывается повторно. Пустое поле сохраняет только порядок языков.</p>
 <label class="check"><input id="remember" type="checkbox"> Запомнить токен на этом устройстве</label><p>По умолчанию токен хранится до завершения сеанса браузера. Постоянное хранилище не зашифровано; другие программы вашего пользователя могут прочитать профиль.</p>
 <label for="languages">Приоритет языков субтитров</label><input id="languages" value="ru,en" maxlength="200" required aria-describedby="languages-help"><p id="languages-help">От 1 до 10 кодов через запятую, в порядке выбора. Перевод не выполняется. Изменения применяются к новым заданиям.</p>
-<div class="actions"><button type="submit">Сохранить настройки</button><button id="delete-token" type="button">Удалить токен</button><button id="check" type="button">Проверить подключение</button><button id="permission" type="button">Разрешить доступ к локальному API</button></div></form>
+<div class="actions"><button type="submit">Сохранить настройки</button><button id="delete-token" type="button">Удалить токен</button><button id="check" type="button">Проверить YouTube API</button><button id="permission" type="button">Разрешить доступ к локальному API</button></div></form>
 <p id="credential-state"></p><p id="connection-state" role="status"></p></section>
-<section aria-labelledby="jobs-heading"><h2 id="jobs-heading">Последние операции</h2><p>До 50 локальных ссылок. Задания выполняет сервер; закрытие этой страницы не отменяет принятые операции. Повторный выбор того же ролика открывает существующее задание. Для нового захвата есть «Сохранить заново».</p>
+<section id="audio-section" aria-labelledby="audio-heading"><h2 id="audio-heading">Загрузить аудио</h2>
+<p>Локальная автоматическая расшифровка: WAV с PCM, MP3, OGG с Opus. До 32 МиБ и 120 секунд; одна аудиодорожка, 1–2 канала, 8–48 кГц. Поддержку проверяет сервер по содержимому. Аудио сохраняется в UniMem; в Obsidian отправляется текст.</p>
+<p>Оператор один раз подготавливает модель, затем запускает UniMem с <code>--audio-model</code>. Здесь модель не скачивается.</p>
+<form id="audio-form"><label for="audio-file">Аудиофайл или сохранённое голосовое</label><input id="audio-file" type="file" accept=".wav,.mp3,.ogg,.opus,audio/wav,audio/mpeg,audio/ogg" required>
+<label for="audio-language">Язык распознавания</label><select id="audio-language"><option value="auto">Автоопределение</option><option value="ru">Русский</option><option value="en">Английский</option></select>
+<button id="audio-recognize" type="submit" disabled>Распознать</button></form>
+<p id="audio-notice" role="status" aria-live="polite">До подтверждённого приёма не закрывайте страницу. После приёма сервер продолжит работу самостоятельно.</p>
+<label for="audio-jobs">Сохранённые аудиозадания</label><select id="audio-jobs"><option value="">Аудиозаданий пока нет</option></select>
+<p id="audio-details" role="status"></p><p id="audio-error" class="error" role="status"></p>
+<div class="actions"><button id="audio-refresh" disabled>Обновить статус</button><button id="audio-retry" disabled>Повторить приём с тем же ID</button><button id="audio-remove" disabled>Удалить локальную ссылку</button></div>
+<div class="actions"><button id="audio-preview" disabled>Получить Markdown</button><button id="audio-download" disabled>Сохранить .md…</button></div>
+<pre id="audio-markdown" tabindex="0" aria-label="Расшифровка в Markdown как текст"></pre>
+<label for="audio-destination">Назначение Obsidian</label><select id="audio-destination"><option value="">Не загружено</option></select><p id="audio-delivery-state" role="status"></p>
+<div class="actions"><button id="audio-obsidian-send" disabled>Отправить в Obsidian</button><button id="audio-obsidian-refresh" disabled>Обновить статус доставки</button></div>
+</section>
+<section aria-labelledby="jobs-heading"><h2 id="jobs-heading">Операции YouTube</h2><p>До 50 локальных ссылок. Задания выполняет сервер; закрытие этой страницы не отменяет принятые операции. Повторный выбор того же ролика открывает существующее задание. Для нового захвата есть «Сохранить заново».</p>
 <label for="jobs">Выберите операцию</label><select id="jobs"><option value="">Заданий пока нет</option></select>
 <div id="job" hidden><h3>Выбранное задание</h3><dl id="details"></dl><p id="job-error" role="status"></p>
 <div class="actions"><button id="refresh">Обновить статус</button><button id="send">Отправить</button><button id="retry">Повторить доставку</button><button id="again">Сохранить заново</button><button id="remove">Удалить локальную ссылку</button></div>

@@ -145,6 +145,33 @@ def test_original_first_persistence_and_offline_render(tmp_path: Path, no_speech
     assert "Автоматическая расшифровка; возможны ошибки" in first
     assert ("не доказывает" in first) is no_speech
     assert calls == 1
+    # Re-read actual persisted content in a fresh process with native imports and
+    # Python networking forbidden, including the ordinary CLI renderer.
+    script = """
+import importlib.abc, sys, socket
+class Absent(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        blocked = {'faster_whisper','av','numpy','onnxruntime','huggingface_hub'}
+        if fullname.split('.')[0] in blocked:
+            raise ModuleNotFoundError(fullname)
+sys.meta_path.insert(0, Absent())
+def forbidden(*a, **k): raise AssertionError('Network is forbidden')
+socket.socket.connect = forbidden
+from unimem_asr.__main__ import main
+sys.argv = ['render', 'render', '--data-dir', sys.argv[1], '--capture-id', 'audio-capture',
+            '--output', sys.argv[2]]
+main()
+"""
+    output = tmp_path / "offline.md"
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path), str(output)],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert output.read_text() == first
 
 
 def test_model_absent_and_tampered_are_local_failures(tmp_path: Path) -> None:

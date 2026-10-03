@@ -22,11 +22,15 @@ def audio_view(op: AudioOperation) -> dict[str, object]:
 
 
 def install_audio_routes(
-    app: FastAPI, store: AudioOperationStore, service: AudioCaptureService
+    app: FastAPI, store: AudioOperationStore, service: AudioCaptureService, *, enabled: bool
 ) -> None:
     @app.exception_handler(AsrError)
     async def failure(request: object, exc: AsrError) -> Response:
-        status = 503 if exc.code in {"model_unavailable", "markdown_unavailable"} else 422
+        status = (
+            503
+            if exc.code in {"asr_disabled", "model_unavailable", "markdown_unavailable"}
+            else 422
+        )
         return refusal(status, exc.code)
 
     @app.post("/v1/audio/operations", status_code=202)
@@ -42,6 +46,8 @@ def install_audio_routes(
                 raise OperationError("operation_conflict")
             response.status_code = 200
             return audio_view(existing)
+        if not enabled:
+            raise AsrError("asr_disabled")
         raw = raw_object_ref(parse_raw_ref(request.file_ref))
         with service.raw_store.open(raw) as stream:
             inspect_input(stream, request.declared_mime)

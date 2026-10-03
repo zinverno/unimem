@@ -84,8 +84,8 @@ class AudioWorker:
         *,
         command: tuple[str, ...] | None = None,
     ) -> None:
-        self.data_dir, self.store, self.lease_fd = data_dir, store, lease_fd
-        self.model_dir = model_dir
+        self.data_dir, self.store, self.lease_fd = data_dir.resolve(), store, lease_fd
+        self.model_dir = model_dir.resolve()
         self.command = command or (sys.executable, "-m", "unimem_api.audio_worker")
         self.stopping = threading.Event()
         self.thread = threading.Thread(target=self._run, name="audio-transcription", daemon=True)
@@ -112,6 +112,7 @@ class AudioWorker:
                     "HF_HUB_DISABLE_TELEMETRY": "1",
                     "OPENBLAS_NUM_THREADS": "2",
                     "OMP_NUM_THREADS": "2",
+                    "TOKENIZERS_PARALLELISM": "false",
                 }
                 with subprocess.Popen(
                     [
@@ -125,6 +126,7 @@ class AudioWorker:
                     stderr=subprocess.DEVNULL,
                     pass_fds=(self.lease_fd,),
                     env=env,
+                    cwd=self.data_dir,
                 ) as child:
                     deadline = monotonic() + EXECUTION_SECONDS
                     while child.poll() is None:

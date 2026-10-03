@@ -36,6 +36,8 @@ def transcribe(
     import av
     import numpy as np
     import onnxruntime
+
+    onnxruntime.disable_telemetry_events()
     from faster_whisper import WhisperModel
     from faster_whisper.vad import VadOptions, get_speech_timestamps
 
@@ -98,7 +100,6 @@ def transcribe(
         )
     except (RuntimeError, ValueError, OSError):
         raise AsrError("model_unavailable") from None
-    onnxruntime.disable_telemetry_events()
     cues: list[Cue] = []
     detected = probability = None
     # Explicit VAD outcome; an empty result makes no claim of proven absence of speech.
@@ -123,7 +124,10 @@ def transcribe(
             size += len(segment.text.encode("utf-8"))
             if len(cues) >= MAX_SEGMENTS or size > MAX_TEXT_BYTES:
                 raise AsrError("output_limit")
-            cues.append(Cue(text=segment.text.strip(), start=segment.start, end=segment.end))
+            try:
+                cues.append(Cue(text=segment.text.strip(), start=segment.start, end=segment.end))
+            except ValueError:
+                raise AsrError("invalid_result") from None
     try:
         return Transcript(
             container=container_name,

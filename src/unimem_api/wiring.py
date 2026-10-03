@@ -64,6 +64,7 @@ resolved against another, that reference would dangle every time.
 """
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -72,7 +73,12 @@ from typing import Final
 from fastapi import FastAPI
 
 from core.intake import CaptureIntake
-from core.persistence import SqliteCaptureRecordStore, SqliteContentObjectStore
+from core.persistence import (
+    CaptureRecordStoreError,
+    ContentObjectStoreError,
+    SqliteCaptureRecordStore,
+    SqliteContentObjectStore,
+)
 from core.processing import (
     AudioProcessor,
     DocxProcessor,
@@ -92,13 +98,13 @@ from core.processing.media_probe import MediaProbe
 from core.processing.ocr import PdfPageOcr
 from core.storage import LocalRawObjectStore
 from unimem_api.app import create_app
-from unimem_api.audio_http import install_audio_routes
 from unimem_api.audio_operations import AudioOperationStore
 from unimem_api.audio_worker import AudioWorker
 from unimem_api.obsidian_store import ObsidianStore
 from unimem_api.security import ApiSecurity
 from unimem_api.worker import DeliveryWorker, ServerLease
 from unimem_asr.service import AudioCaptureService
+from unimem_delivery.operations import OperationError
 from unimem_youtube.operations import OperationStore
 from unimem_youtube.service import YoutubeCaptureService
 
@@ -298,7 +304,8 @@ def build_local_app(
 
     operations = OperationStore(database) if youtube else None
     youtube_service = YoutubeCaptureService(data_dir) if youtube else None
-    audio_operations = AudioOperationStore(database) if audio_model is not None else None
+    audio_operations = AudioOperationStore(database)
+    audio_service = AudioCaptureService(data_dir)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -314,11 +321,20 @@ def build_local_app(
                 AudioWorker(
                     data_dir, audio_operations, lease.fd, audio_model, command=audio_worker_command
                 )
-                if audio_operations is not None and audio_model is not None
+                if audio_model is not None
                 else None
             )
             if audio_worker:
                 audio_worker.start()
+            else:
+                try:
+                    audio_operations.recover(audio_service)
+                except (OperationError, CaptureRecordStoreError, ContentObjectStoreError):
+                    # A storage outage still gets the existing safe HTTP 503;
+                    # no capture/operation state is fabricated to make startup pass.
+                    logging.getLogger(__name__).error(
+                        "Audio recovery unavailable; restart required."
+                    )
             try:
                 yield
             finally:
@@ -338,9 +354,10 @@ def build_local_app(
         operations=operations,
         youtube_service=youtube_service,
         obsidian=ObsidianStore(data_dir / "obsidian-delivery.sqlite3"),
+        audio_operations=audio_operations,
+        audio_service=audio_service,
+        audio_enabled=audio_model is not None,
     )
-    if audio_operations is not None:
-        install_audio_routes(app, audio_operations, AudioCaptureService(data_dir))
     return app
 
 
