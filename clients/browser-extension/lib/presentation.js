@@ -1,3 +1,5 @@
+import { ClientError } from "./transport.js";
+
 export const STATES = { queued: "В очереди", running: "Выполняется", complete: "Готово — результат доступен", failed: "Ошибка обработки на сервере", interrupted: "Выполнение прервано" };
 export function errorText(error) {
   const code = error?.code;
@@ -41,5 +43,5 @@ export async function downloadMarkdown(api, markdown, operationId, urls = URL, s
   try {
     const id = await api.downloads.download({ url, filename, saveAs: true, conflictAction: "uniquify" });
     return { id, release: () => urls.revokeObjectURL(url) };
-  } catch { urls.revokeObjectURL(url); throw new Error("download_failed"); }
+  } catch { urls.revokeObjectURL(url); throw new ClientError("download_failed"); }
 }

@@ -140,7 +140,7 @@ it('Markdown is read from the authorized result route without submit; download i
  let revoked=false, options;const urls={createObjectURL:()=> 'blob:test',revokeObjectURL:()=>{revoked=true;}};
  const result=await downloadMarkdown({downloads:{download:async(o)=>{options=o;return 1;}}},md,'../../bad',urls);
  assert.equal(options.saveAs,true);assert.equal(options.conflictAction,'uniquify');assert.match(options.filename,/^youtube-[A-Za-z0-9_-]+\.md$/);result.release();assert.equal(revoked,true);
- revoked=false;await assert.rejects(downloadMarkdown({downloads:{download:async()=>{throw Error('cancel');}}},md,'op',urls),/download_failed/);assert.equal(revoked,true);
+ revoked=false;await assert.rejects(downloadMarkdown({downloads:{download:async()=>{throw Error('cancel');}}},md,'op',urls),{code:'download_failed'});assert.equal(revoked,true);
 });
 it('site injection has no secret/http/storage; management renders as text, never exports credentials in messages',()=>{
  for(const fn of [readSelection,readPageHtml]) assert.doesNotMatch(fn.toString(),/token|credential|fetch|postMessage|storage|127\.0\.0\.1/);
