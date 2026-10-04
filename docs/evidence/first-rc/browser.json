@@ -1,0 +1,15 @@
+{
+  "source_sha": "ce25f06d3d3f6524f01289041b246f44dbd5f93d",
+  "save_as_saved": true,
+  "save_as_cancel_notice": "Файл не сохранён: ошибка или отмена загрузки. Операция сохранена, экспорт можно повторить.",
+  "session_only_before_optin": {
+    "local": false,
+    "session": true
+  },
+  "explicit_optin": {
+    "local": true,
+    "session": false
+  },
+  "page_reopen_remembered": true,
+  "full_signed_restart": "BLOCKED - matching signed XPI absent"
+}

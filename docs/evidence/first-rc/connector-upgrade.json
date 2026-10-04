@@ -1,0 +1,29 @@
+{
+  "current_main_sha256": "edc08970ec2ee68b2a105f3a2e611f39f135a31a411810cf7b4921c14bc96a27",
+  "previous_main_sha256": "3cdc26cd3754617364107fd9d04908b9873a9601cdb9d357c8626b0db3be043c",
+  "results": [
+    {
+      "version": 1,
+      "entries": 1,
+      "receiver_preserved": true,
+      "repeat_load_identical": true
+    },
+    {
+      "version": 2,
+      "entries": 6,
+      "receiver_preserved": true,
+      "repeat_load_identical": true
+    },
+    {
+      "version": 3,
+      "entries": 1,
+      "receiver_preserved": true,
+      "repeat_load_identical": true
+    },
+    {
+      "downgrade": "0.2.0",
+      "refused_without_writes": true
+    }
+  ],
+  "boundary": "Actual built main.js with mocked Obsidian lifecycle. Separate native empty-vault/restart evidence required."
+}

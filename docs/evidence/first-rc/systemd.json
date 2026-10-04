@@ -1,0 +1,25 @@
+{
+  "template_sha256": "92d9fff8cca0718aef4d3a216a39d0c2700e9b483ab61c757d047abc3e92b398",
+  "isolated_path_substitution_only": true,
+  "starts": [
+    {
+      "active": "active",
+      "enablement": "linked-runtime",
+      "same_operation_counts": true
+    },
+    {
+      "active": "active",
+      "enablement": "linked-runtime",
+      "same_operation_counts": true
+    }
+  ],
+  "operation_counts": {
+    "audio": 1,
+    "video": 3,
+    "image": 2,
+    "youtube": 1
+  },
+  "token_and_raw_unchanged": true,
+  "runtime_link_removed": true,
+  "autostart_enabled": false
+}

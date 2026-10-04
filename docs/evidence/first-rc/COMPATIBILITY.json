@@ -1,0 +1,14 @@
+{
+  "source_sha": "ce25f06d3d3f6524f01289041b246f44dbd5f93d",
+  "service": "0.3.1rc1",
+  "browser": "0.6.1",
+  "connector": "0.3.0",
+  "delivery_protocols": [
+    "1",
+    "2",
+    "3"
+  ],
+  "addon_id": "unimem@zinverno.github.io",
+  "signed_runtime": "BLOCKED until owner supplies matching Mozilla-signed XPI",
+  "native_acceptance": "See separate evidence keyed to this kit's SHA256SUMS"
+}
