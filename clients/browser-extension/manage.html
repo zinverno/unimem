@@ -5,12 +5,12 @@
 <header><p class="eyebrow">Локальный UniMem</p><h1>Материалы и задания</h1><p>Выберите «YouTube → Markdown» в меню значка на странице ролика. Обычный клик сохраняет выделенный текст; «Сохранить всю страницу» — HTML страницы.</p></header>
 <p id="notice" role="status" aria-live="polite"></p>
 <section aria-labelledby="connection-heading"><h2 id="connection-heading">Подключение</h2><p>Адрес сервера: <code>http://127.0.0.1:8765</code></p>
-<p>Получите токен командой <code>python -m unimem_api --data-dir ./data --show-token</code>. Для субтитров запустите сервер с <code>--youtube</code>.</p>
+<p>Запустите <code>unimem start</code>. Browser credential: <code>unimem show-browser-token</code>. Возможности задаются один раз в config.toml; порядок настройки — FIRST_RUN.md из комплекта.</p>
 <form id="settings-form"><label for="token">Новый токен</label><input id="token" type="password" autocomplete="off" spellcheck="false" maxlength="43" aria-describedby="token-help"><p id="token-help">Токен не показывается повторно. Пустое поле сохраняет только порядок языков.</p>
 <label class="check"><input id="remember" type="checkbox"> Запомнить токен на этом устройстве</label><p>По умолчанию токен хранится до завершения сеанса браузера. Постоянное хранилище не зашифровано; другие программы вашего пользователя могут прочитать профиль.</p>
 <label for="languages">Приоритет языков субтитров</label><input id="languages" value="ru,en" maxlength="200" required aria-describedby="languages-help"><p id="languages-help">От 1 до 10 кодов через запятую, в порядке выбора. Перевод не выполняется. Изменения применяются к новым заданиям.</p>
-<div class="actions"><button type="submit">Сохранить настройки</button><button id="delete-token" type="button">Удалить токен</button><button id="check" type="button">Проверить YouTube API</button><button id="permission" type="button">Разрешить доступ к локальному API</button></div></form>
-<p id="credential-state"></p><p id="connection-state" role="status"></p></section>
+<div class="actions"><button type="submit">Сохранить настройки</button><button id="delete-token" type="button">Удалить токен</button><button id="check" type="button">Проверить подключение</button><button id="permission" type="button">Разрешить доступ к локальному API</button></div></form>
+<p id="credential-state"></p><div id="connection-state" role="status" aria-live="polite"></div></section>
 <section id="video-section" aria-labelledby="video-heading"><h2 id="video-heading">Локальное видео → Obsidian</h2>
 <p>MP4 до 32 МиБ и 120 секунд: одна H.264-дорожка, не более одной AAC-дорожки. До 1920×1080 пикселей, без поворота и чересстрочности. Linux desktop.</p>
 <label for="video-file">Выберите локальное видео</label><input id="video-file" type="file" accept="video/mp4,.mp4">
@@ -19,7 +19,7 @@
 <label class="check"><input id="video-frames" type="checkbox" checked> Добавить до трёх кадров</label>
 <p>Фиксированная выборка: ¼, ½ и ¾ длительности. Для каждой позиции берётся первый кадр с PTS не раньше неё, без дублей. Показывается фактическое время. Это не «самые важные» кадры и не анализ всех событий ролика.</p>
 <label class="check"><input id="video-describe" type="checkbox"> Описать кадры моделью</label>
-<p>Описание требует кадров и готового vision-профиля. Модели не загружаются автоматически. Речь и описания кадров остаются отдельными результатами.</p>
+<p>Тяжёлая локальная обработка только выбранных кадров, а не всего ролика; точное время завершения неизвестно. Описание требует кадров и готового vision-профиля. Модели не загружаются автоматически. Речь и описания кадров остаются отдельными результатами.</p>
 <p id="video-capability" role="status"></p><div class="actions"><button id="video-capability-refresh">Проверить готовность</button><button id="video-start" disabled>Обработать видео</button></div>
 <p id="video-notice" role="status" aria-live="polite"></p><label for="video-jobs">Видео-задания</label><select id="video-jobs"></select>
 <p id="video-details" role="status" aria-live="polite"></p><p id="video-error" class="error"></p>
@@ -29,7 +29,7 @@
 <div class="actions"><button id="video-delivery-refresh">Обновить доставку</button><button id="video-send">Отправить в Obsidian</button></div>
 <p>MP4 остаётся в UniMem. После импорта заметка и PNG читаются в Obsidian без запущенного UniMem.</p></section>
 <section id="image-section" aria-labelledby="image-heading"><h2 id="image-heading">Изображение → Obsidian</h2>
-<p>Один локальный PNG/JPEG, до 16 МиБ и 40 миллионов пикселей. Исходный файл, включая EXIF и другую metadata, переносится в vault без изменений. Без облака и описания картинки.</p>
+<p>Один локальный PNG/JPEG, до 16 МиБ и 40 миллионов пикселей. Исходный файл, включая EXIF и другую metadata, переносится в vault без изменений. Без облака; оригинал, OCR и локальное описание выбираются отдельно.</p>
 <div id="image-drop"><label for="image-file">Выберите или перетащите сюда изображение</label><input id="image-file" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg"></div>
 <img id="image-preview-image" alt="Предпросмотр выбранного исходного изображения" hidden>
 <p id="image-capability" role="status">Локальное описание: готовность не проверена.</p>
@@ -48,7 +48,7 @@
 </section>
 <section id="audio-section" aria-labelledby="audio-heading"><h2 id="audio-heading">Загрузить аудио</h2>
 <p>Локальная автоматическая расшифровка: WAV с PCM, MP3, OGG с Opus. До 32 МиБ и 120 секунд; одна аудиодорожка, 1–2 канала, 8–48 кГц. Поддержку проверяет сервер по содержимому. Аудио сохраняется в UniMem; в Obsidian отправляется текст.</p>
-<p>Оператор один раз подготавливает модель, затем запускает UniMem с <code>--audio-model</code>. Здесь модель не скачивается.</p>
+<p>Оператор один раз подготавливает ASR base и задаёт <code>audio_model</code> в config.toml. Здесь модель не скачивается.</p>
 <form id="audio-form"><label for="audio-file">Аудиофайл или сохранённое голосовое</label><input id="audio-file" type="file" accept=".wav,.mp3,.ogg,.opus,audio/wav,audio/mpeg,audio/ogg" required>
 <label for="audio-language">Язык распознавания</label><select id="audio-language"><option value="auto">Автоопределение</option><option value="ru">Русский</option><option value="en">Английский</option></select>
 <button id="audio-recognize" type="submit" disabled>Распознать</button></form>

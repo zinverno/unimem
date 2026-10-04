@@ -1,0 +1,10 @@
+{
+  "source_sha": "1d04d4cc3b491f212a037957eb1f60b9ff2c2202",
+  "wheel_sha256": "0765c55aa845985db45c0f9bf1c0460ad0a693a3a00bbd2620b496fd416aee00",
+  "clean_wheel_install": "PASS",
+  "repeat_setup": "PASS",
+  "api_restart": "PASS",
+  "read_only_diagnosis": "PASS",
+  "missing_model_no_download": "PASS",
+  "signed_runtime": "BLOCKED"
+}

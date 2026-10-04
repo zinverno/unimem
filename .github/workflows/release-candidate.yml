@@ -1,0 +1,27 @@
+name: Installed release candidate
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  installed-kit:
+    name: Wheel install, saved launcher and restart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: astral-sh/setup-uv@v6
+      - run: python scripts/build_candidate.py --output /tmp/unimem-kit
+      - run: python scripts/check_candidate.py --kit /tmp/unimem-kit --work /tmp/unimem-installed
+      - name: Verify user unit syntax without installing or enabling it
+        run: |
+          mkdir -p "$HOME/.local/share/unimem-app/venv/bin"
+          ln -s /tmp/unimem-installed/app/bin/unimem "$HOME/.local/share/unimem-app/venv/bin/unimem"
+          systemd-analyze --user verify packaging/unimem.service

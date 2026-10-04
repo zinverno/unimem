@@ -1,5 +1,11 @@
 # capture-core
 
+**Zen/Linux first release candidate:** [FIRST_RUN.md](FIRST_RUN.md) is the single
+wheel → saved config → Zen → standalone Obsidian Connector setup guide.
+Build a compatible kit with `python3 scripts/build_candidate.py --output /absolute/new-kit`.
+Signing and signed restart remain separate gates; no release/tag is published.
+
+
 Core domain contracts, immutable raw-object storage, capture-record
 persistence, capture intake for text, HTML, PDF, DOCX and still images — with
 optional local OCR for scanned PDF pages and for images — and a local HTTP capture API
@@ -1147,7 +1153,7 @@ import remain distinct; this server slice never imports into a vault.
 
 ## Browser capture
 
-The 0.3.0 development extension targets **Zen/Linux**, using one shared MV3
+The 0.6.1 candidate extension targets **Zen/Linux**, using one shared MV3
 manifest for Gecko event pages and Chromium service workers. It now connects to
 the protected B1 API with an explicit token. [Install/connect instructions,
 recovery limits and manual acceptance](docs/BROWSER_DELIVERY.md),
@@ -1162,10 +1168,10 @@ npm run check-package --prefix clients/browser-extension
 ```
 
 Temporary Zen/Firefox installation: `about:debugging#/runtime/this-firefox` →
-Load Temporary Add-on → `clients/browser-extension/dist/unimem-browser-0.3.0-dev.zip`.
+Load Temporary Add-on → `clients/browser-extension/dist/unimem-browser-0.6.1-dev.zip`.
 Chromium: Load unpacked → `clients/browser-extension/dist/unpacked/`.
-Use a separate test profile. Start B1 with `--youtube`, obtain the token with
-`--show-token`, then right-click the UniMem icon → **Открыть UniMem** → save the
+Use a separate test profile. Follow FIRST_RUN, start `unimem start`, obtain the
+browser token with `unimem show-browser-token`, then right-click the UniMem icon → **Открыть UniMem** → save the
 credential and check connection. Token defaults to session storage; explicit
 remembering uses unencrypted local storage. No arbitrary API endpoints.
 
@@ -1176,7 +1182,7 @@ remembering uses unencrypted local storage. No arbitrary API endpoints.
   saves its operation reference before POST and opens status. Close the video/UI;
   later **Открыть UniMem** reads the same ID. No acquisition on status or result.
 - **Получить Markdown** previews text; **Сохранить .md…** requests a browser save
-  dialog. No Obsidian/Companion import or vault writes.
+  dialog. Explicit Send to the standalone Connector is a separate action.
 - Repeated selection opens the existing matching job. **Сохранить заново** explicitly
   creates a new one. Unconfirmed delivery can explicitly reuse its original ID;
   accepted-but-missing operations are never automatically recreated.

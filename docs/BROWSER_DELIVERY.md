@@ -1,4 +1,7 @@
-# UniMem 0.4.0: Zen/Linux, задания и доставка
+# UniMem 0.6.1: Zen/Linux, задания и доставка
+
+Единая актуальная установка: [FIRST_RUN.md](../FIRST_RUN.md).
+Подпись: [MOZILLA_SIGNING.md](MOZILLA_SIGNING.md). Ниже — детали dev-проверки.
 
 Это dev-расширение для защищённого локального API B1. Оно сохраняет выделенный
 текст, HTML страницы и субтитры выбранного YouTube-видео. Состоянием операции
@@ -15,10 +18,10 @@ npm test --prefix clients/browser-extension
 npm run lint --prefix clients/browser-extension
 npm run build --prefix clients/browser-extension
 npm run check-package --prefix clients/browser-extension
-sha256sum clients/browser-extension/dist/unimem-browser-0.4.0-dev.zip
+sha256sum clients/browser-extension/dist/unimem-browser-0.6.1-dev.zip
 ```
 
-Пакет: `clients/browser-extension/dist/unimem-browser-0.4.0-dev.zip`.
+Пакет: `clients/browser-extension/dist/unimem-browser-0.6.1-dev.zip`.
 Рядом — `.sha256`; распакованный набор — `dist/unpacked/`.
 Сборка воспроизводима: повторная сборка тех же исходников даёт тот же SHA256.
 `web-ext` — только dev-зависимость; расширение исполняет исходные ES modules.
@@ -50,34 +53,21 @@ Firefox service_worker и предупреждение metadata для Android 1
 
 ## Подключение
 
-В Python-окружении из корня репозитория:
+После установки wheel и подготовки config по FIRST_RUN:
 
-```bash
-python -m pip install '.[youtube]'
-python -m unimem_api --data-dir ./data --init-token
-python -m unimem_api --data-dir ./data --youtube
-# В другом терминале, показывайте токен только себе:
-python -m unimem_api --data-dir ./data --show-token
+```sh
+unimem start
+# В другом терминале, только для локального ввода:
+unimem show-browser-token
+unimem diagnose
 ```
 
-На странице UniMem введите токен, задайте языки (например `ru,en`), нажмите
-**Сохранить настройки**, затем **Проверить YouTube API**. Адрес всегда
-`http://127.0.0.1:8765`. При отказе host permission есть кнопка **Разрешить доступ к
-локальному API**. На смену серверного токена ответ 401 просит ввести новый.
-Удаление/замена токена явно доступны; старый токен не отображается повторно.
-Пустое поле при сохранении меняет только языки; для смены режима хранения введите
-токен снова.
-
-По умолчанию секрет живёт в `storage.session` до конца сеанса браузера.
-**Запомнить токен на этом устройстве** включает незашифрованное `storage.local`.
-Chromium позволяет дополнительно запретить доступ недоверенным extension
-контекстам; Firefox не предоставляет идентичную настройку для local storage.
-История не содержит секрета; sync, cookies, browser history и content scripts
-не используются. Не прикладывайте токен к скриншотам/логам/issue.
-
-Проверка подключения не делает capture: GET /health проверяет доступность;
-read-only status probe с точным `operation_not_found` проверяет credential и
-YouTube capability. Она не гарантирует, что у выбранного ролика есть субтитры.
+В «Открыть UniMem» сохраните browser credential. По умолчанию — session-only;
+постоянное незашифрованное storage.local включается отдельным opt-in.
+«Проверить подключение» читает health, destinations и image/video capabilities;
+YouTube проверяется отдельно через прежний read-only status probe. Audio-only и
+image-only не требуют YouTube. Назначение выбирается у результата; папку и
+разрешения контролирует отдельный Connector 0.3.0 (v1/v2/v3).
 
 ## Сохранить и вернуться к результату
 

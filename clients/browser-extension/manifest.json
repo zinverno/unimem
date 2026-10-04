@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "minimum_chrome_version": "121",
   "name": "UniMem browser capture",
-  "version": "0.6.0",
-  "description": "Сохранение текста, страниц и субтитров YouTube в локальный UniMem.",
+  "version": "0.6.1",
+  "description": "Локальный захват текста, страниц, субтитров, аудио, изображений и коротких MP4 для UniMem и Obsidian.",
   "permissions": [
     "activeTab",
     "scripting",

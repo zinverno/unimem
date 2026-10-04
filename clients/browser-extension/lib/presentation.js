@@ -1,7 +1,14 @@
+import { ClientError } from "./transport.js";
+
 export const STATES = { queued: "В очереди", running: "Выполняется", complete: "Готово — результат доступен", failed: "Ошибка обработки на сервере", interrupted: "Выполнение прервано" };
 export function errorText(error) {
   const code = error?.code;
   const known = {
+    vision_disabled: "Локальное описание не включено. Оператор должен явно подготовить профиль и включить его на сервере.",
+    vision_profile_missing: "Локальные файлы модели отсутствуют. Автоматической загрузки нет; original-only и OCR доступны независимо.",
+    vision_profile_invalid: "Проверка локальных файлов модели не пройдена. Нужно восстановить закреплённый профиль и перезапустить API.",
+    vision_sandbox_unavailable: "Для изоляции локальной модели нужен bubblewrap на сервере.",
+    vision_platform_unsupported: "Этот профиль требует Linux x86_64 с AVX2/FMA/F16C.",
     missing_token: "Токен не задан. Сохраните его в настройках.", unauthorized: "Токен отклонён (401). После смены серверного токена введите новый и сохраните настройки.",
     unavailable: "Сервер недоступен. Последнее известное состояние сохранено.", timeout: "Время ожидания истекло. Состояние сервера не изменено.",
     invalid_response: "Сервер вернул неподдерживаемый или повреждённый ответ.", invalid_token: "Ожидается токен B1: 43 символа (буквы, цифры, _ и -).",
@@ -36,5 +43,5 @@ export async function downloadMarkdown(api, markdown, operationId, urls = URL, s
   try {
     const id = await api.downloads.download({ url, filename, saveAs: true, conflictAction: "uniquify" });
     return { id, release: () => urls.revokeObjectURL(url) };
-  } catch { urls.revokeObjectURL(url); throw new Error("download_failed"); }
+  } catch { urls.revokeObjectURL(url); throw new ClientError("download_failed"); }
 }

@@ -13,11 +13,6 @@ export function mountImageUi(api, settings) {
   const current = () => rows.find(j => j.operation_id === selected);
   const labels = { not_requested: "OCR не запрашивался. Смысловой анализ не выполнялся.", text: "OCR выполнен: текст получен.", empty: "OCR выполнен: текст не найден.", skipped: "OCR пропущен по известному ограничению; распознавание не выполнено." };
   const errors = {
-    vision_disabled: "Локальное описание не включено. Оператор должен явно подготовить профиль и включить его на сервере.",
-    vision_profile_missing: "Локальные файлы модели отсутствуют. Автоматической загрузки нет; original-only и OCR доступны независимо.",
-    vision_profile_invalid: "Проверка локальных файлов модели не пройдена. Нужно восстановить закреплённый профиль и перезапустить API.",
-    vision_sandbox_unavailable: "Для изоляции локальной модели нужен bubblewrap на сервере.",
-    vision_platform_unsupported: "Этот профиль требует Linux x86_64 с AVX2/FMA/F16C.",
     vision_execution_failed: "Локальная модель завершилась ошибкой; описания нет. Оригинальный upload сохранён.",
     vision_input_too_narrow: "После уменьшения вход слишком узкий для этого профиля. Оригинальный upload сохранён.",
     vision_budget_exceeded: "Лимит времени или памяти модели исчерпан. Процесс остановлен, готового описания нет.",
@@ -33,7 +28,7 @@ export function mountImageUi(api, settings) {
     image_decoder_unavailable: "Нужен пакет capture-core[images] на сервере. OCR для сохранения оригинала не требуется.",
     budget_exceeded: "Бюджет обработки исчерпан; результат не подтверждён. Upload сохранён.",
     execution_interrupted: "Обработка прервана. Upload сохранён; автоматического повтора нет.",
-    receiver_upgrade_required: "Обновите UniMem Connector до 0.2.0, разрешите PNG/JPEG-вложения и включите приём.",
+    receiver_upgrade_required: "Обновите UniMem Connector до 0.3.0, разрешите PNG/JPEG-вложения и включите приём.",
   };
   const explain = e => errors[e?.code] ?? errorText(e);
   const notice = text => { $("notice").textContent = text; };

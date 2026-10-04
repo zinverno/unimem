@@ -1,0 +1,140 @@
+{
+  "source_sha": "ce25f06d3d3f6524f01289041b246f44dbd5f93d",
+  "wheel_sha256": "0765c55aa845985db45c0f9bf1c0460ad0a693a3a00bbd2620b496fd416aee00",
+  "browser_sha256": "6caa13ba137abed5bff246e357e5c56d807ddb5bae4a25f022f54ece3fc91a24",
+  "connector_sha256": "ce563a8217ba333ba0d7252b25c23ba86ffd0036349caaa034703663d7f96d04",
+  "operations": [
+    {
+      "state": "complete",
+      "capture_id": "3992aa79-77f7-4666-865a-c27d2e739df7",
+      "content_id": "f763e0b2-6d58-43bb-a227-1a9d4cafc256",
+      "error_code": null,
+      "execution_seconds": null,
+      "peak_process_tree_rss_bytes": null,
+      "kind": "youtube",
+      "operation_id": "b90fff80-51fd-4e30-987d-2e6879929142",
+      "delivery": {
+        "protocol": "1",
+        "state": "imported"
+      },
+      "acquisition_source_sha": "1d04d4cc3b491f212a037957eb1f60b9ff2c2202",
+      "acquisition_wheel_sha256": "0765c55aa845985db45c0f9bf1c0460ad0a693a3a00bbd2620b496fd416aee00",
+      "acquisition_browser_sha256": "95f2e93114cf0bc0169516db78b1f7d8e06f098fceea438ebbb3cdbcdb42034e",
+      "scope": "live acquisition using byte-identical final wheel; browser Save As helper subsequently corrected"
+    },
+    {
+      "state": "complete",
+      "capture_id": "577226ef-c563-4496-a2b1-2f33944454b9",
+      "content_id": "5494cb78-1460-445a-9477-3eee469954aa",
+      "error_code": null,
+      "execution_seconds": null,
+      "peak_process_tree_rss_bytes": null,
+      "kind": "audio",
+      "operation_id": "0d026935-8108-4a02-b667-f5fcf259553a",
+      "delivery": {
+        "protocol": "1",
+        "state": "imported"
+      },
+      "acquisition_source_sha": "1d04d4cc3b491f212a037957eb1f60b9ff2c2202",
+      "acquisition_wheel_sha256": "0765c55aa845985db45c0f9bf1c0460ad0a693a3a00bbd2620b496fd416aee00",
+      "acquisition_browser_sha256": "95f2e93114cf0bc0169516db78b1f7d8e06f098fceea438ebbb3cdbcdb42034e",
+      "scope": "live acquisition using byte-identical final wheel; browser Save As helper subsequently corrected"
+    },
+    {
+      "state": "complete",
+      "capture_id": "522de4d8-f10c-4db6-8ce9-f554e20392c3",
+      "content_id": "938c6dd9-1437-4ccb-964b-c6c6c7d81140",
+      "error_code": null,
+      "execution_seconds": null,
+      "peak_process_tree_rss_bytes": null,
+      "kind": "image",
+      "operation_id": "16070682-a135-4532-935d-b5b299a8a374",
+      "delivery": {
+        "protocol": "2",
+        "state": "imported"
+      },
+      "acquisition_source_sha": "63e17d88ef309e9a100928f5d176663481a1c229",
+      "acquisition_wheel_sha256": "da67f9302619e1c1e349c44db3d2212fea94f49dc11152c012cf0d4413238624",
+      "acquisition_browser_sha256": "95f2e93114cf0bc0169516db78b1f7d8e06f098fceea438ebbb3cdbcdb42034e",
+      "scope": "prior data / intermediate failure, not final fresh inference"
+    },
+    {
+      "state": "complete",
+      "capture_id": "3a0ed4bb-4976-4d42-bb7a-13fd22405d95",
+      "content_id": "0a59e963-c202-40eb-a86c-dda66141d53e",
+      "error_code": null,
+      "execution_seconds": null,
+      "peak_process_tree_rss_bytes": null,
+      "kind": "image",
+      "operation_id": "13bd72e1-10cd-4eb0-8dd8-4a909371931e",
+      "delivery": {
+        "protocol": "2",
+        "state": "imported"
+      },
+      "acquisition_source_sha": "1d04d4cc3b491f212a037957eb1f60b9ff2c2202",
+      "acquisition_wheel_sha256": "0765c55aa845985db45c0f9bf1c0460ad0a693a3a00bbd2620b496fd416aee00",
+      "acquisition_browser_sha256": "95f2e93114cf0bc0169516db78b1f7d8e06f098fceea438ebbb3cdbcdb42034e",
+      "scope": "live acquisition using byte-identical final wheel; browser Save As helper subsequently corrected"
+    },
+    {
+      "state": "failed",
+      "capture_id": "a5de63d7-e5df-4235-a881-904af008559c",
+      "content_id": null,
+      "error_code": "vision_budget_exceeded",
+      "execution_seconds": 194.11976282601245,
+      "peak_process_tree_rss_bytes": 1769185280,
+      "kind": "video",
+      "operation_id": "8e45018e-dbfb-42be-bfc6-badea095bdaa",
+      "acquisition_source_sha": "63e17d88ef309e9a100928f5d176663481a1c229",
+      "acquisition_wheel_sha256": "da67f9302619e1c1e349c44db3d2212fea94f49dc11152c012cf0d4413238624",
+      "acquisition_browser_sha256": "95f2e93114cf0bc0169516db78b1f7d8e06f098fceea438ebbb3cdbcdb42034e",
+      "scope": "prior data / intermediate failure, not final fresh inference"
+    },
+    {
+      "state": "complete",
+      "capture_id": "051d7a44-d823-4997-8b52-83898b6cdd6c",
+      "content_id": "48c7b5f0-1d51-4c07-9ddf-559cc9749fe4",
+      "error_code": null,
+      "execution_seconds": 4.01976637498592,
+      "peak_process_tree_rss_bytes": 432738304,
+      "kind": "video",
+      "operation_id": "c620b9e0-0481-4f09-b76f-2b859e1e1485",
+      "delivery": {
+        "protocol": "3",
+        "state": "imported"
+      },
+      "acquisition_source_sha": "1d04d4cc3b491f212a037957eb1f60b9ff2c2202",
+      "acquisition_wheel_sha256": "0765c55aa845985db45c0f9bf1c0460ad0a693a3a00bbd2620b496fd416aee00",
+      "acquisition_browser_sha256": "95f2e93114cf0bc0169516db78b1f7d8e06f098fceea438ebbb3cdbcdb42034e",
+      "scope": "live acquisition using byte-identical final wheel; browser Save As helper subsequently corrected"
+    },
+    {
+      "state": "complete",
+      "capture_id": "4a720a45-7240-408d-86db-92c5f2935eb2",
+      "content_id": "ba16abd9-e48f-44c4-b633-9b7b195ac698",
+      "error_code": null,
+      "execution_seconds": 105.97055980097502,
+      "peak_process_tree_rss_bytes": 2336841728,
+      "kind": "video",
+      "operation_id": "ea3be5f4-6a6a-4071-bb32-8059533c3f30",
+      "delivery": {
+        "protocol": "3",
+        "state": "imported"
+      },
+      "acquisition_source_sha": "1d04d4cc3b491f212a037957eb1f60b9ff2c2202",
+      "acquisition_wheel_sha256": "0765c55aa845985db45c0f9bf1c0460ad0a693a3a00bbd2620b496fd416aee00",
+      "acquisition_browser_sha256": "95f2e93114cf0bc0169516db78b1f7d8e06f098fceea438ebbb3cdbcdb42034e",
+      "scope": "live acquisition using byte-identical final wheel; browser Save As helper subsequently corrected"
+    }
+  ],
+  "receiver_id": "01f14b61-3789-4b11-b6de-75a9e709cf5f",
+  "all_six_deliveries_acked": true,
+  "journal_entries": 6,
+  "file_count": 14,
+  "user_edit_and_all_file_hashes_unchanged": true,
+  "two_manual_polls_after_native_restart": true,
+  "save_as_markdown_sha256": "7db3008366dc5a4519579bceaa7f8df6012c75f3964942ff98bf1069e2560b0a",
+  "signature": "BLOCKED",
+  "browser_full_signed_restart": "BLOCKED",
+  "observation_scope": "Final kit reads, delivery status, restart and polling; per-operation acquisition provenance follows. No claim of signed runtime."
+}
